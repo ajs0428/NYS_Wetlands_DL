@@ -33,7 +33,10 @@ writeRaster(dems_target, paste0(args[3], "test_dem.tif"),
 
 win <- c(as.numeric(args[4]), as.numeric(args[4]))
 
-terrain_metrics <- MultiscaleDTM::SlpAsp(dems_target, w = win, unit = "degrees", 
-                                         include_scale = TRUE, metrics = "slope",
-                                         filename = paste0(args[3], "test_slp.tif"),
-                                         overwrite = TRUE)
+slp <- MultiscaleDTM::SlpAsp(dems_target, w = win, unit = "degrees", 
+                                         include_scale = TRUE, metrics = "slope")
+curv <- MultiscaleDTM::Qfit(dems_target, w = win,
+                             include_scale = TRUE, metrics = c("meanc", "planc", "profc"))
+
+writeRaster(c(slp,curv), filename = paste0(args[3], "_slp_curv_", args[4],".tif"),
+            overwrite = TRUE)
