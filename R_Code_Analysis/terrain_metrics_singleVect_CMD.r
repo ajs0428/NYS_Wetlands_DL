@@ -1,30 +1,34 @@
 #!/usr/bin/env Rscript
 
-args = c("Data/DEMs/imgs/", 
-         "Data/NY_HUCS/NY_HUCS_OpalescentRiver.gpkg", 
-         "Data/DEMs/terrain_metrics/",
-         21
-         )
+# args = c("Data/DEMs/", 
+#          "Data/NY_HUCS/NY_HUCS_08_6350_Cluster.gpkg", 
+#          "Data/TerrainProcessed/",
+#          21,
+#          11
+#          )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
 cat("these are the arguments: \n", 
     "DEM folder:", args[1], "\n", 
     "Path to a vector study area", args[2], "\n", 
     "Save folder:", args[3], "\n", 
-    "Odd Integer:", args[4], "\n")
+    "Odd Integer:", args[4], "\n",
+    "cluster number:", args[5], "\n")
 
 library(terra)
 library(MultiscaleDTM)
 #library(future)
-suppressfuturesuppressPackageStartupMessages(library(tidyterra))
+suppressPackageStartupMessages(library(tidyterra))
 
 
 
 #A vrt for all DEM tiles across NYS to be extracted with a HUC/Study area 
 dems <- terra::vrt(list.files(args[1],
-                       pattern = ".img$",
+                       pattern = ".img$|.tif$",
                        full.names = TRUE))
-vector_target <- vect(args[2]) |> project(crs(dems))
+vector_target <- vect(args[2]) |> 
+  terra::project(crs(dems)) |>
+  tidyterra::filter(CLUSTER_ID == args[5])
 
 dems_target <- terra::crop(dems, vector_target)
 
