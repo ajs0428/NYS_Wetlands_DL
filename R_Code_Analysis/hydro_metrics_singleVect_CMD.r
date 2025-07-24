@@ -18,7 +18,7 @@ library(MultiscaleDTM)
 library(future)
 library(future.apply)
 suppressPackageStartupMessages(library(tidyterra))
-
+terraOptions(memfrac = 0.25)
 #plan(multisession)
 
 #A vrt for all DEM tiles across NYS to be extracted with a HUC/Study area 
@@ -46,4 +46,4 @@ hydro_func <- function(huc_in_cluster){
 }
 
 #future_lapply(huc_list, hydro_func, future.globals = "vector_target")
-test <- lapply(huc_list, hydro_func)
+lapply(huc_list, hydro_func)
