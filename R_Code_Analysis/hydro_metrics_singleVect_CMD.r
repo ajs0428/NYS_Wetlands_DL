@@ -3,8 +3,7 @@
 args = c("Data/DEMs/",
          "Data/NY_HUCS/NY_HUCS_08_6350_Cluster.gpkg",
          "Data/TerrainProcessed/",
-         21,
-         11
+         11,
          )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
@@ -12,8 +11,7 @@ cat("these are the arguments: \n",
     "DEM folder:", args[1], "\n", 
     "Path to a vector study area", args[2], "\n", 
     "Save folder:", args[3], "\n", 
-    "Odd Integer:", args[4], "\n",
-    "region cluster number:", args[5], "\n")
+    "region cluster number:", args[4], "\n")
 
 library(terra)
 library(MultiscaleDTM)
@@ -30,12 +28,10 @@ dems <- terra::vrt(list.files(args[1],
 
 vector_target <- vect(args[2]) |> 
   terra::project(crs(dems)) |>
-  tidyterra::filter(CLUSTER_ID == args[5])
+  tidyterra::filter(CLUSTER_ID == args[4])
 huc_list <- seq_along(vector_target$huc12)[3:5]
 
-
 dems_target <- terra::crop(dems, vector_target)
-
 
 hydro_func <- function(huc_in_cluster){
   t <- vector_target$huc12[huc_in_cluster]
