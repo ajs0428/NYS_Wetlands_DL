@@ -41,6 +41,8 @@ slp <- MultiscaleDTM::SlpAsp(dems_target, w = win, unit = "degrees",
                                          include_scale = TRUE, metrics = "slope")
 curv <- MultiscaleDTM::Qfit(dems_target, w = win,
                              include_scale = TRUE, metrics = c("meanc", "planc", "profc"))
+dmv <- MultiscaleDTM::DMV(dems_target, w = win, stand = "none", # I think "none" so that NA won't be produced
+                   include_scale = TRUE)
 
-writeRaster(c(slp,curv), filename = paste0(args[3], "_slp_curv_", args[4],".tif"),
+writeRaster(c(slp, curv, dmv), filename = paste0(args[3], "_slp_curv_dmv", args[4],".tif"),
             overwrite = TRUE)
