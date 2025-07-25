@@ -1,7 +1,6 @@
 ---
 title: "Modeling Wetland Presence in NYS"
 format: html
-editor: visual
 ---
 
 ```{r}
@@ -13,41 +12,26 @@ library(terra)
 
 ## Before starting
 
-### The data to have before modeling 
+### The data to have before modeling
 
-- Multiscale terrain metrics
-  - Preferably: 
-    - slope
-    - curvature (multiple)
-    - deviation from mean elevation
-  - Considering the 1m resolution, these should be calculated at a scale greater than the 3x3 window
-    - 11x11, 21x21, 51x51
-    - Note that increases in the window size greatly increase computation time
-- Hydrology metrics based on terrain characteristics 
-  - Depth to water
-    - This one is tricky and depends on calculation
-  - Topographic wetness index
-- Spectral metrics/indices
-  - For NYS, resolution is 1m so the fine resolution imagery from NAIP would fit best
-    - NDVI
-    - NDWI
-  - Other satellite imagery could include Sentinel (10m) which has more bands
-    - EVI
-    - MNDWI
-  
-Other options for data could include some of the following
-- Terrain
-  - Roughness
-  - Topographic position index
-- Hydrology
-  - Process model outputs
-  - Flow direction or accumulation
-- Other land characteristics
-  - landforms
-  - geology 
-  - soil 
-- Vegetation
-  - land cover classes
-  
-  
-  
+-   Multiscale terrain metrics
+    -   Preferably:
+        -   slope
+        -   curvature (multiple)
+        -   deviation from mean elevation
+    -   Considering the 1m resolution, these should be calculated at a scale greater than the 3x3 window
+        -   11x11, 21x21, 51x51
+        -   Note that increases in the window size greatly increase computation time
+-   Hydrology metrics based on terrain characteristics
+    -   Depth to water
+        -   This one is tricky and depends on calculation
+    -   Topographic wetness index
+-   Spectral metrics/indices
+    -   For NYS, resolution is 1m so the fine resolution imagery from NAIP would fit best
+        -   NDVI
+        -   NDWI
+    -   Other satellite imagery could include Sentinel (10m) which has more bands
+        -   EVI
+        -   MNDWI
+
+Other options for data could include some of the following - Terrain - Roughness - Topographic position index - Hydrology - Process model outputs - Flow direction or accumulation - Other land characteristics - landforms - geology - soil - Vegetation - land cover classes

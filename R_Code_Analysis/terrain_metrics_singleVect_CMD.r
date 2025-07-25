@@ -20,6 +20,7 @@ library(MultiscaleDTM)
 #library(future)
 suppressPackageStartupMessages(library(tidyterra))
 
+terraOptions(memfrac = 0.25)
 
 
 #A vrt for all DEM tiles across NYS to be extracted with a HUC/Study area 
