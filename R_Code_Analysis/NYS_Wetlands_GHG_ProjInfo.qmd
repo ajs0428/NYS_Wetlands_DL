@@ -1,0 +1,16 @@
+---
+title: "Project Info for NYS Wetlands and GHG Estimation"
+format: html
+---
+
+
+```{r}
+#| label: setup
+
+library(terra)
+library(sf)
+
+```
+
+
+Training data generation 
