@@ -1,6 +1,8 @@
 ---
 title: "Project Info for NYS Wetlands and GHG Estimation"
 format: html
+project: 
+    execute-dir: project
 ---
 
 
@@ -9,8 +11,210 @@ format: html
 
 library(terra)
 library(sf)
+library(here)
+library(knitr)
+library(tidyverse)
+#knitr::opts_knit$set(root.dir = "/ibstorage/anthony/NYS_Wetlands_GHG/")
 
+terraOptions(memfrac = 0.25,
+             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp"
+             )
+```
+
+```{r}
+here::here()
 ```
 
 
 Training data generation 
+
+```{r}
+
+```
+
+
+## DEM and Image Processing
+
+To process the large amount of data including both digital elevation models (DEMs) and aerial imagery from the National Agricultural Imagery Program (NAIP), We sought to organize NYS into regions using proximity clusters on watersheds. In particular we used hydrologic unit code (HUC) 12 boundaries. 
+
+
+```{r}
+#ny_hucs <- vect("Data/NY_HUCS/NY_HUCS_08_6350_Cluster.gpkg")
+set.seed(11)
+ny_hucs <- st_read(here("Data/NY_HUCS/NY_HUCS_08_6350_Cluster.gpkg")) #|> 
+    # dplyr::filter(areasqkm < 900)
+ny_hucs_full <- dplyr::filter(ny_hucs, !st_is_empty(ny_hucs))
+
+centers <- ny_hucs_full |> 
+  st_centroid() |> 
+  dplyr::mutate(dplyr::as_tibble(st_coordinates(geom))) |> 
+    dplyr::filter(!is.na(X))
+
+km <- kmeans(centers |>
+               st_drop_geometry() |>
+               dplyr::select(X, Y), 
+             centers = 200)
+ny_hucs_clust <- ny_hucs_full |> 
+  dplyr::mutate(cluster = km$cluster) |> 
+    dplyr::select(name, huc12, cluster, tnmid) |> 
+    sf::st_transform("EPSG:26918")
+sf::st_write(ny_hucs_clust, "/ibstorage/anthony/NYS_Wetlands_GHG/Data/NY_HUCS/NY_Cluster_Zones_200.gpkg", append = FALSE) 
+
+ny_hucs_100 <- ny_hucs_clust[ny_hucs_clust$cluster == 190,]
+plot(ny_hucs_100["name"])
+```
+
+Each cluster of HUC 12s will be used to guide DEM and image processing programs. Where: 
+- The program subsets a virtual raster dataset using the cluster ID
+- Within the cluster, imagery/DEMs are aggregated for each HUC 12
+- Terrain metrics are then calculated for each HUC 12 
+- The outputs are saved and can be mosaic'd back together if needed. 
+
+
+
+DEM Indexing
+- We can use the clusters to subset out the indexes and DEM file names from the vector shapefiles provided by NYS GIS
+- There are a lot of overlapping feature polygons so combining into one polygon is infeasible
+- Instead how can a HUC cluster be used to identify DEM indexes in the list?
+- Function could: 
+    - Check for overlap across the list 
+    - Crop/extract the features of each one separately
+    - Extract the filenames of the corresponding rasters
+    
+First, make sure everything is in the same projection
+
+```{r}
+
+st_list <- (lapply(list.files(here("Data/NYS_DEM_Indexes"), pattern = ".shp$",full.names = TRUE), sf::st_read))
+
+transform_sf <- function(stl){
+    new_stl <- list()
+    for(i in seq_along(stl)){
+        if(crs(stl[[i]]) != st_crs("EPSG:26918")){
+            new_stl[[i]] <- st_transform(stl[[i]], st_crs("EPSG:26918"))
+        } else {
+            new_stl[[i]] <- stl[[i]]
+        }
+    }
+    return(new_stl)
+}
+
+st_list_trs <- transform_sf(st_list)
+for(i in st_list_trs) {print(st_crs(i)$input)}
+
+```
+
+
+Test out a cluster
+- Cluster 56, in the ADK
+- 22 geometries
+```{r}
+test_clust <- ny_hucs_clust |> 
+    dplyr::filter(cluster == "190") 
+
+ggplot() + 
+    geom_sf(data = st_list_trs[[1]], aes(fill = YEAR)) +
+    geom_sf(data = st_list_trs[[2]], aes(fill = YEAR)) +
+    geom_sf(data = st_list_trs[[3]], aes(fill = YEAR)) +
+    geom_sf(data = st_list_trs[[4]], aes(fill = YEAR)) +
+    geom_sf(data = st_list_trs[[5]], aes(fill = YEAR)) +
+    geom_sf(data = test_clust, aes(fill = "huc12")) 
+
+```
+
+Testing code
+```{r}
+# st_crs(test_clust) == st_crs(st_list_trs[[5]])
+# st <- st_intersects(st_list_trs[[5]], sparse = TRUE)
+# l <- list()
+# dems_in56 <- st_list_trs[[5]] |> st_filter(y = test_clust, .predicate = st_intersects)
+# dems_in56["FILENAME"][[1]]
+# la <- append(l, dems_in56["FILENAME"][[1]])
+```
+
+Cluster extraction function
+```{r}
+cluster_extract <- function(cluster, dem_list){
+    files_to_extract <- list()
+    for(i in seq_along(dem_list)){
+        dems_in <- dem_list[[i]] |> st_filter(y = cluster, .predicate = st_intersects)
+        if(nrow(dems_in) > 1){
+            Fnames <- dems_in["FILENAME"][[1]]
+            files_to_extract <- append(files_to_extract, Fnames)
+        } else {
+            next
+        }
+    }
+    return(files_to_extract)
+}
+
+```
+
+This is a list of all DEM files downloaded from NYGIS 
+
+```{r}
+dem_file_list <- list.files(here("Data/DEMs"), 
+                            pattern = ".img$|.tif$", 
+                            full.names = TRUE, 
+                            recursive = TRUE, 
+                            include.dirs = TRUE)
+
+```
+
+We make a function to take a cluster and for every HUC 12 watershed, 
+- Run the cluster extract to get a list of filenames for the DEMs. 
+- create a `spatrastercollection` or `sprc` from the filenames 
+- merge them together and crop to create a new DEM wiuth watershed boundaries 
+
+```{r}
+huc_extract_merge <- function(cluster){
+    f_list <- list()
+    for(i in seq_along(cluster$huc12)){
+        dem_to_extr <- cluster_extract(cluster = cluster[i, ], dem_list = st_list_trs)
+        f_list[[i]] <- dem_file_list[basename(dem_file_list) %in% dem_to_extr]
+    }
+    
+    r_list <- list()
+    for(i in seq_along(cluster$huc12)){
+        r_col <- terra::sprc(f_list[[i]])
+        v_clust <- terra::vect(cluster[i,])
+        r_list[[i]] <- terra::merge(r_col) |> terra::crop(y = v_clust, mask = TRUE)
+    }
+    return(r_list)
+}
+```
+
+
+```{r}
+
+huc_dems <- huc_extract_merge(test_clust)
+
+cluster_dem <- terra::merge(huc_dems[1:4])
+```
+
+
+```{r}
+#| cache: true
+plot(terra::shade(terra::terrain(r_list[[1]], "slope", unit = "radians"), terra::terrain(r_list[[1]], "aspect", unit = "radians")), 
+     col=grey(0:100/100))
+
+plot(terra::shade(terra::terrain(r_list[[2]], "slope", unit = "radians"), terra::terrain(r_list[[2]], "aspect", unit = "radians")), 
+     col=grey(0:100/100))
+
+plot(terra::shade(terra::terrain(r_list[[3]], "slope", unit = "radians"), terra::terrain(r_list[[3]], "aspect", unit = "radians")), 
+     col=grey(0:100/100))
+```
+
+
+```{r}
+
+```
+
+
+
+Missing NY DEM Indexes
+
+```{r}
+sort(unique(vect(here("Data/NY_HUCS/Missing_DEM_Indexes_HUCS.gpkg"))$cluster))
+```
+
