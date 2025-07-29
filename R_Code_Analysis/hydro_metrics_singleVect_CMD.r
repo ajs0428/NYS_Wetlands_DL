@@ -18,7 +18,9 @@ library(MultiscaleDTM)
 library(future)
 library(future.apply)
 suppressPackageStartupMessages(library(tidyterra))
-terraOptions(memfrac = 0.25)
+terraOptions(memfrac = 0.25,
+             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp"
+             )
 #plan(multisession)
 
 #A vrt for all DEM tiles across NYS to be extracted with a HUC/Study area 
