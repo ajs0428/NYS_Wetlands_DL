@@ -18,3 +18,4 @@ Python_Code_Analysis/*/
 !.gitignore
 !.Rproj
 !.RHistory
+.Rproj.user
