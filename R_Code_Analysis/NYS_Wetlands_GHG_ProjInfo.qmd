@@ -11,14 +11,17 @@ project:
 
 library(terra)
 library(sf)
+library(MultiscaleDTM)
+library(foreach)
+library(doParallel)
 library(here)
-library(knitr)
 library(tidyverse)
-#knitr::opts_knit$set(root.dir = "/ibstorage/anthony/NYS_Wetlands_GHG/")
+suppressPackageStartupMessages(library(tidyterra))
 
 terraOptions(memfrac = 0.25,
-             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp"
-             )
+             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
+cl <- makeCluster(16)
+registerDoParallel(cl)
 ```
 
 ```{r}
@@ -53,14 +56,16 @@ centers <- ny_hucs_full |>
 km <- kmeans(centers |>
                st_drop_geometry() |>
                dplyr::select(X, Y), 
-             centers = 200)
+             centers = 250)
+
 ny_hucs_clust <- ny_hucs_full |> 
   dplyr::mutate(cluster = km$cluster) |> 
     dplyr::select(name, huc12, cluster, tnmid) |> 
     sf::st_transform("EPSG:26918")
 sf::st_write(ny_hucs_clust, "/ibstorage/anthony/NYS_Wetlands_GHG/Data/NY_HUCS/NY_Cluster_Zones_200.gpkg", append = FALSE) 
 
-ny_hucs_100 <- ny_hucs_clust[ny_hucs_clust$cluster == 190,]
+ny_hucs_100 <- ny_hucs_clust[ny_hucs_clust$cluster == 93,]
+plot(ny_hucs_clust["cluster"])
 plot(ny_hucs_100["name"])
 ```
 
@@ -110,7 +115,7 @@ Test out a cluster
 - 22 geometries
 ```{r}
 test_clust <- ny_hucs_clust |> 
-    dplyr::filter(cluster == "190") 
+    dplyr::filter(cluster == "208") 
 
 ggplot() + 
     geom_sf(data = st_list_trs[[1]], aes(fill = YEAR)) +
@@ -122,22 +127,27 @@ ggplot() +
 
 ```
 
-Testing code
+
+This is a list of all DEM files downloaded from NYGIS 
+
 ```{r}
-# st_crs(test_clust) == st_crs(st_list_trs[[5]])
-# st <- st_intersects(st_list_trs[[5]], sparse = TRUE)
-# l <- list()
-# dems_in56 <- st_list_trs[[5]] |> st_filter(y = test_clust, .predicate = st_intersects)
-# dems_in56["FILENAME"][[1]]
-# la <- append(l, dems_in56["FILENAME"][[1]])
+dem_file_list <- list.files(here("Data/DEMs"), 
+                            pattern = ".img$|.tif$", 
+                            full.names = TRUE, 
+                            recursive = TRUE, 
+                            include.dirs = TRUE)
+
+length(dem_file_list)
+
 ```
+
 
 Cluster extraction function
 ```{r}
-cluster_extract <- function(cluster, dem_list){
+cluster_extract <- function(cluster, dem_indexes){
     files_to_extract <- list()
-    for(i in seq_along(dem_list)){
-        dems_in <- dem_list[[i]] |> st_filter(y = cluster, .predicate = st_intersects)
+    for(i in seq_along(dem_indexes)){
+        dems_in <- dem_indexes[[i]] |> st_filter(y = cluster, .predicate = st_intersects)
         if(nrow(dems_in) > 1){
             Fnames <- dems_in["FILENAME"][[1]]
             files_to_extract <- append(files_to_extract, Fnames)
@@ -150,46 +160,68 @@ cluster_extract <- function(cluster, dem_list){
 
 ```
 
-This is a list of all DEM files downloaded from NYGIS 
 
-```{r}
-dem_file_list <- list.files(here("Data/DEMs"), 
-                            pattern = ".img$|.tif$", 
-                            full.names = TRUE, 
-                            recursive = TRUE, 
-                            include.dirs = TRUE)
-
-```
 
 We make a function to take a cluster and for every HUC 12 watershed, 
 - Run the cluster extract to get a list of filenames for the DEMs. 
 - create a `spatrastercollection` or `sprc` from the filenames 
 - merge them together and crop to create a new DEM wiuth watershed boundaries 
 
+#### Stopped here after getting the function to return a wrapped sprc that can be merged later
+
 ```{r}
 huc_extract_merge <- function(cluster){
     f_list <- list()
-    for(i in seq_along(cluster$huc12)){
-        dem_to_extr <- cluster_extract(cluster = cluster[i, ], dem_list = st_list_trs)
+    for(i in seq_along(cluster$huc12[1:3])){
+        dem_to_extr <- cluster_extract(cluster = cluster[i, ], dem_indexes = st_list_trs)
         f_list[[i]] <- dem_file_list[basename(dem_file_list) %in% dem_to_extr]
     }
     
-    r_list <- list()
-    for(i in seq_along(cluster$huc12)){
-        r_col <- terra::sprc(f_list[[i]])
-        v_clust <- terra::vect(cluster[i,])
-        r_list[[i]] <- terra::merge(r_col) |> terra::crop(y = v_clust, mask = TRUE)
+    r_list <- foreach(i = seq_along(cluster$huc12[1:3]), .packages = c("sf", "terra", "tidyterra")) %dopar% {
+        r_col <- lapply(f_list[[i]], terra::rast) 
+        v_clust <- terra::vect(cluster[i,]) |> 
+            terra::project(crs(unwrap(r_col[[i]])))
+        s_col <- wrap(sprc(r_col))
+        # r_dem <- terra::merge(s_col) |>
+        #     terra::mask(mask = v_clust, updatevalue=NA, touches = FALSE,
+        #                 filename = paste0(args[5],"cluster_",args[3], cluster$huc12[i], "_dem.tif"),
+        #                 overwrite = TRUE)
+        # r_dem_wrap <- terra::wrap(r_dem)
+        # return(r_dem_wrap)
     }
     return(r_list)
 }
 ```
 
 
+
+```{r}
+#| eval: false
+f_list <- list()
+for(i in seq_along(1:3)){
+    dem_to_extr <- cluster_extract(cluster = test_clust[i, ], dem_list = st_list_trs)
+    f_list[[i]] <- dem_file_list[basename(dem_file_list) %in% dem_to_extr]
+}
+    
+r_list <- list()
+for(i in seq_along(1:1)){
+    r_col <- lapply(f_list[[i]], terra::rast) #terra::sprc(f_list[[i]])
+    v_clust <- terra::vect(test_clust[i,]) |> terra::project(crs(r_col[[i]]))
+    s_col <- sprc(r_col)
+    r_list[[i]] <- terra::merge(s_col) |> terra::crop(y = v_clust, mask = TRUE)
+}
+
+
+plot(r_list[[1]])
+```
+
+
 ```{r}
 
 huc_dems <- huc_extract_merge(test_clust)
+huc_dems_unwrap<- lapply(unlist(huc_dems), terra::unwrap)
 
-cluster_dem <- terra::merge(huc_dems[1:4])
+cluster_dem <- terra::merge(huc_dems_unwrap[[3]])
 ```
 
 
