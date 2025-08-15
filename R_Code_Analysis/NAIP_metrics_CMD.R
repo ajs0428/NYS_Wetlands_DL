@@ -29,4 +29,4 @@ terraOptions(memfrac = 0.10,# Use only 10% of memory for program
              tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
 ###############################################################################################
 
-n <- terra::rast("Data/NAIP/")
+n <- terra::rast("/ibstorage/NAIP/NY-selected/ny_n/ortho_1-1_hn_ny053_2021_1.shp")

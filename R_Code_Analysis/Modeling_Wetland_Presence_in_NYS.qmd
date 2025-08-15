@@ -76,3 +76,13 @@ dmv <- list.files(here("Data/TerrainProcessed/HUC_TerrainMetrics"), full.names =
 
 ```
 
+Actually should go by HUC 
+- get HUC shape
+- crop points 
+- crop larger rasters (Sentinel?)
+
+
+```{r}
+slp_others10 |> plot()
+```
+
