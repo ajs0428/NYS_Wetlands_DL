@@ -4,7 +4,7 @@ args = c("Data/NYS_DEM_Indexes/",
          "Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
          208,
          "Data/DEMs/",
-         "Data/TerrainProcessed/"
+         "Data/TerrainProcessed/HUC_DEMs"
          )
 # args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 

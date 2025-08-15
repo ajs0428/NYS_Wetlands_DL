@@ -6,7 +6,15 @@ format: html
 ```{r}
 #| label: setup
 library(terra)
+suppressPackageStartupMessages(library(tidyterra))
+suppressPackageStartupMessages(library(tidyverse))
+library(here)
 
+here()
+
+terraOptions(memfrac = 0.50,# Use only 10% of memory for program
+             memmax = 64, #max memory is 8Gb
+             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
 
 ```
 
@@ -35,3 +43,36 @@ library(terra)
         -   MNDWI
 
 Other options for data could include some of the following - Terrain - Roughness - Topographic position index - Hydrology - Process model outputs - Flow direction or accumulation - Other land characteristics - landforms - geology - soil - Vegetation - land cover classes
+
+
+## Modeling for cluster 208 
+
+### merge all data into single cluster rasters
+
+This should only need to be run once to 
+
+```{r}
+#| eval: false
+dem <- list.files(here("Data/TerrainProcessed/HUC_DEMs/"), full.names = TRUE) |> 
+   stringr::str_subset(pattern = "wbt", negate = TRUE) |>
+    terra::sprc() |> 
+    terra::merge()
+slp_others10 <- list.files(here("Data/TerrainProcessed/HUC_TerrainMetrics"), full.names = TRUE) |> 
+   stringr::str_subset(pattern = "slp_10m") |>
+    terra::sprc() |> 
+    terra::merge(filename = here("Data/Merged_HUC_Data/Slp_TRI_TPI_HUC_208_10m.tif"))
+slp_others100 <- list.files(here("Data/TerrainProcessed/HUC_TerrainMetrics"), full.names = TRUE) |> 
+   stringr::str_subset(pattern = "slp_100m") |>
+    terra::sprc() |> 
+    terra::merge(filename = here("Data/Merged_HUC_Data/Slp_TRI_TPI_HUC_208_100m.tif"))
+slp_others1000 <- list.files(here("Data/TerrainProcessed/HUC_TerrainMetrics"), full.names = TRUE) |> 
+   stringr::str_subset(pattern = "slp_1000m") |>
+    terra::sprc() |> 
+    terra::merge(filename = here("Data/Merged_HUC_Data/Slp_TRI_TPI_HUC_208_1000m.tif"))
+dmv <- list.files(here("Data/TerrainProcessed/HUC_TerrainMetrics"), full.names = TRUE) |> 
+   stringr::str_subset(pattern = "dmv_10m") |>
+    terra::sprc() |> 
+    terra::merge(filename = here("Data/Merged_HUC_Data/DMV_HUC_208_10m.tif"))
+
+```
+

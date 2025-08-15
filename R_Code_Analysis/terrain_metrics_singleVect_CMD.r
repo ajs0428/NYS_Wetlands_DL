@@ -1,11 +1,12 @@
 #!/usr/bin/env Rscript
 
-# args = c("Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
-#          208,
-#          "Data/TerrainProcessed/",
-#          "slp",
-#          5
-#          )
+args = c("Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
+         208,
+         "Data/TerrainProcessed/",
+         "slp",
+         5,
+         "Data/TerrainProcessed/HUC_TerrainMetrics/"
+         )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
 cat("these are the arguments: \n", 
@@ -13,7 +14,8 @@ cat("these are the arguments: \n",
     "- Cluster number (integer 1-200ish):", args[2], "\n",
     "- Path to the DEMs in TerrainProcessed folder", args[3], "\n",
     "- Metric (slp, dmv, curv):", args[4], "\n", 
-    "- Odd Integer:", args[5], "\n"
+    "- Odd Integer:", args[5], "\n",
+    "- Path to the Save folder", args[6], "\n",
     )
 ###############################################################################################
 
@@ -54,7 +56,7 @@ terrain_function <- function(list_of_dem_rasts, cluster, metric = args[4]){
             .packages = c("terra", "tidyterra"),
             .export = "args") %dopar% {
                 
-        cluster_huc_name <- stringr::str_remove(basename(list_of_dem_rasts[i]), ".tif")
+        cluster_huc_name <- stringr::str_remove(basename(list_of_dem_rasts[[i]]), ".tif")
         dems_target <- list_of_dem_rasts[[i]]
         
         if(stringr::str_detect(metric, "slp")){
@@ -62,25 +64,27 @@ terrain_function <- function(list_of_dem_rasts, cluster, metric = args[4]){
                 terra::rast() |> 
                 MultiscaleDTM::SlpAsp(w = win, unit = "degrees", 
                                       include_scale = TRUE, metrics = "slope",
-                                      filename = paste0(args[3], cluster_huc_name, "_terrain_", args[4],"win",args[5], ".tif"),
+                                      filename = paste0(args[6], cluster_huc_name, "_terrain_", args[4],"win",args[5], ".tif"),
                                       overwrite = TRUE) 
         } else if (stringr::str_detect(metric, "dmv")){
             dems_target |> 
                 terra::rast() |> 
                 MultiscaleDTM::DMV(w = win, stand = "none", # I think "none" so that NA won't be produced
                                    include_scale = TRUE,
-                                      filename = paste0(args[3], cluster_huc_name, "_terrain_", args[4],"win",args[5], ".tif"),
+                                      filename = paste0(args[6], cluster_huc_name, "_terrain_", args[4],"win",args[5], ".tif"),
                                       overwrite = TRUE) 
         } else if(stringr::str_detect(metric, "curv")){
             dems_target |> 
                 terra::rast() |> 
                 MultiscaleDTM::Qfit(w = win,
                                     include_scale = TRUE, metrics = c("meanc", "planc", "profc"),
-                                    filename = paste0(args[3], cluster_huc_name, huc_name, "_terrain_", args[4],"win",args[5], ".tif"),
+                                    filename = paste0(args[6], cluster_huc_name, huc_name, "_terrain_", args[4],"win",args[5], ".tif"),
                                     overwrite = TRUE)
         } else {
             print("No terrain metric specified or not identified")
         }
+        
+        rm(c("cluster_huc_name", "dems_target"))
     }
     stopCluster(cl)
 }
