@@ -50,8 +50,9 @@ naip_processing_func <- function(naip_list, ref_rast_list){
                 terra::project(target_crs, res = 1)
             np <- lapp(c(n[[1]], n[[2]], n[[4]]), fun = vi2, cores = 4)
             print(names(np))
-            set.names(c(n, np), c("r", "g", "b", "nir", "ndvi", "ndwi"))
-            writeRaster(paste0(args[2], "Metrics_", basename(naip_list[[i]])))
+            nall <- c(n, np)
+            set.names(nall, c("r", "g", "b", "nir", "ndvi", "ndwi"))
+            writeRaster(nall, paste0(args[2], "Metrics_", basename(naip_list[[i]])))
         } else {
             print("NAIP already processed")
         }
