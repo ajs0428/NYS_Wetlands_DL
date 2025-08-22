@@ -28,11 +28,8 @@ terraOptions(memfrac = 0.10,# Use only 10% of memory for program
 
 hydro_list <- list.files("Data/TerrainProcessed/HUC_Hydro/", pattern = ".tif", full.names = TRUE, recursive = FALSE)
 
-naip_list <- list.files(args[1], pattern = ".tif", full.names = TRUE, recursive = FALSE)[1:2]
+naip_list <- list.files(args[1], pattern = ".tif", full.names = TRUE, recursive = FALSE)
 ###############################################################################################
-    # resample and reproject into 6347 and 1m
-    # calculate ndvi and ndwi
-    # mosaic into HUCs
 
 naip_processing_func <- function(naip_list, ref_rast_list){
     vi2 <- function(r, g, nir) {
