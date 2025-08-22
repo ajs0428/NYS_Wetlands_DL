@@ -4,7 +4,7 @@ args = c("Data/NYS_DEM_Indexes/",
          "Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
          208,
          "Data/DEMs/",
-         "Data/TerrainProcessed/"
+         "Data/TerrainProcessed/HUC_DEMs"
          )
 # args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
@@ -27,8 +27,7 @@ suppressPackageStartupMessages(library(tidyterra))
 terraOptions(memfrac = 0.10,
              memmax = 8,
              tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
-cl <- makeCluster(4)
-registerDoParallel(cl)
+
 ###############################################################################################
 
 # A shapefile list of all the DEM indexes (vector tiles of the actual DEM locations)
@@ -95,6 +94,8 @@ huc_extract <- function(cluster){
     }
     
     # list of lists of spatrasterCollections
+    cl <- makeCluster(4)
+    registerDoParallel(cl)
     r_list <- foreach(i = seq_along(cluster$huc12),
                       .packages = c("terra", "tidyterra", "sf"),
                       .export = "args") %dopar% {
@@ -109,6 +110,7 @@ huc_extract <- function(cluster){
             #terra::wrap()
         #return(rs)
     }
+    stopCluster(cl)
     #return(list(f_list,lapply(v_list, terra::unwrap), lapply(r_list, terra::unwrap)))
 }
 

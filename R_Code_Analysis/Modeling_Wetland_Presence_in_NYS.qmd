@@ -6,7 +6,16 @@ format: html
 ```{r}
 #| label: setup
 library(terra)
+suppressPackageStartupMessages(library(tidyterra))
+suppressPackageStartupMessages(library(tidyverse))
+library(tidymodels)
+library(here)
 
+here()
+
+terraOptions(memfrac = 0.50,# Use only 10% of memory for program
+             memmax = 64, #max memory is 8Gb
+             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
 
 ```
 
@@ -35,3 +44,86 @@ library(terra)
         -   MNDWI
 
 Other options for data could include some of the following - Terrain - Roughness - Topographic position index - Hydrology - Process model outputs - Flow direction or accumulation - Other land characteristics - landforms - geology - soil - Vegetation - land cover classes
+
+
+## Modeling for cluster 208 
+
+
+HUCS
+
+```{r}
+cluster_target <- sf::st_read(here("Data/NY_HUCS/NY_Cluster_Zones_200.gpkg"), quiet = TRUE) |> 
+    sf::st_transform(sf::st_crs("EPSG:6347")) |>
+    dplyr::filter(cluster == 208) |> 
+    terra::vect() 
+cluster_target |> plot("huc12")
+```
+
+
+All Cluster 208 points 
+
+```{r}
+cluster_pts <- vect(here("Data/Training_Data/Cluster_Extract_Training_Pts/cluster_208_extracted_training_pts.gpkg")) 
+
+cluster_pts |> as_tibble() |> group_by(MOD_CLASS) |> summarise(n = n())
+```
+
+Training/Testing split
+```{r}
+set.seed(11)
+
+cluster_df <- as_tibble(cluster_pts) |> dplyr::select(-COARSE_CLASS) |> 
+    dplyr::mutate(across(where(is.character), as.factor))
+
+data_split <- initial_split(cluster_df, prop = 3/4)
+
+# Create data frames for the two sets:
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+glimpse(train_data)
+```
+
+
+```{r}
+Wetland_Class_Recipe <- 
+    recipe(MOD_CLASS ~ ., data = train_data) 
+
+
+RFM <- 
+    rand_forest(
+        mtry = 6,
+        trees = 200,
+        min_n = 500
+    ) |> 
+    set_engine("ranger") |> 
+    set_mode("classification") 
+
+RFM_workflow <- 
+    workflow() |> 
+    add_model(RFM) |> 
+    add_recipe(Wetland_Class_Recipe)
+
+RFM_fit <- 
+    RFM_workflow |>
+    fit(train_data)
+```
+
+
+```{r}
+RFM_fit |> 
+    extract_fit_parsnip() 
+
+Wetland_Test_Fit <- 
+    augment(RFM_fit, test_data)
+```
+
+
+```{r}
+cm <- conf_mat(data = Wetland_Test_Fit, truth = MOD_CLASS, estimate = .pred_class) 
+
+cm
+
+cm |> summary()
+```
+

@@ -20,8 +20,7 @@ suppressPackageStartupMessages(library(tidyterra))
 
 terraOptions(memfrac = 0.25,
              tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
-cl <- makeCluster(16)
-registerDoParallel(cl)
+
 ```
 
 ```{r}
@@ -62,9 +61,9 @@ ny_hucs_clust <- ny_hucs_full |>
   dplyr::mutate(cluster = km$cluster) |> 
     dplyr::select(name, huc12, cluster, tnmid) |> 
     sf::st_transform("EPSG:26918")
-sf::st_write(ny_hucs_clust, "/ibstorage/anthony/NYS_Wetlands_GHG/Data/NY_HUCS/NY_Cluster_Zones_200.gpkg", append = FALSE) 
+#sf::st_write(ny_hucs_clust, "/ibstorage/anthony/NYS_Wetlands_GHG/Data/NY_HUCS/NY_Cluster_Zones_200.gpkg", append = FALSE) 
 
-ny_hucs_100 <- ny_hucs_clust[ny_hucs_clust$cluster == 93,]
+ny_hucs_100 <- ny_hucs_clust[ny_hucs_clust$cluster == 208,]
 plot(ny_hucs_clust["cluster"])
 plot(ny_hucs_100["name"])
 ```
@@ -95,8 +94,8 @@ st_list <- (lapply(list.files(here("Data/NYS_DEM_Indexes"), pattern = ".shp$",fu
 transform_sf <- function(stl){
     new_stl <- list()
     for(i in seq_along(stl)){
-        if(crs(stl[[i]]) != st_crs("EPSG:26918")){
-            new_stl[[i]] <- st_transform(stl[[i]], st_crs("EPSG:26918"))
+        if(crs(stl[[i]]) != st_crs("EPSG:6347")){
+            new_stl[[i]] <- st_transform(stl[[i]], st_crs("EPSG:6347"))
         } else {
             new_stl[[i]] <- stl[[i]]
         }
@@ -142,6 +141,13 @@ length(dem_file_list)
 ```
 
 
+Missing NY DEM Indexes from lidar acquisitions yet to be processed 
+
+```{r}
+sort(unique(vect(here("Data/NY_HUCS/Missing_DEM_Indexes_HUCS.gpkg"))$cluster))
+```
+
+
 Cluster extraction function
 ```{r}
 cluster_extract <- function(cluster, dem_indexes){
@@ -167,86 +173,210 @@ We make a function to take a cluster and for every HUC 12 watershed,
 - create a `spatrastercollection` or `sprc` from the filenames 
 - merge them together and crop to create a new DEM wiuth watershed boundaries 
 
-#### Stopped here after getting the function to return a wrapped sprc that can be merged later
 
 ```{r}
-huc_extract_merge <- function(cluster){
-    f_list <- list()
-    for(i in seq_along(cluster$huc12[1:3])){
-        dem_to_extr <- cluster_extract(cluster = cluster[i, ], dem_indexes = st_list_trs)
-        f_list[[i]] <- dem_file_list[basename(dem_file_list) %in% dem_to_extr]
+huc_extract <- function(cluster){
+    f_list <- list() # list of lists of filenames 
+    v_list <- list() # list for HUC vectors
+    for(i in seq_along(cluster$huc12)){
+        dem_to_extr <- cluster_extract(cluster = cluster[i, ], dem_indexes = dem_ind_trs)
+        f_list[[i]] <- dems_file_list[basename(dems_file_list) %in% dem_to_extr]
+        v_list[[i]] <- terra::vect(cluster[i,]) |>
+            terra::project(crs("EPSG:6347")) |> terra::wrap()
     }
     
-    r_list <- foreach(i = seq_along(cluster$huc12[1:3]), .packages = c("sf", "terra", "tidyterra")) %dopar% {
-        r_col <- lapply(f_list[[i]], terra::rast) 
-        v_clust <- terra::vect(cluster[i,]) |> 
-            terra::project(crs(unwrap(r_col[[i]])))
-        s_col <- wrap(sprc(r_col))
-        # r_dem <- terra::merge(s_col) |>
-        #     terra::mask(mask = v_clust, updatevalue=NA, touches = FALSE,
-        #                 filename = paste0(args[5],"cluster_",args[3], cluster$huc12[i], "_dem.tif"),
-        #                 overwrite = TRUE)
-        # r_dem_wrap <- terra::wrap(r_dem)
-        # return(r_dem_wrap)
+    # list of lists of spatrasterCollections
+    r_list <- foreach(i = seq_along(cluster$huc12),
+                      .packages = c("terra", "tidyterra", "sf"),
+                      .export = "args") %dopar% {
+        f_list[[i]] |> 
+            as.list() |> 
+            lapply(terra::rast) |> 
+            terra::sprc() |> 
+            terra::merge() |>
+            terra::mask(mask = terra::unwrap(v_list[[i]]), updatevalue = NA, touches = TRUE,
+                        filename = paste0(args[5], "cluster_", args[3], "_huc_", cluster[["huc12"]][[i]],".tif"),
+                        overwrite = TRUE) #|>
+            #terra::wrap()
+        #return(rs)
     }
-    return(r_list)
+    #return(list(f_list,lapply(v_list, terra::unwrap), lapply(r_list, terra::unwrap)))
 }
+
+
 ```
 
 
 
 ```{r}
 #| eval: false
-f_list <- list()
-for(i in seq_along(1:3)){
-    dem_to_extr <- cluster_extract(cluster = test_clust[i, ], dem_list = st_list_trs)
-    f_list[[i]] <- dem_file_list[basename(dem_file_list) %in% dem_to_extr]
-}
-    
-r_list <- list()
-for(i in seq_along(1:1)){
-    r_col <- lapply(f_list[[i]], terra::rast) #terra::sprc(f_list[[i]])
-    v_clust <- terra::vect(test_clust[i,]) |> terra::project(crs(r_col[[i]]))
-    s_col <- sprc(r_col)
-    r_list[[i]] <- terra::merge(s_col) |> terra::crop(y = v_clust, mask = TRUE)
-}
+test_clust3 <- test_clust[1:3,]
 
-
-plot(r_list[[1]])
+huc_extract(cluster = cluster_target)
 ```
-
-
-```{r}
-
-huc_dems <- huc_extract_merge(test_clust)
-huc_dems_unwrap<- lapply(unlist(huc_dems), terra::unwrap)
-
-cluster_dem <- terra::merge(huc_dems_unwrap[[3]])
-```
-
 
 ```{r}
 #| cache: true
-plot(terra::shade(terra::terrain(r_list[[1]], "slope", unit = "radians"), terra::terrain(r_list[[1]], "aspect", unit = "radians")), 
+test_dems <- rast(here("Data/TerrainProcessed/HUC_DEMs/cluster_208_huc_041402011002.tif"))
+
+plet(terra::shade(terra::terrain(test_dems, "slope", unit = "radians"), terra::terrain(test_dems, "aspect", unit = "radians")), 
      col=grey(0:100/100))
 
-plot(terra::shade(terra::terrain(r_list[[2]], "slope", unit = "radians"), terra::terrain(r_list[[2]], "aspect", unit = "radians")), 
-     col=grey(0:100/100))
-
-plot(terra::shade(terra::terrain(r_list[[3]], "slope", unit = "radians"), terra::terrain(r_list[[3]], "aspect", unit = "radians")), 
-     col=grey(0:100/100))
-```
-
-
-```{r}
 
 ```
 
 
 
-Missing NY DEM Indexes
+Terrain metric processing
+
 
 ```{r}
-sort(unique(vect(here("Data/NY_HUCS/Missing_DEM_Indexes_HUCS.gpkg"))$cluster))
+
+terrain_function <- function(list_of_dem_rasts, cluster, metric = args[4]){
+    cl <- makeCluster(4)
+    registerDoParallel(cl)
+    
+    win <- c(as.numeric(args[5]), as.numeric(args[5]))
+    
+    foreach(i = seq_along(list_of_dem_rasts), 
+            .packages = c("terra", "tidyterra"),
+            .export = "args") %dopar% {
+                
+        cluster_huc_name <- stringr::str_remove(basename(list_of_dem_rasts[i]), ".tif")
+        dems_target <- list_of_dem_rasts[[i]]
+        
+        if(stringr::str_detect(metric, "slp")){
+            dems_target |> 
+                terra::rast() |> 
+                MultiscaleDTM::SlpAsp(w = win, unit = "degrees", 
+                                      include_scale = TRUE, metrics = "slope",
+                                      filename = paste0(args[3], cluster_huc_name, "_terrain_", args[4],"win",args[5], ".tif"),
+                                      overwrite = TRUE) 
+        } else if (stringr::str_detect(metric, "dmv")){
+            dems_target |> 
+                terra::rast() |> 
+                MultiscaleDTM::DMV(w = win, stand = "none", # I think "none" so that NA won't be produced
+                                   include_scale = TRUE,
+                                      filename = paste0(args[3], cluster_huc_name, "_terrain_", args[4],"win",args[5], ".tif"),
+                                      overwrite = TRUE) 
+        } else if(stringr::str_detect(metric, "curv")){
+            dems_target |> 
+                terra::rast() |> 
+                MultiscaleDTM::Qfit(w = win,
+                                    include_scale = TRUE, metrics = c("meanc", "planc", "profc"),
+                                    filename = paste0(args[3], cluster_huc_name, huc_name, "_terrain_", args[4],"win",args[5], ".tif"),
+                                    overwrite = TRUE)
+        } else {
+            print("No terrain metric specified or not identified")
+        }
+    }
+    stopCluster(cl)
+}
+    
+```
+
+
+But we can use filtering to get faster computation
+```{r}
+terrain_function <- function(list_of_dem_rasts, cluster, metric = args[4]){
+    cl <- makeCluster(8)
+    registerDoParallel(cl)
+    
+    foreach(i = seq_along(list_of_dem_rasts), 
+            .packages = c("terra", "tidyterra"),
+            .export = "args") %dopar% {
+                
+        cluster_huc_name <- stringr::str_remove(basename(list_of_dem_rasts[[i]]), ".tif")
+        dems_target <- list_of_dem_rasts[[i]]
+        
+        if(stringr::str_detect(metric, "slp")){
+            dems_target |> 
+                terra::rast() |> 
+                terra::aggregate(10, fun = "mean", na.rm = TRUE) |> # aggregate first
+                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
+                               filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"),
+                               overwrite = TRUE)
+            dems_target |> 
+                terra::rast() |> 
+                terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
+                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
+                               filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"),
+                               overwrite = TRUE)
+            dems_target |> 
+                terra::rast() |> 
+                terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> # aggregate first
+                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
+                               filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_1000m.tif"),
+                               overwrite = TRUE)
+        } else if (stringr::str_detect(metric, "dmv")){
+            dems_target |> 
+                terra::rast() |> 
+                terra::aggregate(10, fun = "mean", na.rm = TRUE) |> # aggregate first
+                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
+                                   include_scale = FALSE,
+                                      filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"),
+                                      overwrite = TRUE) 
+            dems_target |> 
+                terra::rast() |> 
+                terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
+                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
+                                   include_scale = FALSE,
+                                   filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"),
+                                   overwrite = TRUE) 
+            dems_target |> 
+                terra::rast() |> 
+                terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> # aggregate first
+                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
+                                   include_scale = FALSE,
+                                   filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_1000m.tif"),
+                                   overwrite = TRUE) 
+        } else if(stringr::str_detect(metric, "curv")){
+            dems_target |> 
+                terra::rast() |> 
+                terra::aggregate(10, fun = "mean", na.rm = TRUE) |> # aggregate first
+                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                MultiscaleDTM::Qfit(w = c(3,3),
+                                    include_scale = TRUE, metrics = c("meanc", "planc", "profc"),
+                                    filename = paste0(args[5], cluster_huc_name, huc_name, "_terrain_", args[4], "_10m.tif"),
+                                    overwrite = TRUE)
+            dems_target |> 
+                terra::rast() |> 
+                terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
+                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                MultiscaleDTM::Qfit(w = c(3,3),
+                                    include_scale = TRUE, metrics = c("meanc", "planc", "profc"),
+                                    filename = paste0(args[5], cluster_huc_name, huc_name, "_terrain_", args[4], "_100m.tif"),
+                                    overwrite = TRUE)
+            dems_target |> 
+                terra::rast() |> 
+                terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> # aggregate first
+                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                MultiscaleDTM::Qfit(w = c(3,3),
+                                    include_scale = TRUE, metrics = c("meanc", "planc", "profc"),
+                                    filename = paste0(args[5], cluster_huc_name, huc_name, "_terrain_", args[4], "_1000m.tif"),
+                                    overwrite = TRUE)
+        } else {
+            print("No terrain metric specified or not identified")
+        }
+        
+        #rm(c("cluster_huc_name", "dems_target"))
+    }
+    stopCluster(cl)
+}
+```
+
+```{r}
+test_metrics10 <- rast(here("Data/TerrainProcessed/HUC_TerrainMetrics/cluster_208_huc_041402011002_terrain_slp_10m.tif"))
+test_metrics100 <- rast(here("Data/TerrainProcessed/HUC_TerrainMetrics/cluster_208_huc_041402011002_terrain_slp_100m.tif"))
+test_metrics1000 <- rast(here("Data/TerrainProcessed/HUC_TerrainMetrics/cluster_208_huc_041402011002_terrain_slp_1000m.tif"))
+
+
+plot(c(test_metrics10$slope,test_metrics100$slope, test_metrics1000$slope), nc = 3)
 ```
 
