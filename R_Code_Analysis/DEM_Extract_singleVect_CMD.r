@@ -27,8 +27,7 @@ suppressPackageStartupMessages(library(tidyterra))
 terraOptions(memfrac = 0.10,
              memmax = 8,
              tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
-cl <- makeCluster(4)
-registerDoParallel(cl)
+
 ###############################################################################################
 
 # A shapefile list of all the DEM indexes (vector tiles of the actual DEM locations)
@@ -95,6 +94,8 @@ huc_extract <- function(cluster){
     }
     
     # list of lists of spatrasterCollections
+    cl <- makeCluster(4)
+    registerDoParallel(cl)
     r_list <- foreach(i = seq_along(cluster$huc12),
                       .packages = c("terra", "tidyterra", "sf"),
                       .export = "args") %dopar% {
@@ -109,6 +110,7 @@ huc_extract <- function(cluster){
             #terra::wrap()
         #return(rs)
     }
+    stopCluster(cl)
     #return(list(f_list,lapply(v_list, terra::unwrap), lapply(r_list, terra::unwrap)))
 }
 

@@ -3,7 +3,7 @@
 # args = c("Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
 #          208,
 #          "Data/TerrainProcessed/HUC_DEMs/",
-#          "slp",
+#          "dmv",
 #          "Data/TerrainProcessed/HUC_TerrainMetrics/"
 #          )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
@@ -25,8 +25,8 @@ library(stringr)
 library(doParallel)
 suppressPackageStartupMessages(library(tidyterra))
 
-terraOptions(memfrac = 0.10,# Use only 10% of memory for program
-             memmax = 8, #max memory is 8Gb
+terraOptions(memfrac = 0.20,# Use only 10% of memory for program
+             memmax = 16, #max memory is 8Gb
              tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
 
 
@@ -52,86 +52,108 @@ terrain_function <- function(list_of_dem_rasts, cluster, metric = args[4]){
     
     foreach(i = seq_along(list_of_dem_rasts), 
             .packages = c("terra", "tidyterra"),
-            .export = "args") %dopar% {
+            .export = "args",
+            .errorhandling = "remove") %dopar% {
                 
         cluster_huc_name <- stringr::str_remove(basename(list_of_dem_rasts[[i]]), ".tif")
         dems_target <- list_of_dem_rasts[[i]]
         
         if(stringr::str_detect(metric, "slp")){
-            dems_target |>
-                terra::rast() |>
-                terra::aggregate(10, fun = "mean", na.rm = TRUE) |> # aggregate first
-                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
-                terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
-                               filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"),
-                               overwrite = TRUE)
-            dems_target |> 
-                terra::rast() |> 
-                terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
-                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
-                terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
-                               filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"),
-                               overwrite = TRUE)
-            dems_target |>
-                terra::rast() |>
-                terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> # aggregate first
-                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
-                terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
-                               filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_1000m.tif"),
-                               overwrite = TRUE)
-        } else if (stringr::str_detect(metric, "dmv")){
-            dems_target |> 
-                terra::rast() |> 
-                terra::aggregate(10, fun = "mean", na.rm = TRUE) |> # aggregate first
-                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
-                MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
-                                   include_scale = FALSE,
-                                      filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"),
-                                      overwrite = TRUE) 
-            print("DMV 10")
-            dems_target |> 
-                terra::rast() |> 
-                terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
-                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
-                MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
-                                   include_scale = FALSE,
+            if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"))){
+                dems_target |>
+                    terra::rast() |>
+                    terra::aggregate(10, fun = "mean", na.rm = TRUE) |> # aggregate first
+                    terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                    terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
+                                   filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"),
+                                   overwrite = TRUE, names = c("slope_10m", "aspect_10m", "TPI_10m", "TRI_10m"))
+            }
+            if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"))){
+                dems_target |> 
+                    terra::rast() |> 
+                    terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
+                    terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                    terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
                                    filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"),
-                                   overwrite = TRUE) 
-            print("DMV 100")
-            dems_target |> 
-                terra::rast() |> 
-                terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> # aggregate first
-                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
-                MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
-                                   include_scale = FALSE,
+                                   overwrite = TRUE, names = c("slope_100m", "aspect_100m", "TPI_100m", "TRI_100m"))
+            }
+            if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_1000m.tif"))){
+                dems_target |>
+                    terra::rast() |>
+                    terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> # aggregate first
+                    terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                    terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
                                    filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_1000m.tif"),
-                                   overwrite = TRUE) 
-            print("DMV 1000")
+                                   overwrite = TRUE, names = c("slope_1000m", "aspect_1000m", "TPI_1000m", "TRI_1000m"))
+            } else {outfile("Metric files accounted for")}
+            
+        } else if (stringr::str_detect(metric, "dmv")){
+            if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"))){
+                d10 <- dems_target |> 
+                    terra::rast() |> 
+                    terra::aggregate(10, fun = "mean", na.rm = TRUE) |> # aggregate first
+                    terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                    MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
+                                       include_scale = FALSE) |>
+                    terra::wrap()
+                writeRaster(terra::unwrap(d10) ,paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"),
+                            overwrite = TRUE, names = c("dmv_10m"))
+            }
+            if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"))){
+                d100 <- dems_target |> 
+                    terra::rast() |> 
+                    terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
+                    terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                    MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
+                                       include_scale = FALSE) |>
+                    terra::wrap()
+                writeRaster(terra::unwrap(d100) ,paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"),
+                            overwrite = TRUE, names = c("dmv_100m"))
+            }
+            if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_1000m.tif"))){
+                d1000 <- dems_target |> 
+                    terra::rast() |> 
+                    terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> # aggregate first
+                    terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                    MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
+                                       include_scale = FALSE) |>
+                    terra::wrap()
+                writeRaster(terra::unwrap(d1000) ,paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_1000m.tif"),
+                            overwrite = TRUE, names = c("dmv_1000m"))
+            }
+            
         } else if(stringr::str_detect(metric, "curv")){
-            dems_target |> 
-                terra::rast() |> 
-                terra::aggregate(10, fun = "mean", na.rm = TRUE) |> # aggregate first
-                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
-                MultiscaleDTM::Qfit(w = c(3,3),
-                                    include_scale = TRUE, metrics = c("meanc", "planc", "profc"),
-                                    filename = paste0(args[5], cluster_huc_name, huc_name, "_terrain_", args[4], "_10m.tif"),
-                                    overwrite = TRUE)
-            dems_target |> 
-                terra::rast() |> 
-                terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
-                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
-                MultiscaleDTM::Qfit(w = c(3,3),
-                                    include_scale = TRUE, metrics = c("meanc", "planc", "profc"),
-                                    filename = paste0(args[5], cluster_huc_name, huc_name, "_terrain_", args[4], "_100m.tif"),
-                                    overwrite = TRUE)
-            dems_target |> 
-                terra::rast() |> 
-                terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> # aggregate first
-                terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
-                MultiscaleDTM::Qfit(w = c(3,3),
-                                    include_scale = TRUE, metrics = c("meanc", "planc", "profc"),
-                                    filename = paste0(args[5], cluster_huc_name, huc_name, "_terrain_", args[4], "_1000m.tif"),
-                                    overwrite = TRUE)
+            if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"))){
+                c10 <- dems_target |> 
+                    terra::rast() |> 
+                    terra::aggregate(10, fun = "mean", na.rm = TRUE) |> # aggregate first
+                    terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                    MultiscaleDTM::Qfit(w = c(3,3), include_scale = TRUE, metrics = c("meanc", "planc", "profc")) |>
+                    terra::wrap()
+                writeRaster(terra::unwrap(c10) ,paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_10m.tif"),
+                            overwrite = TRUE, c("meanc_10m", "planc_10m", "profc_10m"))
+            }
+            if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"))){
+                c100 <- dems_target |> 
+                    terra::rast() |> 
+                    terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
+                    terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                    MultiscaleDTM::Qfit(w = c(3,3), include_scale = TRUE, metrics = c("meanc", "planc", "profc"))|>
+                    terra::wrap()
+                writeRaster(terra::unwrap(c100) ,paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"),
+                            overwrite = TRUE, c("meanc_100m", "planc_100m", "profc_100m"))
+            }
+            if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_1000m.tif"))){
+                c1000 <- dems_target |> 
+                    terra::rast() |> 
+                    terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> # aggregate first
+                    terra::resample(y = terra::rast(dems_target), method = "cubicspline") |> # resample to original resolution
+                    MultiscaleDTM::Qfit(w = c(3,3),include_scale = TRUE, metrics = c("meanc", "planc", "profc"))|>
+                    terra::wrap()
+                writeRaster(terra::unwrap(c1000) ,paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_1000m.tif"),
+                            overwrite = TRUE, c("meanc_1000m", "planc_1000m", "profc_1000m"))
+            } else {outfile("Metric files accounted for")}
+
         } else {
             print("No terrain metric specified or not identified")
         }
@@ -143,24 +165,3 @@ terrain_function <- function(list_of_dem_rasts, cluster, metric = args[4]){
     
 
 terrain_function(list_of_huc_dems, cluster_target)
-
-# 
-# 
-# rt <- rast("Data/TerrainProcessed/HUC_DEMs/cluster_208_huc_041402011002.tif")
-# rts <- terra::terrain(rt, v = "slope")
-# r10 <- rt |> 
-#     terra::aggregate(fact = 10, fun = "mean", na.rm = TRUE) |> 
-#     terra::resample(y = rt, method = "cubicspline") 
-# r100 <- rt |> 
-#     terra::aggregate(100, fun = "mean", na.rm = TRUE) |> 
-#     terra::resample(y = rt, method = "cubicspline") 
-# r1000 <- rt |> 
-#     terra::aggregate(1000, fun = "mean", na.rm = TRUE) |> 
-#     terra::resample(y = rt, method = "cubicspline") 
-# sr10 <- terra::terrain(r10, v = "slope") 
-# sr100 <- terra::terrain(r100, v = "slope") 
-# sr1000 <- terra::terrain(r1000, v = "slope") 
-# 
-# 
-# plot(c(sr10, sr100, sr1000), nc = 3)
-# plot(c(rt, r10, r100), nc = 3)
