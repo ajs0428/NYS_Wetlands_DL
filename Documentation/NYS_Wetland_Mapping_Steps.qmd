@@ -1,0 +1,36 @@
+---
+title: "Scripting Steps for NY Wetland Mapping"
+author: "Anthony Stewart"
+format: html
+project: 
+    output-file: Documentation/
+---
+
+
+```{r}
+#| label: setup
+#| message: false
+
+library(terra)
+library(sf) 
+library(tidyverse)
+
+```
+
+## Introduction
+
+## Starting out 
+
+The earliest starting point for the wetland mapping analysis is assuming there is no data, i.e. no wetland observations, no predictor geospatial layers. Sourcing the data is somewhat unique to this project and other projects may need to conduct searches differently 
+
+Here, we want to map wetlands in subsets of the area of NYS. We chose to use watersheds defined by the hydrologic unit code (HUC) 12. Therefore input geospatial data used to calculate terrain and hydrology metrics were calculated at this scale. NYS DEC and the NY GIS provide lidar DTMs and shapefile indexes of their locations through the geospatial portal.
+
+The script for processing NYS lidar DTMs is terrain `DEM_Extract_singleVect_CMD.r`. This script uses the DEM indexes to point towards DEM rasters that fit in the extent of a HUC cluster of interest
+
+```{r}
+#| echo: true
+#| eval: false
+#| file: 
+```
+
+
