@@ -4,6 +4,7 @@ author: "Anthony Stewart"
 format: html
 project: 
     output-file: Documentation/
+    execute-dir: project
 ---
 
 
@@ -14,7 +15,8 @@ project:
 library(terra)
 library(sf) 
 library(tidyverse)
-
+library(here)
+here()
 ```
 
 ## Introduction
@@ -30,6 +32,7 @@ The script for processing NYS lidar DTMs is terrain `DEM_Extract_singleVect_CMD.
 ```{r}
 #| echo: true
 #| eval: false
+#| file: R_Code_Analysis/DEM_Extract_singleVect_CMD.r
 
 ```
 
