@@ -30,7 +30,27 @@ The script for processing NYS lidar DTMs is terrain `DEM_Extract_singleVect_CMD.
 ```{r}
 #| echo: true
 #| eval: false
-#| file: 
+
 ```
 
+
+
+
+## Training data generation
+
+Sources for training data
+- National Wetland Inventory (NWI)
+- Field Observations
+
+Criteria for generating points from NWI
+- Remove all Estuarine, Tidal, and Marine wetlands
+- Remove small rivering wetlands since they are based on NHD flowlines and buffered by a small amount
+    - In the NWI the ATTRIBUTE lists R1 Tidal, R2: Lower Perennial, R3: Upper Perennial, R4: Intermittent, R5: small streas
+- Reclassify lakes, ponds, rivers to open water wetlands
+    - Palustrine Unconsolidated Bottom (PUB) sometimes misaligned with imagery — remove
+
+
+```{r}
+
+```
 
