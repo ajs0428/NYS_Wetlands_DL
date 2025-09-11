@@ -65,7 +65,8 @@ names(pts_list) <- as.vector(cluster_target["huc12"][[1]])
 ###############################################################################################
 #pts_list[1:2] 
 dem_list <- list.files("Data/TerrainProcessed/HUC_DEMs/", pattern = ".*\\d+.tif", full.names = TRUE)
-terr_list <- list.files(path = args[3], pattern = paste0("cluster_", args[2], ".*\\m.tif"), full.names = TRUE)
+terr_list <- list.files(path = args[3], pattern = paste0("cluster_", args[2], ".*\\m.tif"), full.names = TRUE) %>% 
+    .[!str_detect(., "1000m")]
 hydro_list <- list.files(path = args[4], pattern = paste0("cluster_", args[2], ".*\\.tif"), full.names = TRUE)
 naip_huc_list <- list.files(path = args[5], pattern = paste0(".*\\cluster_", args[2], ".*\\.tif"), full.names = TRUE)
 
@@ -84,15 +85,17 @@ raster_stack_extract <- function(terr_list, hydro_list, naip_list, pts_list){
         #print(ext(cr))
         if(stringr::str_detect(tolower(args[6]), "yes")){
             print("rewriting/creating raster stacks")
-            dr <- dem_list[str_detect(dem_list, huc_name)] |> rast()
             tr <- terr_list[str_detect(terr_list, huc_name)] |> rast()
             hr <- hydro_list[str_detect(hydro_list, huc_name)] |> rast()
             nr <- naip_huc_list[str_detect(naip_huc_list, huc_name)] |> rast() |> 
                 terra::resample(tr, method = "bilinear", threads = TRUE)
+            dr <- dem_list[str_detect(dem_list, huc_name)] |> rast() |>
+                terra::project(crs(hr))
+            set.names(dr, "DEM")
             # print(ext(tr))
             # print(ext(hr))
             # print(ext(nr))
-            cr <- c(tr, hr, nr)
+            cr <- c(dr, tr, hr, nr)
             writeRaster(cr,
                         filename = paste0("Data/Predictor_Stacks/cluster_",
                                           args[2], "_huc_", huc_name, "_raster_predictors.tif"),
