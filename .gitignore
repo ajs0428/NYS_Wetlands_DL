@@ -5,6 +5,7 @@
 !R_Code_Analysis/
 !Python_Code_Analysis/
 !Documentation/
+!Shell_Scripts/
 
 # Don't ignore files directly in these directories
 !R_Code_Analysis/*

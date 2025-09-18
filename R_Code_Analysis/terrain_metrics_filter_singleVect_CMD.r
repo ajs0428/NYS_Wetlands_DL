@@ -166,8 +166,8 @@ terrain_function <- function(dems_target, metric = args[4]){
     # stopCluster(cl)
 }
 
-corenum <-  2
-options(future.globals.maxSize= 1.0 * 1e9)
+corenum <-  4
+options(future.globals.maxSize= 2.0 * 1e9)
 plan(multisession, workers = corenum) 
 
 print(corenum)
