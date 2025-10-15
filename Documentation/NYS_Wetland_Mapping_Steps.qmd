@@ -1,0 +1,59 @@
+---
+title: "Scripting Steps for NY Wetland Mapping"
+author: "Anthony Stewart"
+format: html
+project: 
+    output-file: Documentation/
+    execute-dir: project
+---
+
+
+```{r}
+#| label: setup
+#| message: false
+
+library(terra)
+library(sf) 
+library(tidyverse)
+library(here)
+here()
+```
+
+## Introduction
+
+## Starting out 
+
+The earliest starting point for the wetland mapping analysis is assuming there is no data, i.e. no wetland observations, no predictor geospatial layers. Sourcing the data is somewhat unique to this project and other projects may need to conduct searches differently 
+
+Here, we want to map wetlands in subsets of the area of NYS. We chose to use watersheds defined by the hydrologic unit code (HUC) 12. Therefore input geospatial data used to calculate terrain and hydrology metrics were calculated at this scale. NYS DEC and the NY GIS provide lidar DTMs and shapefile indexes of their locations through the geospatial portal.
+
+The script for processing NYS lidar DTMs is terrain `DEM_Extract_singleVect_CMD.r`. This script uses the DEM indexes to point towards DEM rasters that fit in the extent of a HUC cluster of interest
+
+```{r}
+#| echo: true
+#| eval: false
+#| file: R_Code_Analysis/DEM_Extract_singleVect_CMD.r
+
+```
+
+
+
+
+## Training data generation
+
+Sources for training data
+- National Wetland Inventory (NWI)
+- Field Observations
+
+Criteria for generating points from NWI
+- Remove all Estuarine, Tidal, and Marine wetlands
+- Remove small rivering wetlands since they are based on NHD flowlines and buffered by a small amount
+    - In the NWI the ATTRIBUTE lists R1 Tidal, R2: Lower Perennial, R3: Upper Perennial, R4: Intermittent, R5: small streas
+- Reclassify lakes, ponds, rivers to open water wetlands
+    - Palustrine Unconsolidated Bottom (PUB) sometimes misaligned with imagery — remove
+
+
+```{r}
+
+```
+

@@ -4,6 +4,7 @@
 # Except these directories
 !R_Code_Analysis/
 !Python_Code_Analysis/
+!Documentation/
 
 # Don't ignore files directly in these directories
 !R_Code_Analysis/*
