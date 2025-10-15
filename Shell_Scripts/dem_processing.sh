@@ -12,6 +12,8 @@
 #SBATCH --mail-type=ALL
 
 cd /ibstorage/anthony/NYS_Wetlands_GHG/
+module load R/4.4.3
+
 
 exclude=(5 12 18 35 49 53 67 72 73 76 82 99 105 107 112 123 124 146 148 149 157 165 166 177)
 

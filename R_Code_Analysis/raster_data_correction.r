@@ -1,8 +1,12 @@
 #!/usr/bin/env Rscript
 
+#################
+# This script corrects the layer names and crs
+#################
+
 args = c(
          "Data/TerrainProcessed/HUC_Hydro//",
-         208
+         22
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 

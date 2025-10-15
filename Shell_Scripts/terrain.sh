@@ -5,7 +5,7 @@ module load R/4.4.3
 
 Rscript R_Code_Analysis/terrain_metrics_filter_singleVect_CMD.r \
         "Data/NY_HUCS/NY_Cluster_Zones_200.gpkg" \
-        208 \
+        11 \
         "Data/TerrainProcessed/HUC_DEMs" \
         "slp" \
         "Data/TerrainProcessed/HUC_TerrainMetrics/" > Shell_Scripts/terrain.log 2>&1 &
@@ -17,7 +17,7 @@ wait
 
 Rscript R_Code_Analysis/terrain_metrics_filter_singleVect_CMD.r \
 	"Data/NY_HUCS/NY_Cluster_Zones_200.gpkg" \
-	208 \
+	11 \
 	"Data/TerrainProcessed/HUC_DEMs" \
 	"dmv" \
 	"Data/TerrainProcessed/HUC_TerrainMetrics/" > Shell_Scripts/terrain.log 2>&1 &
@@ -30,7 +30,7 @@ wait
 
 Rscript R_Code_Analysis/terrain_metrics_filter_singleVect_CMD.r \
 	"Data/NY_HUCS/NY_Cluster_Zones_200.gpkg" \
-	208 \
+	11 \
 	"Data/TerrainProcessed/HUC_DEMs" \
 	"curv" \
 	"Data/TerrainProcessed/HUC_TerrainMetrics/" > Shell_Scripts/terrain.log 2>&1 &

@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
 
 args = c("Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
-         208,
+         11,
          "Data/TerrainProcessed/HUC_DEMs/",
-         "curv",
+         "slp",
          "Data/TerrainProcessed/HUC_TerrainMetrics/"
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
@@ -28,7 +28,7 @@ library(doParallel)
 suppressPackageStartupMessages(library(tidyterra))
 
 terraOptions(memfrac = 0.20,# Use only 10% of memory for program
-             memmax = 16, #max memory is 8Gb
+             memmax = 64, #max memory is 8Gb
              tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
 
 
@@ -43,24 +43,17 @@ terraOptions(memfrac = 0.20,# Use only 10% of memory for program
 #     terra::vect() 
 
 ###############################################################################################
-list_of_huc_dems <- list.files(args[3], full.names = TRUE, glob2rx(pattern = paste0("^cluster_", args[2], "*\\*.tif$"))) |> 
+list_of_huc_dems <- list.files(args[3], full.names = TRUE, glob2rx(pattern = paste0("^cluster_", args[2], "_", "*\\*.tif$"))) |> 
     stringr::str_subset(pattern = "wbt", negate = TRUE)
 
 terrain_function <- function(dems_target, metric = args[4]){
-    
-    # cl <- makeCluster(4)
-    # registerDoParallel(cl)
-    # 
-    # foreach(i = seq_along(dems_target), 
-    #         .packages = c("terra", "tidyterra"),
-    #         .export = "args",
-    #         .errorhandling = "remove") %dopar% {
-    
+
     cluster_huc_name <- stringr::str_remove(basename(dems_target), ".tif")
     print(cluster_huc_name)
-
+    
+    tryCatch({
     if(stringr::str_detect(metric, "slp")){
-        print(metric)
+        print("Slp")
         if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_5m.tif"))){
             dems_target |>
                 terra::rast() |>
@@ -90,7 +83,7 @@ terrain_function <- function(dems_target, metric = args[4]){
         } else {print(paste0(args[4], " 500m Metric files accounted for"))}
         
     } else if (stringr::str_detect(metric, "dmv")){
-        print(metric)
+        print("DMV")
         if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_5m.tif"))){
             dems_target |> 
                 terra::rast() |> 
@@ -126,7 +119,7 @@ terrain_function <- function(dems_target, metric = args[4]){
         }else {print(paste0(args[4], " 500m Metric files accounted for"))}
         
     } else if(stringr::str_detect(metric, "curv")){
-        print(metric)
+        print("CURV")
         if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_5m.tif"))){
             dems_target |> 
                 terra::rast() |> 
@@ -159,21 +152,22 @@ terrain_function <- function(dems_target, metric = args[4]){
         } else {print(paste0(args[4], " 500m Metric files accounted for"))}
     } else {
         print("No terrain metric specified or not identified") 
-        }
-    
-    #rm(c("cluster_huc_name", "dems_target"))
-    # }
-    # stopCluster(cl)
+    }
+    }, error = function(msg){
+        message(paste0("Error at: ", cluster_huc_name))
+        return(NA)
+    }
+    )
 }
 
-corenum <-  4
-options(future.globals.maxSize= 2.0 * 1e9)
-plan(multisession, workers = corenum) 
+corenum <-  future::availableCores()
+options(future.globals.maxSize= 32.0 * 1e9)
+plan(multisession, workers = corenum)
 
 print(corenum)
 print(options()$future.globals.maxSize)
 
-# terrain_function(list_of_huc_dems, cluster_target)
+# lapply(list_of_huc_dems, terrain_function)
 future_lapply(list_of_huc_dems, terrain_function, future.seed = TRUE)
 
 # lapply(list_of_huc_dems, terrain_function, cluster_target)
