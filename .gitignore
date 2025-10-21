@@ -5,16 +5,20 @@
 !R_Code_Analysis/
 !Python_Code_Analysis/
 !Documentation/
+!Shell_Scripts/
 
 # Don't ignore files directly in these directories
 !R_Code_Analysis/*
 !Python_Code_Analysis/*
+!Shell_Scripts/*.sh
 R_Code_Analysis/raster_footprint*
 Python_Code_Analysis/raster_footprint*
 
 # Ignore directories in directories (probably quarto stuff)
 R_Code_Analysis/*/
-Python_Code_Analysis/*/
+# Python_Code_Analysis/*/
+# except the DL stuff now
+# !Python_Code_Analysis/DL_Learning/*
 
 !.gitignore
 !.gitattributes

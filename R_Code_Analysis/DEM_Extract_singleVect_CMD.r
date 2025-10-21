@@ -1,12 +1,17 @@
 #!/usr/bin/env Rscript
 
+###################
+# This script creates a DTM mosaic for each HUC in a cluster 
+    # The cluster is pre-defined as a group of HUCs
+###################
+
 args = c("Data/NYS_DEM_Indexes/",
          "Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
-         208,
+         50,
          "Data/DEMs/",
          "Data/TerrainProcessed/HUC_DEMs"
          )
-# args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
+args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
 cat("these are the arguments: \n", 
     "- Path to the DEM indexes folder", args[1], "\n",
@@ -22,6 +27,9 @@ library(sf)
 library(MultiscaleDTM)
 library(foreach)
 library(doParallel)
+library(future)
+library(future.apply)
+library(stringr)
 suppressPackageStartupMessages(library(tidyterra))
 
 terraOptions(memfrac = 0.10,
@@ -81,42 +89,58 @@ cluster_extract <- function(cluster, dem_indexes){
     return(files_to_extract)
 }
 
-#Take the list of dems_to_extract and go by each HUC to merge into a full raster    
+cluster_dem_indices <- cluster_extract(cluster_target, dem_ind_trs)
+
+#Take the list of cluster_dem_indices and go by each HUC to merge into a full raster    
     # should return a list of rasters that can be merged again
-huc_extract <- function(cluster){
-    f_list <- list() # list of lists of filenames 
-    v_list <- list() # list for HUC vectors
-    for(i in seq_along(cluster$huc12)){
-        dem_to_extr <- cluster_extract(cluster = cluster[i, ], dem_indexes = dem_ind_trs)
-        f_list[[i]] <- dems_file_list[basename(dems_file_list) %in% dem_to_extr]
-        v_list[[i]] <- terra::vect(cluster[i,]) |>
-            terra::project(crs("EPSG:6347")) |> terra::wrap()
-    }
-    
-    # list of lists of spatrasterCollections
-    cl <- makeCluster(4)
-    registerDoParallel(cl)
-    r_list <- foreach(i = seq_along(cluster$huc12),
-                      .packages = c("terra", "tidyterra", "sf"),
-                      .export = "args") %dopar% {
-        f_list[[i]] |> 
-            as.list() |> 
-            lapply(terra::rast) |> 
-            terra::sprc() |> 
-            terra::merge() |>
-            terra::mask(mask = terra::unwrap(v_list[[i]]), updatevalue = NA, touches = TRUE,
-                        filename = paste0(args[5], "cluster_", args[3], "_huc_", cluster[["huc12"]][[i]],".tif"),
-                        overwrite = TRUE) #|>
-            #terra::wrap()
-        #return(rs)
-    }
-    stopCluster(cl)
-    #return(list(f_list,lapply(v_list, terra::unwrap), lapply(r_list, terra::unwrap)))
+
+f_list <- list() # list of lists of filenames 
+v_list <- list() # list for HUC vectors
+for(i in seq_along(cluster_target$huc12)){
+    dem_to_extr <- cluster_extract(cluster = cluster_target[i, ], dem_indexes = dem_ind_trs)
+    f_list[[i]] <- dems_file_list[basename(dems_file_list) %in% dem_to_extr]
+    v_list[[i]] <- terra::vect(cluster_target[i,]) |>
+        terra::project(crs("EPSG:6347")) |> terra::wrap()
 }
 
-#cluster_target3 <- cluster_target[1:3]
+huc_extract <- function(list_of_files, list_of_vectors){
+    print(length(list_of_files))
+    huc_name <- (terra::unwrap(list_of_vectors)[1,"huc12", drop = T][[1]])
+    print(paste0(args[5], "/cluster_", args[3], "_huc_", huc_name,".tif"))
+    
+    subfolders_names <- basename(dirname(list_of_files))
+    file_lists <- split(list_of_files, subfolders_names)
+    lvrt <- lapply(file_lists, function(lists){
+        terra::vrt(lists) |> 
+            terra::project("EPSG:6347", res = 1)
+    })
+    
+    tryCatch(
+        {terra::merge(sprc(lvrt)) |>
+        terra::mask(mask = terra::unwrap(list_of_vectors), updatevalue = NA, touches = TRUE,
+                    filename = paste0(args[5], "/cluster_", args[3], "_huc_", huc_name,".tif"),
+                    overwrite = TRUE)
+            }, 
+        error = function(msg){
+            message(paste0("Error at: ", huc_name))
+                        return(NA)
+            }
+        )
 
-huc_extract(cluster = cluster_target)
+}
 
+mapply(huc_extract, f_list, v_list)
 
-stopCluster(cl)
+# huc_extract(cluster = cluster_target)
+
+# corenum <-  4
+# options(future.globals.maxSize= 8.0 * 1e9)
+# plan(multisession, workers = corenum) 
+# 
+# print(corenum)
+# print(options()$future.globals.maxSize)
+# 
+# future_mapply(huc_extract, f_list[1:2], v_list[1:2], future.seed = TRUE)
+
+##########################################
+
