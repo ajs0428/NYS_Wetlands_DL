@@ -1,9 +1,11 @@
 #!/bin/bash -l
-#SBATCH --nodelist=cbsuxu09,cbsuxu10
+#SBATCH --nodelist=cbsuxu09
 #SBATCH --mail-user=ajs544@cornell.edu
-#SBATCH --mem=64G
-#SBATCH --job-name=curv
-#SBATCH --ntasks=4
+#SBATCH --mail-type=ALL
+#SBATCH --mem=128G
+#SBATCH --job-name=curv_5
+#SBATCH --ntasks=1
+#SBATCH --output=Shell_Scripts/slurm-%j.out
 
 
 cd /ibstorage/anthony/NYS_Wetlands_GHG/
@@ -15,7 +17,7 @@ module load R/4.4.3
 
 # Define the list of numbers
 #include=(11 12 22 51 53 56 60 64 67 84 86 90 92 102 105 116 120 123 136 138 152 176 183 189 192 193 198 218 225 250)
-include=(11 12 22 51 53 56 60 64 67 84 86 90 92 102 105 116 120 123 136 138 152 176 183 189 192 193 198 218 225 250)
+include=(22)
 # Loop through each number in the list
 for number in "${include[@]}"; do
     echo "Running Rscript with argument: $number"

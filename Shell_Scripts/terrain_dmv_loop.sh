@@ -3,7 +3,7 @@
 #SBATCH --mail-user=ajs544@cornell.edu
 #SBATCH --mem=64G
 #SBATCH --job-name=dmv
-#SBATCH --ntasks=8
+#SBATCH --ntasks=4
 
 
 cd /ibstorage/anthony/NYS_Wetlands_GHG/
@@ -15,7 +15,7 @@ module load R/4.4.3
 
 # Define the list of numbers
 #include=(11 12 22 51 53 56 60 64 67 84 86 90 92 102 105 116 120 123 136 138 152 176 183 189 192 193 198 218 225 250)
-include=(11 12 22 51 53 56 60 64 67 84 86 90 92 102 105 116 120 123 136 138 152 176 183 189 192 193 198 218 225 250)
+include=(225 250)
 # Loop through each number in the list
 for number in "${include[@]}"; do
     echo "Running Rscript with argument: $number"

@@ -160,15 +160,15 @@ terrain_function <- function(dems_target, metric = args[4]){
     )
 }
 
-corenum <-  future::availableCores()
-options(future.globals.maxSize= 32.0 * 1e9)
-plan(multisession, workers = corenum)
+# corenum <-  future::availableCores()
+# options(future.globals.maxSize= 32.0 * 1e9)
+# plan(multisession, workers = corenum)
+# 
+# print(corenum)
+# print(options()$future.globals.maxSize)
 
-print(corenum)
-print(options()$future.globals.maxSize)
-
-# lapply(list_of_huc_dems, terrain_function)
-future_lapply(list_of_huc_dems, terrain_function, future.seed = TRUE)
+lapply(list_of_huc_dems, terrain_function)
+# future_lapply(list_of_huc_dems, terrain_function, future.seed = TRUE)
 
 # lapply(list_of_huc_dems, terrain_function, cluster_target)
 
