@@ -18,10 +18,6 @@ library(here)
 
 here()
 
-terraOptions(memfrac = 0.50,# Use only 10% of memory for program
-             memmax = 64, #max memory is 8Gb
-             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
-
 theme_param <- theme(
     text = element_text(size = 14),
     legend.position = 'right', 
@@ -46,9 +42,7 @@ theme_param <- theme(
         -   slope
         -   curvature (multiple)
         -   deviation from mean elevation
-    -   Considering the 1m resolution, these should be calculated at a scale greater than the 3x3 window
-        -   11x11, 21x21, 51x51
-        -   Note that increases in the window size greatly increase computation time
+    -   Considering the 1m resolution, these should be calculated at a larger scale
 -   Hydrology metrics based on terrain characteristics
     -   Depth to water
         -   This one is tricky and depends on calculation
@@ -61,69 +55,153 @@ theme_param <- theme(
         -   EVI
         -   MNDWI
 
-Other options for data could include some of the following - Terrain - Roughness - Topographic position index - Hydrology - Process model outputs - Flow direction or accumulation - Other land characteristics - landforms - geology - soil - Vegetation - land cover classes
+Other options for data could include some of the following 
+
+- Terrain 
+    - Roughness
+    - Topographic position index 
+- Hydrology 
+    - Process model outputs 
+    - Flow direction or accumulation 
+- Other land characteristics 
+    - landforms
+    - geology
+    - soil 
+- Vegetation 
+    - land cover classes
 
 
-## Modeling for cluster 208 
+## Merging training data from separate clusters
 
 
-HUCS
+Training data points generated from extracting predictor data from HUC rasters
 
 ```{r}
-cluster_target <- sf::st_read(here("Data/NY_HUCS/NY_Cluster_Zones_200.gpkg"), quiet = TRUE) |> 
-    sf::st_transform(sf::st_crs("EPSG:6347")) |>
-    dplyr::filter(cluster == 208) 
-plot(cluster_target["huc12"])
+clusters <- c(11, 12, 22, 51, 53, 56, 60, 64, 67, 84, 86, 90, 92, 102, 105, 116, 120, 123, 136, 138, 152, 176, 183, 189, 192, 193, 198, 208, 218, 225, 250)
 
-cluster_pts <- st_read(here("Data/Training_Data/Cluster_Extract_Training_Pts/cluster_208_extracted_training_pts.gpkg")) 
+list_of_pts_extracted_locs <- list.files(here("Data/Training_Data/HUC_Extracted_Training_Data/"), pattern = ".gpkg$", full.names = TRUE, recursive = FALSE)
+list_of_pts_extracted <- lapply(list_of_pts_extracted_locs, st_read, quiet = TRUE) |> 
+    bind_rows()
+
+nrow(list_of_pts_extracted)
+
+```
 
 
-cluster_pts |> as_tibble() |> group_by(MOD_CLASS) |> summarise(n = n())
-cluster_pts |> as_tibble() |> group_by(COARSE_CLASS) |> summarise(n = n())
+NA checking 
 
-plot(st_geometry(cluster_target))
-plot(cluster_pts["MOD_CLASS"], add = TRUE)
+```{r}
+clusters <- str_extract(list_of_pts_extracted_locs, "(?<=cluster_)\\d+") |> unique()
+
+# df <- pts_extracted_filtered |> 
+#         filter((huc %in% c("043001040302", "043001060503", "043001060504",
+#                             "043001081302", "043001081401", "043001081402",
+#                             "043001081602", "043001081604")))
+
+
+eval_na_df <- data.frame()
+
+for(j in clusters){
+    clust_df <- list_of_pts_extracted_locs[str_detect(list_of_pts_extracted_locs,
+                                                      paste0("cluster_", j, "_"))] |>
+        lapply(st_read, quiet = TRUE) |> 
+        bind_rows() |> 
+        as_tibble()
+    na_df <- clust_df %>% summarise(across(everything(), ~sum(is.na(.))))
+    na_df$cluster <- j
+    na_df <- na_df |> select(cluster, everything())
+    eval_na_df <- bind_rows(na_df, eval_na_df)
+}
+
+eval_na_df |> arrange(desc(DEM))
+
+```
+
+
+Filter out some of the dat classified as UPL using the wetland delineations datasets
+
+```{r}
+nys_delin_upl <- st_read(here("Data/NYS_NHP_Wetland_DelineatonData/NYNHP_NatComm_data/NYSWetlands_NYNHP_NatComm_data_combined.gpkg")) |> 
+    filter(COARSE_CLASS == "UPL")
+nys_delin_wet <- st_read(here("Data/NYS_NHP_Wetland_DelineatonData/NYNHP_NatComm_data/NYSWetlands_NYNHP_NatComm_data_combined.gpkg")) |> 
+    filter(COARSE_CLASS == "WET")
+
+
+list_of_pts_extracted_wet <- list_of_pts_extracted[list_of_pts_extracted$COARSE_CLASS == "WET", ]
+list_of_pts_extracted_upl <- list_of_pts_extracted[list_of_pts_extracted$COARSE_CLASS == "UPL", ]
+wet_in_upl <- list_of_pts_extracted_wet[!st_intersects(list_of_pts_extracted_wet, nys_delin_upl) |> lengths(), ]
+upl_in_wet <- list_of_pts_extracted_upl[!st_intersects(list_of_pts_extracted_upl, nys_delin_wet) |> lengths(), ]
+
+pts_extracted_filtered <- bind_rows(wet_in_upl, upl_in_wet) |>
+    mutate(ID = paste0(MOD_CLASS, row_number()))
+nrow(pts_extracted_filtered)
+```
+
+
+
+```{r}
+pts_extracted_filtered |> as_tibble() |> group_by(MOD_CLASS) |> summarise(n = n())
+pts_extracted_filtered |> as_tibble() |> group_by(COARSE_CLASS) |> summarise(n = n())
+
+df <- pts_extracted_filtered |> 
+        filter((huc %in% c("043001040302", "043001060503", "043001060504",
+                            "043001081302", "043001081401", "043001081402",
+                            "043001081602", "043001081604")))
+ndf <- nrow(df)
+for(i in names(pts_extracted_filtered)){
+    na_rows <- df |> filter(is.na(.data[[i]])) |> nrow()
+    print(paste0(i, ": ", round(na_rows/ndf, 2)))
+}
 ```
 
 
 
 
 ```{r}
-cluster_df <- as_tibble(cluster_pts) |> 
+pts_extracted_df <- as_tibble(pts_extracted_filtered) |> 
+    # unite(dplyr::starts_with("X"), sep = "", col = "CHM") |> 
+    # mutate(CHM = str_remove_all(CHM, "[A-Z]"),
+    #        CHM = as.numeric(CHM)) |> 
     dplyr::mutate(across(where(is.character), as.factor),
-                  ID = paste0(MOD_CLASS, row_number()),
-                  twi = case_when(is.infinite(twi) ~ 11.8,
-                                  is.nan(twi) ~ 0,
-                                  .default = twi)) |> 
-    dplyr::select(MOD_CLASS, COARSE_CLASS, ID, everything(), -geom)
+                  twi = case_when(is.infinite(twi) ~ NA,
+                                  # is.nan(twi) ~ 0,
+                                  .default = twi)
+                  ) |> 
+    drop_na() |> 
+    dplyr::select(MOD_CLASS, COARSE_CLASS, ID, everything(), -geom) 
 
-cluster_df
+names(pts_extracted_df)
+nrow(pts_extracted_df)
+
+
+pts_extracted_df |> group_by(MOD_CLASS) |> reframe(mean = mean(CHM),
+                                                   n = n())
 ```
 
 ### Data exploration
 
 ```{r}
-cluster_df_pca <- cluster_df |> 
-    #dplyr::select(-MOD_CLASS, -ID) |>
-    filter(if_all(is.numeric, is.finite))
+cluster_df_pca <- pts_extracted_df |> 
+    # filter(MOD_CLASS != "UPL") |> 
+    # dplyr::select(where(is.numeric)) |>
+    filter(if_all(is.numeric, is.finite)) 
 
-pc <- prcomp(cluster_df_pca |> select(-MOD_CLASS, -ID, -COARSE_CLASS,
-                                      -starts_with("aspect")),
+pc <- prcomp(cluster_df_pca |> select(where(is.numeric)),
              center = TRUE,
             scale. = TRUE)
 
-ggbiplot::ggbiplot(pc,
+ggbiplot::ggbiplot(pc, point.size = 0.1,
+                   alpha = 0.1,
               obs.scale = 1,
-              var.scale = 1,
-              groups = cluster_df_pca$MOD_CLASS,
+              var.scale = 1, var.axes = FALSE,
+              groups = cluster_df_pca$COARSE_CLASS,
               ellipse = TRUE,
-              #circle = TRUE,
-              ellipse.prob = 0.68)
-
+              #circle = TRUE,circle.prob = 0.68,
+              ellipse.prob = 0.90)
 ```
 
 ```{r}
-cluster_df |> 
+pts_extracted_df |> 
     mutate(across(where(is.numeric), ~ scale(.x))) |> 
     group_by(MOD_CLASS) |> 
     pivot_longer(c(slope_500m, slope_5m), names_to = "metric", values_to = "value") |> 
@@ -131,15 +209,15 @@ cluster_df |>
     geom_violin(aes(y = value, fill = metric)) +
     theme_param
 
-cluster_df |> 
+pts_extracted_df |> 
     mutate(across(where(is.numeric), ~ scale(.x))) |> 
     group_by(MOD_CLASS) |> 
-    pivot_longer(c(profc_500m, profc_5m), names_to = "metric", values_to = "value") |> 
+    pivot_longer(c(CHM), names_to = "metric", values_to = "value") |> 
     ggplot(aes(x = MOD_CLASS)) +
     geom_violin(aes(y = value, fill = metric)) +
     theme_param
 
-cluster_df |> 
+pts_extracted_df |> 
     mutate(across(where(is.numeric), ~ scale(.x))) |> 
     group_by(MOD_CLASS) |> 
     pivot_longer(c(twi), names_to = "metric", values_to = "value") |> 
@@ -147,7 +225,16 @@ cluster_df |>
     geom_violin(aes(y = value, fill = metric), draw_quantiles = 0.5) +
     theme_param
 
-cluster_df |> 
+pts_extracted_df |> 
+    mutate(across(where(is.numeric), ~ scale(.x))) |> 
+    group_by(MOD_CLASS) |> 
+    pivot_longer(c(ndwi, ndvi), names_to = "metric", values_to = "value") |> 
+    ggplot(aes(x = MOD_CLASS)) +
+    geom_violin(aes(y = (value), fill = metric), draw_quantiles = 0.5) +
+    #geom_jitter(aes(y = (value)), alpha = 0.05, width = 0.1) +
+    theme_param
+
+pts_extracted_df |> 
     mutate(across(where(is.numeric), ~ scale(.x))) |> 
     group_by(MOD_CLASS) |> 
     pivot_longer(c(r, nir), names_to = "metric", values_to = "value") |> 
@@ -163,14 +250,18 @@ Training/Testing split
 ```{r}
 set.seed(11)
 
-data_split <- initial_split(cluster_df, prop = 3/4)
+data_split <- initial_split(pts_extracted_df, prop = 3/4)
 
 # Create data frames for the two sets:
-train_data <- training(data_split)
+train_data <- training(data_split) |> 
+    filter(!(MOD_CLASS == "OWW" & CHM > 1)) |>
+    filter(!(MOD_CLASS == "EMW" & CHM > 4)) |> 
+    filter(!(MOD_CLASS == "SSW" & CHM > 6)) #|> 
+    # filter(!(MOD_CLASS == "FSW" & CHM < 3))
 test_data  <- testing(data_split)
 
-readr::write_csv(train_data, here("Data/Dataframes/Cluster_208_training_data.csv"))
-readr::write_csv(test_data, here("Data/Dataframes/Cluster_208_test_data.csv"))
+readr::write_csv(train_data, here("Data/Dataframes/TrainingPoints.csv"))
+readr::write_csv(test_data, here("Data/Dataframes/TestPoints.csv"))
 
 glimpse(train_data)
 ```
@@ -179,25 +270,33 @@ glimpse(train_data)
 ```{r}
 #| eval: false
 Wetland_Multi_Recipe <- 
-    recipe(MOD_CLASS ~ ., data = train_data |> select(-ID, -COARSE_CLASS)) 
+    recipe(MOD_CLASS ~ ., data = train_data |> select(-ID, -COARSE_CLASS, -huc, -ID)) 
 Wetland_Coarse_Recipe <- 
-    recipe(COARSE_CLASS ~ ., data = train_data |> select(-ID, -MOD_CLASS)) 
+    recipe(COARSE_CLASS ~ ., data = train_data |> select(-ID, -MOD_CLASS, -huc, -ID)) 
 
 
 RFM <- 
     rand_forest(
-        mtry = ncol(train_data|> select(-ID))-2,
-        trees = 500,
-        min_n = 5
+        mtry = ncol(train_data|> select(-ID))-3,
+        trees = 300,
+        min_n = 3
     ) |> 
     set_engine(
         "ranger", 
-        num.threads = 24,
+        num.threads = 36,
         seed = 11,
         importance = "permutation"
         #probability = TRUE
         ) |> 
     set_mode("classification") 
+# BT <- 
+#     boost_tree(mode = "classification", 
+#                mtry = ncol(train_data|> select(-ID))-2,
+#                trees = 500,
+#                min_n = 3,
+#                learn_rate = 0.1) |> 
+#     set_engine("xgboost",
+#                eval_metric = "rmse")
 
 RFM_multi_workflow <- 
     workflow() |> 
@@ -207,6 +306,10 @@ RFM_coarse_workflow <-
     workflow() |> 
     add_model(RFM) |> 
     add_recipe(Wetland_Coarse_Recipe)
+# BT_multi_workflow <- 
+#     workflow() |> 
+#     add_model(BT) |> 
+#     add_recipe(Wetland_Multi_Recipe)
 
 system.time({RFM_multi_fit <- 
     RFM_multi_workflow |>
@@ -214,6 +317,9 @@ system.time({RFM_multi_fit <-
 system.time({RFM_coarse_fit <- 
     RFM_coarse_workflow |>
     fit(train_data|> select(-ID, -MOD_CLASS))})
+# system.time({BT_multi_fit <- 
+#     BT_multi_workflow |>
+#     fit(train_data |> select(-ID, -COARSE_CLASS, -huc))})
 
 saveRDS(bundle(RFM_multi_fit), here("Data/Models/Cluster_208_MultiClass_RFM.rds"))
 saveRDS(bundle(RFM_coarse_fit), here("Data/Models/Cluster_208_CoarseClass_RFM.rds"))
@@ -240,10 +346,16 @@ Wetland_MultiTest_Fit <-
 Wetland_CoarseTest_Fit <- 
     augment(RFM_coarse_fit, test_data)
 
-cluster_test_pts <- cluster_pts |> 
-    dplyr::mutate(ID = paste0(MOD_CLASS, row_number())) |> 
-    right_join(y = Wetland_CoarseTest_Fit |> select(ID, .pred_class, .pred_WET), by = join_by(ID))
-st_write(cluster_test_pts, here("Data/Validation_Test_Data/Cluster_208_CoarseClass_Test_Data.gpkg"), append = FALSE)
+cluster_test_pts <- Wetland_MultiTest_Fit |> 
+    select(ID, dplyr::starts_with(".pred")) |> 
+    # dplyr::mutate(ID = paste0(MOD_CLASS, row_number())) |> 
+    left_join(y = pts_extracted_filtered, 
+               by = join_by(ID)) |> 
+    select(ID, dplyr::starts_with(".pred"), MOD_CLASS, COARSE_CLASS, geom) |> 
+    mutate(AGREE = case_when(.pred_class == MOD_CLASS ~ "YES",
+                             .default = "NO")) |> 
+    st_as_sf()
+st_write(cluster_test_pts, here("Data/Validation_Test_Data/CoarseClass_Test_Data.gpkg"), append = FALSE)
 ```
 
 
@@ -259,6 +371,36 @@ cmCoarse |> summary()
 ```
 
 ```{r}
+RFM_test_pts <- cluster_test_pts |> 
+    as_tibble() |> 
+    # filter(MOD_CLASS != "UPL") |> 
+    # dplyr::select(where(is.numeric)) |>
+    filter(if_all(is.numeric)) 
 
+RFM_test_pc <- prcomp(RFM_test_pts |> select(where(is.numeric)),
+             center = TRUE,
+            scale. = TRUE)
+
+ggbiplot::ggbiplot(RFM_test_pc, point.size = 0.1,
+                   alpha = 0.1,
+              obs.scale = 1,
+              var.scale = 1, var.axes = FALSE,
+              groups = RFM_test_pts$AGREE,
+              ellipse = TRUE,
+              #circle = TRUE,circle.prob = 0.68,
+              ellipse.prob = 0.75)
+```
+
+
+```{r}
+cluster_test_pts |> 
+    # filter(AGREE == "NO") |> 
+    group_by(MOD_CLASS) |> 
+    reframe(n = n()) 
+
+cluster_test_pts |> 
+    filter(AGREE == "NO") |> 
+    group_by(MOD_CLASS) |> 
+    reframe(n = n()) 
 ```
 

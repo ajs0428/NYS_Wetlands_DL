@@ -6,8 +6,8 @@
 ###################
 
 args = c("Data/NYS_DEM_Indexes/",
-         "Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
-         50,
+         "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
+         120,
          "Data/DEMs/",
          "Data/TerrainProcessed/HUC_DEMs"
          )
@@ -32,14 +32,12 @@ library(future.apply)
 library(stringr)
 suppressPackageStartupMessages(library(tidyterra))
 
-terraOptions(memfrac = 0.10,
-             memmax = 8,
-             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
 
 ###############################################################################################
 
 # A shapefile list of all the DEM indexes (vector tiles of the actual DEM locations)
-dem_ind_list <- (lapply(list.files(args[1], pattern = ".shp$",full.names = TRUE), sf::st_read))
+dem_ind_list <- (lapply(list.files(args[1], pattern = ".gpkg$",full.names = TRUE), sf::st_read))
+#dem_ind_list <- st_read("Data/NYS_DEM_Indexes/NY_DEM_Indexes_cmb.gpkg")
 
 transform_sf <- function(stl){
     new_stl <- list()
@@ -55,6 +53,10 @@ transform_sf <- function(stl){
 
 dem_ind_trs <- transform_sf(dem_ind_list)
 
+# dem_ind_trs <- st_transform(dem_ind_list, st_crs("EPSG:6347"))
+# print(paste0("The number of DEM indices: ", nrow(dem_ind_trs)))
+
+
 # This should just output a summary for the collections
 for(i in dem_ind_trs) {print(st_crs(i)$input)}
 
@@ -65,7 +67,7 @@ dems_file_list <- list.files(args[4],
                              full.names = TRUE, 
                              recursive = TRUE, 
                              include.dirs = TRUE)
-print(paste0("this is the total list of DEM indexes: ", length(dems_file_list)[[1]]))
+print(paste0("this is the total list of DEM raster files: ", length(dems_file_list)[[1]]))
 ###############################################################################################
 
 # This takes the vector file of all HUC watersheds, projects them, and filters for the cluster 
@@ -78,9 +80,21 @@ cluster_target <- sf::st_read(args[2]) |>
 cluster_extract <- function(cluster, dem_indexes){
     files_to_extract <- list()
     for(i in seq_along(dem_indexes)){
-        dems_in <- dem_indexes[[i]] |> st_filter(y = cluster, .predicate = st_intersects)
+        # dems_in <- dem_indexes[[i]] |> st_filter(y = cluster, .predicate = st_intersects)
+        dems_in <- tryCatch(
+            dem_indexes[[i]] |> st_filter(y = cluster, .predicate = st_intersects),
+            error = function(e) {
+                # Return an empty sf object with 0 rows
+                st_sf(geometry = st_sfc(crs = st_crs(dem_indexes[[i]])))
+            }
+        )
         if(nrow(dems_in) > 1){
-            Fnames <- dems_in["FILENAME"][[1]]
+            Fnames <- tryCatch(
+                dems_in["FILENAME"][[1]],
+                error = function(e){
+                    basename(dems_in["location"][[1]])
+                }
+            )
             files_to_extract <- append(files_to_extract, Fnames)
         } else {
             next
@@ -96,7 +110,7 @@ cluster_dem_indices <- cluster_extract(cluster_target, dem_ind_trs)
 
 f_list <- list() # list of lists of filenames 
 v_list <- list() # list for HUC vectors
-for(i in seq_along(cluster_target$huc12)){
+for(i in seq_along(cluster_target$huc12)[3]){
     dem_to_extr <- cluster_extract(cluster = cluster_target[i, ], dem_indexes = dem_ind_trs)
     f_list[[i]] <- dems_file_list[basename(dems_file_list) %in% dem_to_extr]
     v_list[[i]] <- terra::vect(cluster_target[i,]) |>
@@ -104,29 +118,38 @@ for(i in seq_along(cluster_target$huc12)){
 }
 
 huc_extract <- function(list_of_files, list_of_vectors){
-    print(length(list_of_files))
-    huc_name <- (terra::unwrap(list_of_vectors)[1,"huc12", drop = T][[1]])
-    print(paste0(args[5], "/cluster_", args[3], "_huc_", huc_name,".tif"))
+    files <- Filter(Negate(is.null), list_of_files)
+    vectors <- Filter(Negate(is.null), list_of_vectors)
+    print(length(files))
+    huc_name <- (terra::unwrap(vectors)[1,"huc12", drop = T][[1]])
     
-    subfolders_names <- basename(dirname(list_of_files))
-    file_lists <- split(list_of_files, subfolders_names)
+    fn <- (paste0(args[5], "/cluster_", args[3], "_huc_", huc_name,".tif"))
+    print(fn)
+    
+    if(!file.exists(fn)){
+    print(paste0("Processing new file: ", fn))
+    subfolders_names <- basename(dirname(files))
+    file_lists <- split(files, subfolders_names)
     lvrt <- lapply(file_lists, function(lists){
-        terra::vrt(lists) |> 
+        terra::sprc(lists) |> 
+            terra::merge() |> 
             terra::project("EPSG:6347", res = 1)
     })
     
     tryCatch(
-        {terra::merge(sprc(lvrt)) |>
-        terra::mask(mask = terra::unwrap(list_of_vectors), updatevalue = NA, touches = TRUE,
-                    filename = paste0(args[5], "/cluster_", args[3], "_huc_", huc_name,".tif"),
+        {lvrt |>
+        terra::mask(mask = terra::unwrap(vectors), updatevalue = NA, touches = TRUE,
+                    filename = fn,
                     overwrite = TRUE)
-            }, 
+            },
         error = function(msg){
             message(paste0("Error at: ", huc_name))
                         return(NA)
             }
         )
-
+    } else {
+        print(paste0("File already exists: ", fn))
+    }
 }
 
 mapply(huc_extract, f_list, v_list)

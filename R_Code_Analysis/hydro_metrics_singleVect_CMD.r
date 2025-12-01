@@ -7,7 +7,7 @@
 ###################
 
 args = c("Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
-         22,
+         67,
          "Data/TerrainProcessed/HUC_DEMs/",
          "Data/TerrainProcessed/HUC_Hydro/"
          )
@@ -33,10 +33,8 @@ library(future.apply)
 library(stringr)
 suppressPackageStartupMessages(library(tidyterra))
 
-terraOptions(memfrac = 0.25,# Use only 10% of memory for program
-             memmax = 64, #max memory is 8Gb
-             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
-
+terraOptions(tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
+print(tempdir())
 
 ###############################################################################################
 
@@ -63,6 +61,7 @@ non_wbt_hucs <- str_extract(non_wbt_list, "(?<=huc_)\\d+")
 
 #HUCs that haven't been hydroconditioned
 missing_wbt_hucs <- setdiff(non_wbt_hucs, wbt_hucs)
+print(missing_wbt_hucs)
 
 hydro_condition_func <- function(dem){
     print("Hydro-Conditioning")
@@ -74,10 +73,11 @@ hydro_condition_func <- function(dem){
     )
 }
 
-if(length(wbt_list) < length(non_wbt_list)){
-    print(paste0("Requires Hydro-Conditioning: ", length(non_wbt_list)))
+if(length(missing_wbt_hucs) != 0){
+    print(paste0("Requires Hydro-Conditioning: ", length(missing_wbt_hucs)))
     cond_list <- non_wbt_list[!(non_wbt_hucs %in% wbt_hucs)]
-    future_lapply(cond_list, hydro_condition_func, future.seed = TRUE)
+    print(cond_list)
+    lapply(cond_list, hydro_condition_func)
 } else {
     print(paste0("Already Hydro-Conditioned Number of Hydro-DEMs: ", length(wbt_list)))
 }
@@ -90,34 +90,53 @@ list_of_huc_hydro_dems <- list.files(args[3],
                                      full.names = TRUE, 
                                      glob2rx(pattern = paste0("^cluster_", args[2], "_", "*\\*wbt.tif$"))
                                      )
-
+list_of_huc_hydro_dems
 hydro_func <- function(dem){
                 
     cluster_huc_name <- stringr::str_remove(basename(dem), ".tif")
     #dems_target <- dems_list[[i]]
     
-    fs <- dem |>
-        terra::rast() |>
-        terra::terrain(v = c("flowdir", "slope"), unit = "radians")
-    fa <- terra::flowAccumulation(fs["flowdir"])
-
-    twi <- log(fa/tan(fs["slope"]))
-
-    writeRaster(c(fa, twi), paste0(args[4], cluster_huc_name, "_TWI_Facc.tif"),
-                overwrite = TRUE, names = c("flowacc", "twi"))
+    fa_twi_name <- paste0(args[4], cluster_huc_name, "_TWI_Facc.tif")
+    
+    if(!file.exists(fa_twi_name)){
+        fs <- dem |>
+            terra::rast() |>
+            terra::project("EPSG:6347") |> 
+            terra::terrain(v = c("flowdir", "slope"), unit = "radians")
+        fa <- terra::flowAccumulation(fs["flowdir"])
+        
+        twi <- log(fa/tan(fs["slope"]))
+        
+        writeRaster(c(fa, twi), fa_twi_name,
+                    overwrite = TRUE, names = c("flowacc", "twi"))
+    } else {
+        print(paste0("TWI and Flow Accum. already made: ", cluster_huc_name))
+    }
+    
 
 }
+
+# hydro_func("Data/TerrainProcessed/HUC_DEMs/cluster_12_huc_043001081604_wbt.tif")
+
 # 
-# corenum <-  4
-# options(future.globals.maxSize= 16 * 1e9)
-# plan(multisession, workers = corenum) 
-# 
+if(future::availableCores() > 16){
+    corenum <-  4
+} else {
+    corenum <-  (future::availableCores())
+}
+options(future.globals.maxSize= 64 * 1e9)
+# plan(multisession, workers = corenum)
+plan(future.callr::callr, workers = corenum)
+
 # print(corenum)
 # print(options()$future.globals.maxSize)
 # 
-# future_lapply(list_of_huc_hydro_dems, hydro_func, future.seed = TRUE)
+future_lapply(list_of_huc_hydro_dems, hydro_func, future.seed = TRUE)
 
-lapply(list_of_huc_hydro_dems, hydro_func)
+
+################################################################################################
+# non-parallel
+# lapply(list_of_huc_hydro_dems, hydro_func)
 
 # r <- rast(list_of_huc_hydro_dems[[1]])
 # s <- terra::terrain(r, v = "slope")

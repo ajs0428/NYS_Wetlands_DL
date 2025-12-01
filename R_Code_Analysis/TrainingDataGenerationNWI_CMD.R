@@ -2,7 +2,7 @@
 
 args <- c(
     "Data/NWI/NY_NWI_6347.gpkg",
-    "Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
+    "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
     "cluster"
 )
 
@@ -13,6 +13,7 @@ cat("these are the arguments: \n",
     "2) path to areas of interest (Ecoregions or Other):", args[2], "\n",
     "3) The data field name of the areas to subset:", args[3], "\n")
 
+###############################################################################################
 # test if there is at least one argument: if not, return an error
 if (length(args)<3) {
     stop("At least three arguments must be supplied (input file).n", call.=FALSE)
@@ -28,11 +29,12 @@ library(future.apply)
 
 set.seed(11)
 
+###############################################################################################
 # filter the NWI down to the targeted wetlands
 ny_nwi <- st_read(args[1], quiet = TRUE) 
 if(st_crs(ny_nwi) != st_crs("EPSG:6347")){
     ny_nwi <- st_transform(ny_nwi, "EPSG:6347")
-    st_write(ny_nwi, paste0("Data/NWI/",toupper(deparse(substitute(ny_nwi))), "_6347.gpkg"))
+    st_write(ny_nwi, paste0("Data/NWI/",toupper(deparse(substitute(ny_nwi))), "_6347.gpkg"), delete_layer = TRUE)
 } else {
     print("No reprojection to EPSG:6347")
 }
@@ -44,6 +46,7 @@ ny_areas <- st_read(args[2], quiet = TRUE) |> st_transform("EPSG:6347")
 ID <- args[3]
 area_ids <- ny_areas[, ID][[1]] |> na.omit() |> unique()
 
+###############################################################################################
 # The function should take a arguments to subset ecoregions/study areas and produce NWI sample points within them
     #### Separate surface water to be used to filter out unwanted poins 
     #### Generate training data from wetlands but filter upland points by full NWI
@@ -86,7 +89,7 @@ training_pts_func <- function(ids, areas = ny_areas, nwi = ny_nwi) {
         dplyr::mutate(geom = case_when(Shape_Area > 3000 ~ st_buffer(geom, -10), # a negative buffer should remove points on the lines
                                        .default = geom)) %>% # but keep area > 3000 to still sample small wetlands
         filter(!st_is_empty(.)) |>
-        st_sample(size = sum(numEMW, numFSW, numSSW,numOWW, na.rm = TRUE)*10) |>
+        st_sample(size = sum(numEMW, numFSW, numSSW,numOWW, na.rm = TRUE)*1.5) |> # The number of points for wetlands is equal to the number of wetlands x2
         st_sf() |>
         st_set_geometry("geom") |>
         st_join(nwi_area_filter[,"WetClass"]) |>
@@ -101,8 +104,8 @@ training_pts_func <- function(ids, areas = ny_areas, nwi = ny_nwi) {
 
     # Upland points are defined as outside the NWI polygons
         # Might have some commission error/included wetlands, so there are many of these
-        # Setting to 5x the number of wetland points
-    pts <- st_sample((target), size = sum(numEMW, numFSW, numSSW, na.rm = TRUE)*100)
+        
+    pts <- st_sample((target), size = sum(numEMW, numFSW, numSSW, na.rm = TRUE)*10) # Setting number of upland points to 10x the number of wetland points
       # reverse mask the random number of points outside NWI polygons
     nwi_pts_upl <- pts[lengths(st_intersects(pts, st_geometry(nwi_target) |> 
                                                  st_buffer(100), sparse = TRUE)) == 0,] |>
@@ -120,10 +123,12 @@ training_pts_func <- function(ids, areas = ny_areas, nwi = ny_nwi) {
     numEMW_pts <- nrow(nwi_pts_all[nwi_pts_all$MOD_CLASS == "EMW", ])
     numSSW_pts <- nrow(nwi_pts_all[nwi_pts_all$MOD_CLASS == "SSW", ])
     numOWW_pts <- nrow(nwi_pts_all[nwi_pts_all$MOD_CLASS == "OWW", ])
+    numUPL_pts <- nrow(nwi_pts_all[nwi_pts_all$MOD_CLASS == "UPL", ])
     print(paste0("numFSW_pts:", numFSW_pts))
     print(paste0("numEMW_pts:", numEMW_pts))
     print(paste0("numSSW_pts:", numSSW_pts))
     print(paste0("numOWW_pts:", numOWW_pts))
+    print(paste0("numUPL_pts:", numUPL_pts))
     # If there are fewer than half of emergent and scrub/shrub vs. forested then supplement the points by sampling
         # additional emergent polygons
     if(numEMW_pts < 0.5*numFSW_pts & numSSW_pts < 0.5*numFSW_pts ){
@@ -186,17 +191,22 @@ training_pts_func <- function(ids, areas = ny_areas, nwi = ny_nwi) {
                                          target_name,
                                          #"_",
                                          #ids,
-                                         "_training_pts.gpkg"), append = FALSE)
+                                         "_training_pts.gpkg"), append = FALSE, delete_layer = TRUE)
 }
 
-corenum <-  16
-stopifnot("Too many cores specified" = corenum <= future::availableCores()[[1]])
-options(future.globals.maxSize= 1.0 * 1e9)
-plan(multisession, workers = corenum) # number of cores is decided by availableCores() and should work with Slurm scheduler
+###############################################################################################
+if(future::availableCores() > 16){
+    corenum <-  16
+} else {
+    corenum <-  (future::availableCores())
+}
+options(future.globals.maxSize= 16 * 1e9)
+# plan(multisession, workers = corenum)
+plan(future.callr::callr, workers = corenum)
+
 # this should probably be an argument for bash
 system.time({future_lapply(area_ids, training_pts_func, future.seed=TRUE)})
 
 
-## Single cluster
-# lapply(area_ids[38], training_pts_func)
-
+# Single cluster
+# lapply(area_ids[14], training_pts_func)
