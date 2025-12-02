@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
-args = c("Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
-         11,
+args = c("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
+         67,
          "Data/TerrainProcessed/HUC_DEMs/",
          "slp",
          "Data/TerrainProcessed/HUC_TerrainMetrics/"
@@ -23,15 +23,12 @@ library(MultiscaleDTM)
 library(foreach)
 library(future)
 library(future.apply)
+library(future.callr)
 library(stringr)
 library(doParallel)
 suppressPackageStartupMessages(library(tidyterra))
 
-terraOptions(memfrac = 0.20,# Use only 10% of memory for program
-             memmax = 64, #max memory is 8Gb
-             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
-
-
+terraOptions(tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp") 
 ###############################################################################################
 
 # This takes the vector file of all HUC watersheds, projects them, and filters for the cluster 
@@ -62,6 +59,7 @@ terrain_function <- function(dems_target, metric = args[4]){
                 terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
                                filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_5m.tif"),
                                overwrite = TRUE, names = c("slope_5m", "aspect_5m", "TPI_5m", "TRI_5m"))
+            gc(verbose = FALSE)
         } else {print(paste0(args[4], " 5m Metric files accounted for"))}
         if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"))){
             dems_target |> 
@@ -71,6 +69,7 @@ terrain_function <- function(dems_target, metric = args[4]){
                 terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
                                filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"),
                                overwrite = TRUE, names = c("slope_100m", "aspect_100m", "TPI_100m", "TRI_100m"))
+            gc(verbose = FALSE)
         }else {print(paste0(args[4], " 100m Metric files accounted for"))}
         if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_500m.tif"))){
             dems_target |>
@@ -80,6 +79,7 @@ terrain_function <- function(dems_target, metric = args[4]){
                 terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
                                filename = paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_500m.tif"),
                                overwrite = TRUE, names = c("slope_500m", "aspect_500m", "TPI_500m", "TRI_500m"))
+            gc(verbose = FALSE)
         } else {print(paste0(args[4], " 500m Metric files accounted for"))}
         
     } else if (stringr::str_detect(metric, "dmv")){
@@ -94,6 +94,7 @@ terrain_function <- function(dems_target, metric = args[4]){
                 # terra::wrap()
                 writeRaster(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_5m.tif"),
                             overwrite = TRUE, names = c("dmv_5m"))
+            gc(verbose = FALSE)
         } else {print(paste0(args[4], " 5m Metric files accounted for"))}
         if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"))){
             dems_target |> 
@@ -105,6 +106,7 @@ terrain_function <- function(dems_target, metric = args[4]){
                 # terra::wrap()
                 writeRaster(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"),
                             overwrite = TRUE, names = c("dmv_100m"))
+            gc(verbose = FALSE)
         }else {print(paste0(args[4], " 100m Metric files accounted for"))}
         if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_500m.tif"))){
             dems_target |> 
@@ -116,6 +118,7 @@ terrain_function <- function(dems_target, metric = args[4]){
                 # terra::wrap()
                 writeRaster(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_500m.tif"),
                             overwrite = TRUE, names = c("dmv_500m"))
+            gc(verbose = FALSE)
         }else {print(paste0(args[4], " 500m Metric files accounted for"))}
         
     } else if(stringr::str_detect(metric, "curv")){
@@ -129,6 +132,7 @@ terrain_function <- function(dems_target, metric = args[4]){
 
                 writeRaster(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_5m.tif"),
                             overwrite = TRUE, names = c("meanc_5m", "planc_5m", "profc_5m"))
+            gc(verbose = FALSE)
         } else {print(paste0(args[4], " 5m Metric files accounted for"))}
         if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"))){
             dems_target |>
@@ -139,6 +143,7 @@ terrain_function <- function(dems_target, metric = args[4]){
 
             writeRaster(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif"),
                         overwrite = TRUE, names = c("meanc_100m", "planc_100m", "profc_100m"))
+            gc(verbose = FALSE)
         }else {print(paste0(args[4], " 100m Metric files accounted for"))}
         if(!file.exists(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_500m.tif"))){
             dems_target |>
@@ -149,6 +154,7 @@ terrain_function <- function(dems_target, metric = args[4]){
 
             writeRaster(paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_500m.tif"),
                         overwrite = TRUE, names = c("meanc_500m", "planc_500m", "profc_500m"))
+            gc(verbose = FALSE)
         } else {print(paste0(args[4], " 500m Metric files accounted for"))}
     } else {
         print("No terrain metric specified or not identified") 
@@ -158,17 +164,21 @@ terrain_function <- function(dems_target, metric = args[4]){
         return(NA)
     }
     )
+    gc(verbose = FALSE)
+    tmpFiles(remove = TRUE)
 }
 
-# corenum <-  future::availableCores()
-# options(future.globals.maxSize= 32.0 * 1e9)
+corenum <-  future::availableCores()
+options(future.globals.maxSize= 128.0 * 1e9)
 # plan(multisession, workers = corenum)
-# 
+plan(future.callr::callr)
+
 # print(corenum)
 # print(options()$future.globals.maxSize)
-
-lapply(list_of_huc_dems, terrain_function)
-# future_lapply(list_of_huc_dems, terrain_function, future.seed = TRUE)
+# 
+# lapply(list_of_huc_dems, terrain_function)
+future_lapply(list_of_huc_dems, terrain_function, future.seed = TRUE,
+              future.scheduling = 1)
 
 # lapply(list_of_huc_dems, terrain_function, cluster_target)
 

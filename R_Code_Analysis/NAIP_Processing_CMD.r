@@ -1,15 +1,16 @@
 #!/usr/bin/env Rscript
 
 args = c(
-    "Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
-    11,
-    "Data/NAIP/NAIP_Processed/"
+    "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
+    120,
+    "Data/NAIP/HUC_NAIP_Processed/"
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
 (cat("these are the arguments: \n", 
-    "- Path to a file unprocessed NAIP files:", args[1], "\n",
-    "- Cluster:", args[2], "\n"
+    "- Path to cluster:", args[1], "\n",
+    "- Cluster:", args[2], "\n",
+    "- Path to NAIP Processed:", args[3], "\n"
 ))
 
 ###############################################################################################
@@ -18,10 +19,14 @@ library(terra)
 library(sf)
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(tidyterra))
+library(foreach)
+library(future)
+library(future.apply)
+library(parallel)
+library(doParallel)
 
-terraOptions(memfrac = 0.10,# Use only 10% of memory for program
-             memmax = 64, #max memory is 8Gb
-             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
+terraOptions(tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
+print(tempdir())
 ###############################################################################################
 
 #Index of all NAIP tiles
@@ -43,42 +48,76 @@ naip_int_cluster <- st_filter(naip_index, cluster_target, .predicate = st_inters
 
 # This should take a list of all the NAIP rasters, merge them together in a HUC,
 # crop to HUC boundaris, calculate indices, export and write to file
-naip_processing_func <- function(naip_vector_tiles = naip_int_cluster){
-    vi2 <- function(r, g, nir) {
-        return(
-            c(((nir - r) / (nir + r)), ((g-nir)/(g+nir)))
-            )
-    }
-    target_crs <- cluster_crs
 
-    
-    for(i in seq_along(cluster_target$huc12)){
-        
-        target_file <- paste0(args[3], "cluster_", args[2], "_huc_", cluster_target$huc12[[i]], "_NAIP_metrics.tif")
-        print(target_file)
-        if(!file.exists(target_file)){
-            print("no NAIP processed yet")
-            
-            naip_tiles_huc <- st_filter(naip_vector_tiles, cluster_target[1,])
-
-            #re-paste the file path to rasters
-            naip_int_cluster_rast_locs <- paste0("Data/NAIP/noaa_digital_coast_2017/", naip_tiles_huc$location)
-            print(naip_int_cluster_rast_locs)
-            n <- terra::vrt(naip_int_cluster_rast_locs) |>
-                terra::project(target_crs, res = 1)
-            np <- vi2(n[[1]], n[[2]], n[[4]])
-            nall <- c(n, np)
-            set.names(nall, c("r", "g", "b", "nir", "ndvi", "ndwi"))
-            writeRaster(nall, 
-                        filename = target_file,
-                        overwrite = TRUE)
-        } else {
-            print("NAIP already processed")
-        }
-        
-    }
-    #return(naip_processed)
+vi2 <- function(r, g, nir) {
+    return(
+        c(((nir - r) / (nir + r)), ((g-nir)/(g+nir)))
+        )
 }
 
-system.time({naip_processing_func()})
+process_huc <- function(i, cluster_target, naip_int_cluster, args) {
+    target_file <- paste0(args[3], "cluster_", args[2], "_huc_", cluster_target$huc12[[i]], "_NAIP_metrics.tif")
+    dem_filename <- paste0("Data/TerrainProcessed/HUC_DEMs", "/cluster_", args[2], "_huc_", cluster_target$huc12[[i]], ".tif")
+    
+    # uncomment the if statement with file.exists to ignore files already created
+   # if(!file.exists(target_file)){
+    print("no NAIP processed yet")
+    
+    naip_tiles_huc <- st_filter(naip_int_cluster, cluster_target[i,])
+    # print(naip_tiles_huc)
+    #re-paste the file path to rasters
+    naip_int_cluster_rast_locs <- paste0("Data/NAIP/noaa_digital_coast_2017/", naip_tiles_huc$location)
+    print(naip_int_cluster_rast_locs)
+    n <- terra::sprc(naip_int_cluster_rast_locs) |>
+        terra::mosaic(fun = "max") |>
+        terra::project("EPSG:6347", res = 1) |>
+        terra::crop(cluster_target[i,] |> vect(), mask = TRUE) |>
+        resample(y = rast(dem_filename))
+    np <- vi2(n[[1]], n[[2]], n[[4]])
+    nall <- c(n, np)
+    set.names(nall, c("r", "g", "b", "nir", "ndvi", "ndwi"))
+    
+    writeRaster(nall,
+                filename = target_file,
+                overwrite = TRUE)
+    rm(n)
+    rm(np)
+    rm(nall)
+    gc()
+    # } else {
+    #     print("NAIP already processed")
+    # }
+    
+    return(NULL)  # or return something meaningful if needed
+}
+
+if(future::availableCores() > 16){
+    corenum <-  4
+} else {
+    corenum <-  (future::availableCores())
+}
+options(future.globals.maxSize= 64 * 1e9)
+# plan(multisession, workers = corenum)
+plan(future.callr::callr, workers = corenum)
+
+# Run with future_lapply
+results <- future_lapply(
+    seq_along(cluster_target$huc12),
+    FUN = process_huc,
+    cluster_target = cluster_target,
+    naip_int_cluster = naip_int_cluster,
+    args = args,
+    # future.packages = c("terra", "sf", "tidyverse", "tidyterra"),
+    future.seed = TRUE
+)
+
+# Run with non-parallel
+# results <- lapply(
+#     seq_along(cluster_target$huc12)[1],
+#     FUN = process_huc,
+#     cluster_target = cluster_target,
+#     naip_int_cluster = naip_int_cluster,
+#     args = args
+# )
+
 

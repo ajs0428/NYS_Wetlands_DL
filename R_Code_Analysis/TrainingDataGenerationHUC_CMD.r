@@ -1,4 +1,11 @@
 #!/usr/bin/env Rscript
+
+args = c(
+        "Data/NWI/NY_Wetlands_6350_filterTrain.gpkg",
+        "Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
+        "cluster"
+        )
+
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
 # test if there is at least one argument: if not, return an error
@@ -35,7 +42,7 @@ training_pts_func <- function(huc_num, nwi = ny_nwi, hucs = ny_hucs) {
     nwi_huc_filter <- nwi_huc_crop |> 
         dplyr::filter(WETLAND_TY == "Freshwater Forested/Shrub Wetland" | WETLAND_TY == "Freshwater Emergent Wetland")
     
-    pts <- terra::spatSample(target_huc, method = "random", size = 1E4)
+    pts <- terra::spatSample(target_huc, method = "random", size = 1E3)
     
     nwi_pts_wet <- terra::mask(pts, nwi_huc_filter, inverse = FALSE) |> 
         terra::intersect(x = nwi_huc_filter |> terra::buffer(-1)) |> 

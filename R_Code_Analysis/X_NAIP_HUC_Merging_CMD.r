@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
 
 args = c(
-    "Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
+    "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
     208,
-    "Data/NAIP/NAIP_Processed/",
+    "Data/NAIP/HUC_NAIP_Processed/",
     "Data/NAIP/NAIP_HUC_Merged/"
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
@@ -24,9 +24,7 @@ library(foreach)
 library(doParallel)
 suppressPackageStartupMessages(library(tidyterra))
 
-terraOptions(memfrac = 0.10,# Use only 10% of memory for program
-             memmax = 64, #max memory is 8Gb
-             tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
+terraOptions(tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
 ###############################################################################################
 
 cluster_target <- sf::st_read(args[1]) |> 
@@ -55,10 +53,11 @@ naip_extract_merge <- function(raster_list, vector_list) {
 
     raster_extents <- lapply(raster_list, ext)
     vector_extents <- lapply(vector_list, ext)
+    filename <- paste0(args[4], "NAIP_Metrics_cluster_",args[2],"_HUC_", huc_name, ".tif")
     
     for(i in seq_along(vector_extents)){
         huc_name <- vector_list[[i]][["huc12"]][[1]]
-        if(!file.exists(paste0(args[4], "NAIP_Metrics_cluster_",args[2],"_HUC_", huc_name, ".tif"))){
+        if(!file.exists(filename)){
             print("New NAIP for HUC")
             overlap <- which(sapply(raster_extents, 
                                     function(re) {
@@ -69,7 +68,7 @@ naip_extract_merge <- function(raster_list, vector_list) {
                 terra::sprc() |>
                 terra::merge() |>
                 terra::crop(y = vector_list[[i]], mask = TRUE,
-                            filename = paste0(args[4], "NAIP_Metrics_cluster_",args[2],"_HUC_", huc_name, ".tif"))
+                            filename = filename)
             
         } else {
             print("NAIP Already Exists")
