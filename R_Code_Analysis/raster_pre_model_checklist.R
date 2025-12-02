@@ -8,7 +8,7 @@
 args = c(
     "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
     120,
-    "Data/NAIP/HUC_NAIP_Processed/"
+    "Data/TerrainProcessed/HUC_Hydro/"
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
@@ -133,7 +133,7 @@ check_layers_func <- function(i, cluster_target, rast_list, dem_list){
 }
 
 lists <- lapply(
-    seq_along(cluster_target$huc12)[3],
+    seq_along(cluster_target$huc12),
     check_layers_func, # function
     cluster_target = cluster_target,
     rast_list = rast_list,

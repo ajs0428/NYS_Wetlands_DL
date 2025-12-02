@@ -36,16 +36,19 @@ suppressPackageStartupMessages(library(tidyterra))
 ###############################################################################################
 
 # A shapefile list of all the DEM indexes (vector tiles of the actual DEM locations)
-dem_ind_list <- (lapply(list.files(args[1], pattern = ".gpkg$",full.names = TRUE), sf::st_read))
-#dem_ind_list <- st_read("Data/NYS_DEM_Indexes/NY_DEM_Indexes_cmb.gpkg")
+dem_ind_list <- (lapply(list.files(args[1], pattern = "^dem_1_meter.*\\.shp$|USGS_LakeOntarioHudsonRiverRegion2022",full.names = TRUE), sf::st_read, quiet = TRUE))
+
 
 transform_sf <- function(stl){
     new_stl <- list()
     for(i in seq_along(stl)){
+        stl_fix <- stl[[i]][st_is_valid(dem_ind_list[[1]]), ]
         if(crs(stl[[i]]) != st_crs("EPSG:6347")){
-            new_stl[[i]] <- st_transform(stl[[i]], st_crs("EPSG:6347"))
+            #stl_fix <- st_make_valid(stl[[i]])
+            new_stl[[i]] <- st_transform(stl_fix, st_crs("EPSG:6347")) 
         } else {
-            new_stl[[i]] <- stl[[i]]
+            #stl_fix <- st_make_valid(stl[[i]])
+            new_stl[[i]] <- stl_fix
         }
     }
     return(new_stl)
@@ -73,7 +76,7 @@ print(paste0("this is the total list of DEM raster files: ", length(dems_file_li
 # This takes the vector file of all HUC watersheds, projects them, and filters for the cluster 
     # of interest.
     # cluster_target is all the HUCs in a cluster
-cluster_target <- sf::st_read(args[2]) |> 
+cluster_target <- sf::st_read(args[2], quiet = TRUE) |> 
     sf::st_transform(st_crs("EPSG:6347")) |>
     dplyr::filter(cluster == args[3])
 
@@ -110,39 +113,41 @@ cluster_dem_indices <- cluster_extract(cluster_target, dem_ind_trs)
 
 f_list <- list() # list of lists of filenames 
 v_list <- list() # list for HUC vectors
-for(i in seq_along(cluster_target$huc12)[3]){
+for(i in seq_along(cluster_target$huc12)){
     dem_to_extr <- cluster_extract(cluster = cluster_target[i, ], dem_indexes = dem_ind_trs)
     f_list[[i]] <- dems_file_list[basename(dems_file_list) %in% dem_to_extr]
     v_list[[i]] <- terra::vect(cluster_target[i,]) |>
         terra::project(crs("EPSG:6347")) |> terra::wrap()
 }
 
-huc_extract <- function(list_of_files, list_of_vectors){
-    files <- Filter(Negate(is.null), list_of_files)
-    vectors <- Filter(Negate(is.null), list_of_vectors)
-    print(length(files))
-    huc_name <- (terra::unwrap(vectors)[1,"huc12", drop = T][[1]])
-    
+files <- Filter(Negate(is.null), f_list)
+vectors <- Filter(Negate(is.null), v_list)
+print(length(files))
+print(length(vectors))
+
+huc_extract <- function(dem_files, vect_files){
+
+    huc_name <- (terra::unwrap(vect_files)[1,"huc12", drop = T][[1]])
+
     fn <- (paste0(args[5], "/cluster_", args[3], "_huc_", huc_name,".tif"))
     print(fn)
-    
+
     if(!file.exists(fn)){
     print(paste0("Processing new file: ", fn))
-    subfolders_names <- basename(dirname(files))
-    file_lists <- split(files, subfolders_names)
-    lvrt <- lapply(file_lists, function(lists){
-        terra::sprc(lists) |> 
-            terra::merge() |> 
-            terra::project("EPSG:6347", res = 1)
-    })
+    # subfolders_names <- basename(dirname(dem_files)) #the DEMs are different collection folders
+    # file_lists <- unlist(dem_files) # split(dem_files, subfolders_names)
     
     tryCatch(
-        {lvrt |>
-        terra::mask(mask = terra::unwrap(vectors), updatevalue = NA, touches = TRUE,
-                    filename = fn,
-                    overwrite = TRUE)
+        {
+    lvrt <-  terra::mosaic(terra::sprc(dem_files), fun = "mean") |>
+        terra::project("EPSG:6347", res = 1)
+    set.names(lvrt, "DEM")
+    terra::mask(lvrt, mask = terra::unwrap(vect_files), updatevalue = NA, touches = TRUE,
+            filename = fn,
+            overwrite = TRUE)
             },
         error = function(msg){
+            message(msg$message)
             message(paste0("Error at: ", huc_name))
                         return(NA)
             }
@@ -152,16 +157,18 @@ huc_extract <- function(list_of_files, list_of_vectors){
     }
 }
 
-mapply(huc_extract, f_list, v_list)
+mapply(huc_extract, files, vectors)
 
 # huc_extract(cluster = cluster_target)
 
-# corenum <-  4
-# options(future.globals.maxSize= 8.0 * 1e9)
-# plan(multisession, workers = corenum) 
-# 
-# print(corenum)
-# print(options()$future.globals.maxSize)
+# if(future::availableCores() > 16){
+#     corenum <-  4
+# } else {
+#     corenum <-  (future::availableCores())
+# }
+# options(future.globals.maxSize= 64 * 1e9)
+# # plan(multisession, workers = corenum)
+# plan(future.callr::callr, workers = corenum)
 # 
 # future_mapply(huc_extract, f_list[1:2], v_list[1:2], future.seed = TRUE)
 

@@ -6,7 +6,7 @@
 # It also creates the hydrologic metrics for Topographic Wetness Index
 ###################
 
-args = c("Data/NY_HUCS/NY_Cluster_Zones_200.gpkg",
+args = c("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
          67,
          "Data/TerrainProcessed/HUC_DEMs/",
          "Data/TerrainProcessed/HUC_Hydro/"
@@ -101,7 +101,7 @@ hydro_func <- function(dem){
     if(!file.exists(fa_twi_name)){
         fs <- dem |>
             terra::rast() |>
-            terra::project("EPSG:6347") |> 
+            terra::project("EPSG:6347", res = 1) |> 
             terra::terrain(v = c("flowdir", "slope"), unit = "radians")
         fa <- terra::flowAccumulation(fs["flowdir"])
         

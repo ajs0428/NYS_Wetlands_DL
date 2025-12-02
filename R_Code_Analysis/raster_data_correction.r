@@ -6,7 +6,7 @@
 
 args = c(
     "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
-    22,
+    120,
     "Data/NAIP/HUC_NAIP_Processed/"
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
@@ -89,10 +89,10 @@ future_lapply(
 )
 
 ###############################################################################################
-# lapply(
-#     seq_along(cluster_target$huc12),
-#     corr_layers_func,
-#     cluster_target = cluster_target,
-#     rast_list = rast_list,
-#     dem_list = dem_list
-# )
+lapply(
+    seq_along(cluster_target$huc12),
+    corr_layers_func,
+    cluster_target = cluster_target,
+    rast_list = rast_list,
+    dem_list = dem_list
+)

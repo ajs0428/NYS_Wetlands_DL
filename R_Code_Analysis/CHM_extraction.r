@@ -2,7 +2,7 @@
 
 args = c(
     "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
-    67,
+    120,
     "Data/CHMs/AWS"
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
