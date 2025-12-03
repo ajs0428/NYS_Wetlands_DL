@@ -113,7 +113,7 @@ for(j in clusters){
     eval_na_df <- bind_rows(na_df, eval_na_df)
 }
 
-eval_na_df |> arrange(desc(DEM))
+eval_na_df |> arrange(desc(r))
 
 ```
 
@@ -167,8 +167,8 @@ pts_extracted_df <- as_tibble(pts_extracted_filtered) |>
                                   # is.nan(twi) ~ 0,
                                   .default = twi)
                   ) |> 
-    drop_na() |> 
-    dplyr::select(MOD_CLASS, COARSE_CLASS, ID, everything(), -geom) 
+    dplyr::select(MOD_CLASS, COARSE_CLASS, ID, everything(), -geom, -flowacc.1, -twi.1, -contains("3x3"), -contains("10m")) |> 
+    drop_na()
 
 names(pts_extracted_df)
 nrow(pts_extracted_df)
@@ -278,7 +278,7 @@ Wetland_Coarse_Recipe <-
 RFM <- 
     rand_forest(
         mtry = ncol(train_data|> select(-ID))-3,
-        trees = 300,
+        trees = 100,
         min_n = 3
     ) |> 
     set_engine(

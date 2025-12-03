@@ -8,7 +8,7 @@
 args = c(
     "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
     120,
-    "Data/TerrainProcessed/HUC_Hydro/"
+    "Data/TerrainProcessed/HUC_TerrainMetrics/"
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 

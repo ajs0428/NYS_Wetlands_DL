@@ -7,7 +7,7 @@
 ###################
 
 args = c("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
-         67,
+         120,
          "Data/TerrainProcessed/HUC_DEMs/",
          "Data/TerrainProcessed/HUC_Hydro/"
          )
@@ -75,7 +75,7 @@ hydro_condition_func <- function(dem){
 
 if(length(missing_wbt_hucs) != 0){
     print(paste0("Requires Hydro-Conditioning: ", length(missing_wbt_hucs)))
-    cond_list <- non_wbt_list[!(non_wbt_hucs %in% wbt_hucs)]
+    cond_list <- non_wbt_list[!(non_wbt_hucs %in% wbt_hucs)] # the DEMs that need hydrocondition not in the wbt list
     print(cond_list)
     lapply(cond_list, hydro_condition_func)
 } else {
