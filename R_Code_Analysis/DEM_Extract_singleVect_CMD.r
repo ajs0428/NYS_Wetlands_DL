@@ -32,7 +32,12 @@ library(future.apply)
 library(stringr)
 suppressPackageStartupMessages(library(tidyterra))
 
-
+# Configure terra for efficiency
+terraOptions(
+    tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp",
+    memfrac = 0.6,      # Use up to 60% of RAM before writing to disk
+    threads = 2         # Internal threading for terra operations (per worker)
+)
 ###############################################################################################
 
 # A shapefile list of all the DEM indexes (vector tiles of the actual DEM locations)

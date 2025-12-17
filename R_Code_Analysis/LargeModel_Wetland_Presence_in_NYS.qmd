@@ -1,0 +1,169 @@
+---
+title: "Modeling Wetland Presence in NYS"
+format: html
+---
+
+```{r}
+#| label: setup
+#| warning: false
+suppressPackageStartupMessages({
+    library(tidymodels)
+    library(ranger)
+    library(future)
+    library(doFuture)
+    library(vip)
+    library(terra)
+    library(sf)
+    library(here)
+})
+
+here()
+
+theme_param <- theme(
+    text = element_text(size = 14),
+    legend.position = 'right', 
+    legend.key.size = unit(1, "cm"),
+    legend.spacing.x = unit(1.2, "cm"),
+    legend.text = element_text(size = rel(0.70), hjust = 0.5),
+    panel.background = element_blank(),
+    panel.grid.major = element_line(colour = "grey80", linewidth = 0.5),
+    axis.ticks = element_blank(),
+    axis.text = element_text(size = rel(0.8)),
+    axis.title = element_text(size = rel(1))
+    )
+
+```
+
+
+### Training, Validation, and Testing data
+
+```{r}
+train_data <- read.csv(here("Data/Dataframes/TrainingPoints.csv"))
+val_data <- read.csv(here("Data/Dataframes/ValidationPoints.csv"))
+test_data <- read.csv(here("Data/Dataframes/TestPoints.csv"))
+
+full_data <- dplyr::bind_rows(train_data, val_data, test_data)
+```
+
+
+
+
+
+
+```{r}
+train_data |> group_by(MOD_CLASS) |> reframe(CHM_mean = mean(CHM), 
+                                             n = n())
+```
+
+### Data exploration
+
+```{r}
+train_data_pca <- train_data |> 
+    filter(if_all(is.numeric, is.finite)) 
+
+pc <- prcomp(train_data_pca |> select(where(is.numeric)),
+             center = TRUE,
+            scale. = TRUE)
+
+ggbiplot::ggbiplot(pc, point.size = 0.2,
+                   alpha = 0.1,
+              obs.scale = 1,
+              var.scale = 1, var.axes = FALSE,
+              groups = train_data_pca$MOD_CLASS,
+              #ellipse = TRUE,
+              #circle = TRUE,circle.prob = 0.68,
+              ellipse.prob = 0.99)
+```
+
+```{r}
+train_data |> 
+    mutate(across(where(is.numeric), ~ scale(.x))) |> 
+    group_by(MOD_CLASS) |> 
+    pivot_longer(c(slope_500m, slope_5m), names_to = "metric", values_to = "value") |> 
+    ggplot(aes(x = MOD_CLASS)) +
+    geom_violin(aes(y = value, fill = metric)) +
+    theme_param
+
+train_data |> 
+    mutate(across(where(is.numeric), ~ scale(.x))) |> 
+    group_by(MOD_CLASS) |> 
+    pivot_longer(c(CHM), names_to = "metric", values_to = "value") |> 
+    ggplot(aes(x = MOD_CLASS)) +
+    geom_violin(aes(y = value, fill = metric)) +
+    theme_param
+
+train_data |> 
+    mutate(across(where(is.numeric), ~ scale(.x))) |> 
+    group_by(MOD_CLASS) |> 
+    pivot_longer(c(twi), names_to = "metric", values_to = "value") |> 
+    ggplot(aes(x = MOD_CLASS)) +
+    geom_violin(aes(y = value, fill = metric), draw_quantiles = 0.5) +
+    theme_param
+
+train_data |> 
+    mutate(across(where(is.numeric), ~ scale(.x))) |> 
+    group_by(MOD_CLASS) |> 
+    pivot_longer(c(ndwi, ndvi), names_to = "metric", values_to = "value") |> 
+    ggplot(aes(x = MOD_CLASS)) +
+    geom_violin(aes(y = (value), fill = metric), draw_quantiles = 0.5) +
+    #geom_jitter(aes(y = (value)), alpha = 0.05, width = 0.1) +
+    theme_param
+
+train_data |> 
+    mutate(across(where(is.numeric), ~ scale(.x))) |> 
+    group_by(MOD_CLASS) |> 
+    pivot_longer(c(r, nir), names_to = "metric", values_to = "value") |> 
+    ggplot(aes(x = MOD_CLASS)) +
+    geom_violin(aes(y = value, fill = metric), draw_quantiles = 0.5) +
+    theme_param
+```
+
+
+```{r}
+RFM_multi_fit <- unbundle(readRDS(here("Models/RF_model_output/MOD_CLASS_rf_model.rds")))
+RFM_multi_vip <- unbundle(readRDS(here("Models/RF_model_output/MOD_CLASS_variable_importance.rds")))
+RFM_best_params <- unbundle(readRDS(here("Models/RF_model_output/MOD_CLASS_best_params.rds")))
+RFM_metrics_summary <- unbundle(readRDS(here("Models/RF_model_output//MOD_CLASS_metrics_summary.rds")))
+RFM_selected_features <- unbundle(readRDS(here("Models/RF_model_output//MOD_CLASS_selected_features.rds" )))
+
+```
+
+
+```{r}
+RFM_best_params
+```
+```{r}
+RFM_metrics_summary$validation
+```
+
+```{r}
+RFM_metrics_summary$test
+```
+
+```{r}
+RFM_selected_features
+```
+
+
+
+```{r}
+test_predictions <- predict(RFM_multi_fit, test_data) %>%
+    bind_cols(predict(RFM_multi_fit, test_data, type = "prob")) %>%
+    bind_cols(test_data %>% select(MOD_CLASS)) %>%
+    dplyr::mutate(across(where(is.character), as.factor))
+```
+
+```{r}
+cm <- conf_mat(test_predictions, truth = "MOD_CLASS", estimate = ".pred_class")
+summary(cm)
+```
+
+
+
+```{r}
+RFM_multi_vip %>% 
+    #dplyr::arrange(desc(Importance)) %>% 
+    ggplot(data = .) +
+    geom_col(aes(y = fct_reorder(Variable, Importance), x = Importance))
+```
+

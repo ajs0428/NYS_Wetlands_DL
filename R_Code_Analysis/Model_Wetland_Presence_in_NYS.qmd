@@ -84,7 +84,11 @@ list_of_pts_extracted <- lapply(list_of_pts_extracted_locs, st_read, quiet = TRU
     bind_rows()
 
 nrow(list_of_pts_extracted)
+names(list_of_pts_extracted)
 
+list_of_pts_extracted |> 
+    mutate(ID = paste0(MOD_CLASS, row_number())) |> 
+    select(ID, MOD_CLASS, COARSE_CLASS, huc, cluster, geom) |> st_write(here("Data/Training_Data/FieldSite_Clusters_All_Pts.gpkg"), append = FALSE)
 ```
 
 
@@ -113,7 +117,7 @@ for(j in clusters){
     eval_na_df <- bind_rows(na_df, eval_na_df)
 }
 
-eval_na_df |> arrange(desc(r))
+eval_na_df |> arrange(desc(DEM))
 
 ```
 
@@ -148,10 +152,10 @@ df <- pts_extracted_filtered |>
                             "043001081302", "043001081401", "043001081402",
                             "043001081602", "043001081604")))
 ndf <- nrow(df)
-for(i in names(pts_extracted_filtered)){
-    na_rows <- df |> filter(is.na(.data[[i]])) |> nrow()
-    print(paste0(i, ": ", round(na_rows/ndf, 2)))
-}
+# for(i in names(pts_extracted_filtered)){
+#     na_rows <- df |> filter(is.na(.data[[i]])) |> nrow()
+#     print(paste0(i, ": ", round(na_rows/ndf, 2)))
+# }
 ```
 
 
@@ -159,20 +163,17 @@ for(i in names(pts_extracted_filtered)){
 
 ```{r}
 pts_extracted_df <- as_tibble(pts_extracted_filtered) |> 
-    # unite(dplyr::starts_with("X"), sep = "", col = "CHM") |> 
-    # mutate(CHM = str_remove_all(CHM, "[A-Z]"),
-    #        CHM = as.numeric(CHM)) |> 
+    # filter(!(cluster %in% c(198))) |> 
+    # select(1:38, ID) |> 
     dplyr::mutate(across(where(is.character), as.factor),
                   twi = case_when(is.infinite(twi) ~ NA,
                                   # is.nan(twi) ~ 0,
                                   .default = twi)
                   ) |> 
-    dplyr::select(MOD_CLASS, COARSE_CLASS, ID, everything(), -geom, -flowacc.1, -twi.1, -contains("3x3"), -contains("10m")) |> 
     drop_na()
 
 names(pts_extracted_df)
 nrow(pts_extracted_df)
-
 
 pts_extracted_df |> group_by(MOD_CLASS) |> reframe(mean = mean(CHM),
                                                    n = n())
@@ -197,7 +198,7 @@ ggbiplot::ggbiplot(pc, point.size = 0.1,
               groups = cluster_df_pca$COARSE_CLASS,
               ellipse = TRUE,
               #circle = TRUE,circle.prob = 0.68,
-              ellipse.prob = 0.90)
+              ellipse.prob = 0.99)
 ```
 
 ```{r}
@@ -254,14 +255,15 @@ data_split <- initial_split(pts_extracted_df, prop = 3/4)
 
 # Create data frames for the two sets:
 train_data <- training(data_split) |> 
-    filter(!(MOD_CLASS == "OWW" & CHM > 1)) |>
-    filter(!(MOD_CLASS == "EMW" & CHM > 4)) |> 
-    filter(!(MOD_CLASS == "SSW" & CHM > 6)) #|> 
+    filter(!(MOD_CLASS == "OWW" & CHM > 1))
+    # filter(!(MOD_CLASS == "EMW" & CHM > 4)) |> 
+    # filter(!(MOD_CLASS == "SSW" & CHM > 6)) #|> 
     # filter(!(MOD_CLASS == "FSW" & CHM < 3))
-test_data  <- testing(data_split)
+test_data  <- testing(data_split) |> 
+    filter(!(MOD_CLASS == "OWW" & CHM > 1))
 
-readr::write_csv(train_data, here("Data/Dataframes/TrainingPoints.csv"))
-readr::write_csv(test_data, here("Data/Dataframes/TestPoints.csv"))
+readr::write_csv(train_data, here("Data/Dataframes/draftTrainingPoints.csv"))
+readr::write_csv(test_data, here("Data/Dataframes/draftTestPoints.csv"))
 
 glimpse(train_data)
 ```
@@ -270,20 +272,20 @@ glimpse(train_data)
 ```{r}
 #| eval: false
 Wetland_Multi_Recipe <- 
-    recipe(MOD_CLASS ~ ., data = train_data |> select(-ID, -COARSE_CLASS, -huc, -ID)) 
+    recipe(MOD_CLASS ~ ., data = train_data |> select(-ID, -COARSE_CLASS, -cluster, -huc, -geom)) 
 Wetland_Coarse_Recipe <- 
-    recipe(COARSE_CLASS ~ ., data = train_data |> select(-ID, -MOD_CLASS, -huc, -ID)) 
+    recipe(COARSE_CLASS ~ ., data = train_data |> select(-ID, -MOD_CLASS, -cluster, -huc, -geom)) 
 
 
 RFM <- 
     rand_forest(
-        mtry = ncol(train_data|> select(-ID))-3,
+        mtry = ncol(train_data|> select(-ID))-5,
         trees = 100,
         min_n = 3
     ) |> 
     set_engine(
         "ranger", 
-        num.threads = 36,
+        num.threads = 24,
         seed = 11,
         importance = "permutation"
         #probability = TRUE
@@ -313,22 +315,22 @@ RFM_coarse_workflow <-
 
 system.time({RFM_multi_fit <- 
     RFM_multi_workflow |>
-    fit(train_data |> select(-ID, -COARSE_CLASS))})
+    fit(train_data |> select(-ID, -COARSE_CLASS, -cluster, -huc, -geom))})
 system.time({RFM_coarse_fit <- 
     RFM_coarse_workflow |>
-    fit(train_data|> select(-ID, -MOD_CLASS))})
+    fit(train_data |> select(-ID, -MOD_CLASS, -cluster, -huc, -geom))})
 # system.time({BT_multi_fit <- 
 #     BT_multi_workflow |>
 #     fit(train_data |> select(-ID, -COARSE_CLASS, -huc))})
 
-saveRDS(bundle(RFM_multi_fit), here("Data/Models/Cluster_208_MultiClass_RFM.rds"))
-saveRDS(bundle(RFM_coarse_fit), here("Data/Models/Cluster_208_CoarseClass_RFM.rds"))
+saveRDS(bundle(RFM_multi_fit), here("Data/Models/draftMultiClass_RFM.rds"))
+saveRDS(bundle(RFM_coarse_fit), here("Data/Models/draftCoarseClass_RFM.rds"))
 ```
 
 
 ```{r}
-RFM_multi_fit <- unbundle(readRDS(here("Data/Models/Cluster_208_MultiClass_RFM.rds")))
-RFM_coarse_fit <- unbundle(readRDS(here("Data/Models/Cluster_208_CoarseClass_RFM.rds")))
+RFM_multi_fit <- unbundle(readRDS(here("Data/Models/draftMultiClass_RFM.rds")))
+RFM_coarse_fit <- unbundle(readRDS(here("Data/Models/draftCoarseClass_RFM.rds")))
 
 RFM_multi_fit |> 
     extract_fit_parsnip() |> 

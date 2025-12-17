@@ -7,7 +7,7 @@ args = c(
          "Data/TerrainProcessed/HUC_Hydro/", #4
          "Data/NAIP/HUC_NAIP_Processed/", #5
          "Data/CHMs/HUC_CHMs/", #6
-         "Data/Training_Data/Cluster_Extract_Training_Pts/" #7
+         "Data/Training_Data/HUC_Extracted_Training_Data/" #7
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
@@ -96,7 +96,7 @@ raster_stack_extract <- function(dem){
         tidyterra::mutate(huc = huc_name,
                           cluster = args[2])
 
-    writeVector(pts_extracted, filename = paste0("Data/Training_Data/HUC_Extracted_Training_Data/",
+    writeVector(pts_extracted, filename = paste0(args[7],
                                                  "cluster_",
                                                  args[2],
                                                  "_huc_",

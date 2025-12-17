@@ -53,17 +53,25 @@ process_scale <- function(dem_rast, scale_factor, output_file, metric, scale_lab
                          smoothed,
                          v = c("slope", "aspect", "TPI", "TRI"),
                          filename = output_file,
-                         overwrite = TRUE
+                         overwrite = TRUE, 
+                         names = c(paste0("slope_", scale_label),
+                                   paste0("aspect_", scale_label),
+                                   paste0("TPI_", scale_label),
+                                   paste0("TRI_", scale_label))
                      ),
                      "dmv" = {
                          dmv_result <- MultiscaleDTM::DMV(smoothed, w = c(3, 3), 
                                                           stand = "none", include_scale = FALSE)
-                         writeRaster(dmv_result, output_file, overwrite = TRUE)
+                         writeRaster(dmv_result, output_file, overwrite = TRUE,
+                                     names = c(paste0("dmv_", scale_label)))
                      },
                      "curv" = {
                          curv_result <- MultiscaleDTM::Qfit(smoothed, w = c(3, 3), include_scale = TRUE,
                                                             metrics = c("meanc", "planc", "profc"))
-                         writeRaster(curv_result, output_file, overwrite = TRUE)
+                         writeRaster(curv_result, output_file, overwrite = TRUE,
+                                     names = c(paste0("meanc_", scale_label),
+                                               paste0("planc_", scale_label),
+                                               paste0("profc_", scale_label)))
                      },
                      stop("Unknown Metric")
     )
@@ -123,137 +131,6 @@ list_of_huc_dems <- list.files(
 message(paste0("Found ", length(list_of_huc_dems), " DEMs to process"))
 
 ###############################################################################################
-# list_of_huc_dems <- list.files(args[3], full.names = TRUE, glob2rx(pattern = paste0("^cluster_", args[2], "_", "*\\*.tif$"))) |> 
-#     stringr::str_subset(pattern = "wbt", negate = TRUE)
-# 
-# terrain_function <- function(dems_target, metric = args[4]){
-# 
-#     cluster_huc_name <- stringr::str_remove(basename(dems_target), ".tif")
-#     print(cluster_huc_name)
-#     
-#     file_5m <- paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_5m.tif")
-#     file_100m <- paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_100m.tif")
-#     file_500m <- paste0(args[5], cluster_huc_name, "_terrain_", args[4], "_500m.tif")
-#     
-#     dem_rast <- rast(dems_target)
-#     
-#     tryCatch({
-#     if(stringr::str_detect(metric, "slp")){
-#         if(!file.exists(file_5m)){
-#             print(paste0("Creating slp 5m for: ", file_5m))
-#             dem_rast |>
-#                 terra::aggregate(5, fun = "mean", na.rm = TRUE) |> # aggregate first
-#                 terra::resample(y = dem_rast, method = "cubicspline") |> # resample to original resolution
-#                 terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
-#                                filename = file_5m,
-#                                overwrite = TRUE, names = c("slope_5m", "aspect_5m", "TPI_5m", "TRI_5m"))
-#             gc(verbose = FALSE)
-#         } else {print(paste0(args[4], " 5m Metric files accounted for"))}
-#         if(!file.exists(file_100m)){
-#             print(paste0("Creating slp 100m for: ", file_100m))
-#             dem_rast |> 
-#                 terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
-#                 terra::resample(y = dem_rast, method = "cubicspline") |> # resample to original resolution
-#                 terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
-#                                filename = file_100m,
-#                                overwrite = TRUE, names = c("slope_100m", "aspect_100m", "TPI_100m", "TRI_100m"))
-#             gc(verbose = FALSE)
-#         }else {print(paste0(args[4], " 100m Metric files accounted for"))}
-#         if(!file.exists(file_500m)){
-#             print(paste0("Creating slp 500m for: ", file_500m))
-#             dem_rast |>
-#                 terra::aggregate(500, fun = "mean", na.rm = TRUE) |> # aggregate first
-#                 terra::resample(y = dem_rast, method = "cubicspline") |> # resample to original resolution
-#                 terra::terrain(v = c("slope", "aspect", "TPI", "TRI"),
-#                                filename = file_500m,
-#                                overwrite = TRUE, names = c("slope_500m", "aspect_500m", "TPI_500m", "TRI_500m"))
-#             gc(verbose = FALSE)
-#         } else {print(paste0(args[4], " 500m Metric files accounted for"))}
-#         
-#     } else if (stringr::str_detect(metric, "dmv")){
-#         if(!file.exists(file_5m)){
-#             print(paste0("Creating dmv 5m for: ", file_5m))
-#             dem_rast |> 
-#                 terra::aggregate(5, fun = "mean", na.rm = TRUE) |> # aggregate first
-#                 terra::resample(y = dem_rast, method = "cubicspline") |> # resample to original resolution
-#                 MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
-#                                    include_scale = FALSE) |>
-#                 # terra::wrap()
-#                 writeRaster(file_5m,
-#                             overwrite = TRUE, names = c("dmv_5m"))
-#             gc(verbose = FALSE)
-#         } else {print(paste0(args[4], " 5m Metric files accounted for"))}
-#         if(!file.exists(file_100m)){
-#             print(paste0("Creating dmv 100m for: ", file_100m))
-#             dem_rast |> 
-#                 terra::aggregate(100, fun = "mean", na.rm = TRUE) |> # aggregate first
-#                 terra::resample(y = dem_rast, method = "cubicspline") |> # resample to original resolution
-#                 MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
-#                                    include_scale = FALSE) |>
-#                 # terra::wrap()
-#                 writeRaster(file_100m,
-#                             overwrite = TRUE, names = c("dmv_100m"))
-#             gc(verbose = FALSE)
-#         }else {print(paste0(args[4], " 100m Metric files accounted for"))}
-#         if(!file.exists(file_500m)){
-#             print(paste0("Creating dmv 500m for: ", file_500m))
-#             dem_rast |> 
-#                 terra::aggregate(500, fun = "mean", na.rm = TRUE) |> # aggregate first
-#                 terra::resample(y = dem_rast, method = "cubicspline") |> # resample to original resolution
-#                 MultiscaleDTM::DMV(w = c(3,3), stand = "none", # I think "none" so that NA won't be produced
-#                                    include_scale = FALSE) |>
-#                 # terra::wrap()
-#                 writeRaster(file_500m,
-#                             overwrite = TRUE, names = c("dmv_500m"))
-#             gc(verbose = FALSE)
-#         }else {print(paste0(args[4], " 500m Metric files accounted for"))}
-#         
-#     } else if(stringr::str_detect(metric, "curv")){
-#         if(!file.exists(file_5m)){
-#             print(paste0("Creating curv 5m for: ", file_5m))
-#             dem_rast |> 
-#                 terra::aggregate(5, fun = "mean", na.rm = TRUE) |> 
-#                 terra::resample(y = dem_rast, method = "cubicspline") |> 
-#                 MultiscaleDTM::Qfit(w = c(3,3), include_scale = TRUE, metrics = c("meanc", "planc", "profc")) |>
-# 
-#                 writeRaster(file_5m,
-#                             overwrite = TRUE, names = c("meanc_5m", "planc_5m", "profc_5m"))
-#             gc(verbose = FALSE)
-#         } else {print(paste0(args[4], " 5m Metric files accounted for"))}
-#         if(!file.exists(file_100m)){
-#             print(paste0("Creating curv 100m for: ", file_100m))
-#             dem_rast |>
-#                 terra::aggregate(100, fun = "mean", na.rm = TRUE) |>
-#                 terra::resample(y = dem_rast, method = "cubicspline") |> 
-#                 MultiscaleDTM::Qfit(w = c(3,3), include_scale = TRUE, metrics = c("meanc", "planc", "profc"))|>
-# 
-#             writeRaster(file_100m,
-#                         overwrite = TRUE, names = c("meanc_100m", "planc_100m", "profc_100m"))
-#             gc(verbose = FALSE)
-#         }else {print(paste0(args[4], " 100m Metric files accounted for"))}
-#         if(!file.exists(file_500m)){
-#             print(paste0("Creating curv 500m for: ", file_500m))
-#             dem_rast |>
-#                 terra::aggregate(500, fun = "mean", na.rm = TRUE) |>
-#                 terra::resample(y = dem_rast, method = "cubicspline") |> 
-#                 MultiscaleDTM::Qfit(w = c(3,3),include_scale = TRUE, metrics = c("meanc", "planc", "profc")) |>
-# 
-#             writeRaster(file_500m,
-#                         overwrite = TRUE, names = c("meanc_500m", "planc_500m", "profc_500m"))
-#             gc(verbose = FALSE)
-#         } else {print(paste0(args[4], " 500m Metric files accounted for"))}
-#     } else {
-#         print("No terrain metric specified or not identified") 
-#     }
-#     }, error = function(msg){
-#         message(paste0("Error at: ", cluster_huc_name))
-#         return(NA)
-#     }
-#     )
-#     gc(verbose = FALSE)
-#     tmpFiles(remove = TRUE)
-# }
-
 
 if(future::availableCores() > 16){
     corenum <-  4

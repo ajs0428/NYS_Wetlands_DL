@@ -133,6 +133,7 @@ plan(future.callr::callr, workers = corenum)
 # 
 future_lapply(list_of_huc_hydro_dems, hydro_func, future.seed = TRUE)
 
+terra::tmpFiles(remove = TRUE)
 
 ################################################################################################
 # non-parallel

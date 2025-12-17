@@ -23,7 +23,7 @@ for number in "${include[@]}"; do
     Rscript R_Code_Analysis/CHM_extraction.r \
     "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg" \
     "$number" \
-    "Data/CHMs/AWS" > "Shell_Scripts/logs/chm_${number}_$(date +%Y%m%d).log" 2>&1 
+    "Data/CHMs/AWS" > "Shell_Scripts/logs/chm_$(date +%Y%m%d).log" 2>&1 
     
 done
 
