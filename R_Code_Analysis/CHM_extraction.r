@@ -120,12 +120,12 @@ process_huc <- function(i, cluster_target, final_crossing_features, args) {
     
     chm_filename <- paste0("Data/CHMs/HUC_CHMs", "/cluster_", args[2], "_huc_", cluster_huc_name, "_CHM.tif")
     dem_filename <- paste0("Data/TerrainProcessed/HUC_DEMs", "/cluster_", args[2], "_huc_", cluster_huc_name, ".tif")
-    
+    dem_rast <- rast(dem_filename)
     is_not_empty <- function(r) {
         !all(is.na(values(r)))
     }
 
-    if(file.exists(chm_filename) & file.exists(dem_filename)){
+    if(!file.exists(chm_filename) & file.exists(dem_filename)){
         huc_chms <- st_filter(final_crossing_features, cluster_target[i,], .predicate = st_intersects)
         huc_file_locs <- paste0(args[3], "/",  huc_chms$location)
         huc_rasts <- lapply(huc_file_locs, rast)
@@ -135,9 +135,9 @@ process_huc <- function(i, cluster_target, final_crossing_features, args) {
             terra::mosaic(fun = "max") |>
             terra::project("EPSG:6347", res = 1) |>
             terra::crop(y = cluster_target[i,], mask = TRUE) |>
-            resample(y = rast(dem_filename)) |> 
+            resample(y = dem_rast) |> 
             tidyterra::rename("CHM" = 1)
-        huc_chm_merge_mask <- terra::mask(huc_chm_merge, (!is.na(rast(dem_filename)) & is.na(huc_chm_merge)),
+        huc_chm_merge_mask <- terra::mask(huc_chm_merge, (!is.na(dem_rast) & is.na(huc_chm_merge)),
                                           maskvalues=TRUE, updatevalue = 0, filename = chm_filename,
                                           overwrite = TRUE)
 
@@ -168,13 +168,13 @@ future_lapply(
 )
 
 # ### Non-parallel testing
-# lapply(
-#     seq_along(cluster_target$huc12)[1],
-#     process_huc,
-#     cluster_target = cluster_target,
-#     final_crossing_features = final_crossing_features,
-#     args = args
-# )
+lapply(
+    seq_along(cluster_target$huc12),
+    process_huc,
+    cluster_target = cluster_target,
+    final_crossing_features = final_crossing_features,
+    args = args
+)
 
 
 

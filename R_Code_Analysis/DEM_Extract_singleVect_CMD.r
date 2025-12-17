@@ -32,11 +32,16 @@ library(future.apply)
 library(stringr)
 suppressPackageStartupMessages(library(tidyterra))
 
-
+# Configure terra for efficiency
+terraOptions(
+    tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp",
+    memfrac = 0.6,      # Use up to 60% of RAM before writing to disk
+    threads = 2         # Internal threading for terra operations (per worker)
+)
 ###############################################################################################
 
 # A shapefile list of all the DEM indexes (vector tiles of the actual DEM locations)
-dem_ind_list <- (lapply(list.files(args[1], pattern = "^dem_1_meter.*\\.shp$|USGS_LakeOntarioHudsonRiverRegion2022",full.names = TRUE), sf::st_read, quiet = TRUE))
+dem_ind_list <- (lapply(list.files(args[1], pattern = "^dem_1_meter.*\\.shp$|USGS_LakeOntarioHudsonRiverRegion2022|FEMA_Bare_Earth_DEM_1m.shp",full.names = TRUE), sf::st_read, quiet = TRUE))
 
 
 transform_sf <- function(stl){
@@ -157,20 +162,20 @@ huc_extract <- function(dem_files, vect_files){
     }
 }
 
-mapply(huc_extract, files, vectors)
+# mapply(huc_extract, files, vectors)
 
 # huc_extract(cluster = cluster_target)
 
-# if(future::availableCores() > 16){
-#     corenum <-  4
-# } else {
-#     corenum <-  (future::availableCores())
-# }
-# options(future.globals.maxSize= 64 * 1e9)
-# # plan(multisession, workers = corenum)
-# plan(future.callr::callr, workers = corenum)
+if(future::availableCores() > 16){
+    corenum <-  4
+} else {
+    corenum <-  (future::availableCores())
+}
+options(future.globals.maxSize= 64 * 1e9)
+# plan(multisession, workers = corenum)
+plan(future.callr::callr, workers = corenum)
 # 
-# future_mapply(huc_extract, f_list[1:2], v_list[1:2], future.seed = TRUE)
+future_mapply(huc_extract, files, vectors, future.seed = TRUE)
 
 ##########################################
 
