@@ -7,7 +7,8 @@ args = c(
          "Data/TerrainProcessed/HUC_Hydro/", #4
          "Data/NAIP/HUC_NAIP_Processed/", #5
          "Data/CHMs/HUC_CHMs/", #6
-         "Data/Training_Data/HUC_Extracted_Training_Data/" #7
+         "Data/Satellite/HUC_Processed_NY_Sentinel_Indices/", #7
+         "Data/Training_Data/HUC_Extracted_Training_Data/" #8
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
@@ -26,8 +27,6 @@ cat("these are the arguments: \n",
 library(terra)
 library(sf)
 library(here)
-library(foreach)
-library(doParallel)
 library(collapse)
 library(future)
 library(future.apply)
@@ -67,7 +66,7 @@ terr_list <- list.files(path = args[3], pattern = paste0("cluster_", args[2], "_
 hydro_list <- list.files(path = args[4], pattern = paste0("cluster_", args[2], "_", ".*\\.tif"), full.names = TRUE)
 naip_list <- list.files(path = args[5], pattern = paste0(".*\\cluster_", args[2], "_", ".*\\.tif"), full.names = TRUE)
 chm_list <- list.files(path = args[6], pattern = paste0(".*\\cluster_", args[2], "_", ".*\\.tif"), full.names = TRUE)
-
+sat_list <- list.files(path = args[7], pattern = paste0(".*\\cluster_", args[2], "_", ".*\\.tif"), full.names = TRUE)
 
 
 ###############################################################################################
@@ -79,38 +78,43 @@ raster_stack_extract <- function(dem){
     terr_rast <- terr_list[str_detect(terr_list, huc_name)] |> rast()
     hydro_rast <- hydro_list[str_detect(hydro_list, huc_name)] |> rast()
     naip_rast <- naip_list[str_detect(naip_list, huc_name)] |> rast()
+    names(naip_rast) <- paste0("naip_", names(naip_rast))
     chm_rast <- chm_list[str_detect(chm_list, huc_name)] |> rast()
+    sat_rast <- sat_list[str_detect(sat_list, huc_name)] |> rast()
+    names(sat_rast) <- paste0("sat_", names(sat_rast))
     pts <- pts_list[huc_name][[1]]
 
-    pts_extracted <- terra::extract(y = pts,
-                                    x = dem_rast,
-                                    bind = TRUE) |> 
-        terra::extract(x = terr_rast,
-                       bind = TRUE) |>
-        terra::extract(x = hydro_rast,
-                       bind = TRUE) |>
-        terra::extract(x = naip_rast,
-                       bind = TRUE ) |>
-        terra::extract(x = chm_rast,
-                       bind = TRUE) |>
-        tidyterra::mutate(huc = huc_name,
-                          cluster = args[2])
-
-    writeVector(pts_extracted, filename = paste0(args[7],
-                                                 "cluster_",
-                                                 args[2],
-                                                 "_huc_",
-                                                 huc_name,
-                                                 "ext_train_pts.gpkg"),
-                overwrite =TRUE)
-
-    rm(dem_rast)
-    rm(terr_rast)
-    rm(chm_rast)
-    rm(hydro_rast)
-    rm(naip_rast)
-    rm(pts_extracted)
-    gc(verbose = FALSE)
+    # pts_extracted <- terra::extract(y = pts,
+    #                                 x = dem_rast,
+    #                                 bind = TRUE) |> 
+    #     terra::extract(x = terr_rast,
+    #                    bind = TRUE) |>
+    #     terra::extract(x = hydro_rast,
+    #                    bind = TRUE) |>
+    #     terra::extract(x = naip_rast,
+    #                    bind = TRUE ) |>
+    #     terra::extract(x = chm_rast,
+    #                    bind = TRUE) |>
+    #     terra::extract(x = sat_rast,
+    #                    bind = TRUE) |>
+    #     tidyterra::mutate(huc = huc_name,
+    #                       cluster = args[2])
+    # 
+    # writeVector(pts_extracted, filename = paste0(args[8],
+    #                                              "cluster_",
+    #                                              args[2],
+    #                                              "_huc_",
+    #                                              huc_name,
+    #                                              "ext_train_pts.gpkg"),
+    #             overwrite =TRUE)
+    # 
+    # rm(dem_rast)
+    # rm(terr_rast)
+    # rm(chm_rast)
+    # rm(hydro_rast)
+    # rm(naip_rast)
+    # rm(pts_extracted)
+    # gc(verbose = FALSE)
 
 }
 
