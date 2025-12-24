@@ -8,6 +8,7 @@ format: html
 #| warning: false
 suppressPackageStartupMessages({
     library(tidymodels)
+    library(bundle)
     library(ranger)
     library(future)
     library(doFuture)
@@ -38,6 +39,8 @@ theme_param <- theme(
 ### Training, Validation, and Testing data
 
 ```{r}
+all_data <- st_read(here("Data/Training_Data/Combined_Training_Datasets/AJS_MOD_CLASS_sf_points_for_RFM_FieldLocs.gpkg")) |> 
+    as_tibble()
 train_data <- read.csv(here("Data/Dataframes/TrainingPoints.csv"))
 val_data <- read.csv(here("Data/Dataframes/ValidationPoints.csv"))
 test_data <- read.csv(here("Data/Dataframes/TestPoints.csv"))
@@ -51,17 +54,17 @@ full_data <- dplyr::bind_rows(train_data, val_data, test_data)
 
 
 ```{r}
-train_data |> group_by(MOD_CLASS) |> reframe(CHM_mean = mean(CHM), 
+all_data |> group_by(MOD_CLASS) |> reframe(CHM_mean = mean(CHM), 
                                              n = n())
 ```
 
 ### Data exploration
 
 ```{r}
-train_data_pca <- train_data |> 
+data_pca <- all_data |>
     filter(if_all(is.numeric, is.finite)) 
 
-pc <- prcomp(train_data_pca |> select(where(is.numeric)),
+pc <- prcomp(data_pca |> select(where(is.numeric), -geom),
              center = TRUE,
             scale. = TRUE)
 
@@ -69,14 +72,14 @@ ggbiplot::ggbiplot(pc, point.size = 0.2,
                    alpha = 0.1,
               obs.scale = 1,
               var.scale = 1, var.axes = FALSE,
-              groups = train_data_pca$MOD_CLASS,
-              #ellipse = TRUE,
-              #circle = TRUE,circle.prob = 0.68,
-              ellipse.prob = 0.99)
+              groups = data_pca$MOD_CLASS,
+              ellipse = TRUE,
+              # circle = TRUE,circle.prob = 0.68,
+              ellipse.prob = 0.68)
 ```
 
 ```{r}
-train_data |> 
+all_data |> 
     mutate(across(where(is.numeric), ~ scale(.x))) |> 
     group_by(MOD_CLASS) |> 
     pivot_longer(c(slope_500m, slope_5m), names_to = "metric", values_to = "value") |> 
@@ -84,7 +87,7 @@ train_data |>
     geom_violin(aes(y = value, fill = metric)) +
     theme_param
 
-train_data |> 
+all_data |> 
     mutate(across(where(is.numeric), ~ scale(.x))) |> 
     group_by(MOD_CLASS) |> 
     pivot_longer(c(CHM), names_to = "metric", values_to = "value") |> 
@@ -92,7 +95,7 @@ train_data |>
     geom_violin(aes(y = value, fill = metric)) +
     theme_param
 
-train_data |> 
+all_data |> 
     mutate(across(where(is.numeric), ~ scale(.x))) |> 
     group_by(MOD_CLASS) |> 
     pivot_longer(c(twi), names_to = "metric", values_to = "value") |> 
@@ -100,19 +103,27 @@ train_data |>
     geom_violin(aes(y = value, fill = metric), draw_quantiles = 0.5) +
     theme_param
 
-train_data |> 
+all_data |> 
     mutate(across(where(is.numeric), ~ scale(.x))) |> 
     group_by(MOD_CLASS) |> 
-    pivot_longer(c(ndwi, ndvi), names_to = "metric", values_to = "value") |> 
+    pivot_longer(c(naip_ndwi, naip_ndvi), names_to = "metric", values_to = "value") |> 
     ggplot(aes(x = MOD_CLASS)) +
     geom_violin(aes(y = (value), fill = metric), draw_quantiles = 0.5) +
     #geom_jitter(aes(y = (value)), alpha = 0.05, width = 0.1) +
     theme_param
 
-train_data |> 
+all_data |> 
     mutate(across(where(is.numeric), ~ scale(.x))) |> 
     group_by(MOD_CLASS) |> 
-    pivot_longer(c(r, nir), names_to = "metric", values_to = "value") |> 
+    pivot_longer(c(naip_r, naip_nir), names_to = "metric", values_to = "value") |> 
+    ggplot(aes(x = MOD_CLASS)) +
+    geom_violin(aes(y = value, fill = metric), draw_quantiles = 0.5) +
+    theme_param
+
+all_data |> 
+    mutate(across(where(is.numeric), ~ scale(.x))) |> 
+    group_by(MOD_CLASS) |> 
+    pivot_longer(c(sat_VV, sat_VH, sat_GDVI), names_to = "metric", values_to = "value") |> 
     ggplot(aes(x = MOD_CLASS)) +
     geom_violin(aes(y = value, fill = metric), draw_quantiles = 0.5) +
     theme_param
@@ -132,6 +143,8 @@ RFM_selected_features <- unbundle(readRDS(here("Models/RF_model_output//MOD_CLAS
 ```{r}
 RFM_best_params
 ```
+
+
 ```{r}
 RFM_metrics_summary$validation
 ```

@@ -11,7 +11,7 @@ args = c(
          "Data/Training_Data/HUC_Extracted_Training_Data/" #8
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
-
+ 
 cat("these are the arguments: \n", 
     "- Path to a file vector study area:", args[1], "\n",
     "- Cluster number (integer 1-200ish):", args[2], "\n",
@@ -84,42 +84,44 @@ raster_stack_extract <- function(dem){
     names(sat_rast) <- paste0("sat_", names(sat_rast))
     pts <- pts_list[huc_name][[1]]
 
-    # pts_extracted <- terra::extract(y = pts,
-    #                                 x = dem_rast,
-    #                                 bind = TRUE) |> 
-    #     terra::extract(x = terr_rast,
-    #                    bind = TRUE) |>
-    #     terra::extract(x = hydro_rast,
-    #                    bind = TRUE) |>
-    #     terra::extract(x = naip_rast,
-    #                    bind = TRUE ) |>
-    #     terra::extract(x = chm_rast,
-    #                    bind = TRUE) |>
-    #     terra::extract(x = sat_rast,
-    #                    bind = TRUE) |>
-    #     tidyterra::mutate(huc = huc_name,
-    #                       cluster = args[2])
-    # 
-    # writeVector(pts_extracted, filename = paste0(args[8],
-    #                                              "cluster_",
-    #                                              args[2],
-    #                                              "_huc_",
-    #                                              huc_name,
-    #                                              "ext_train_pts.gpkg"),
-    #             overwrite =TRUE)
-    # 
-    # rm(dem_rast)
-    # rm(terr_rast)
-    # rm(chm_rast)
-    # rm(hydro_rast)
-    # rm(naip_rast)
-    # rm(pts_extracted)
-    # gc(verbose = FALSE)
+    pts_extracted <- terra::extract(y = pts,
+                                    x = dem_rast,
+                                    bind = TRUE) |>
+        terra::extract(x = terr_rast,
+                       bind = TRUE) |>
+        terra::extract(x = hydro_rast,
+                       bind = TRUE) |>
+        terra::extract(x = naip_rast,
+                       bind = TRUE ) |>
+        terra::extract(x = chm_rast,
+                       bind = TRUE) |>
+        terra::extract(x = sat_rast,
+                       bind = TRUE) |>
+        tidyterra::mutate(huc = huc_name,
+                          cluster = args[2])
+
+    writeVector(pts_extracted, filename = paste0(args[8],
+                                                 "cluster_",
+                                                 args[2],
+                                                 "_huc_",
+                                                 huc_name,
+                                                 "ext_train_pts.gpkg"),
+                overwrite =TRUE)
+
+    rm(dem_rast)
+    rm(terr_rast)
+    rm(chm_rast)
+    rm(hydro_rast)
+    rm(naip_rast)
+    rm(sat_rast)
+    rm(pts_extracted)
+    gc(verbose = FALSE)
 
 }
 
-
 ###############################################################################################
+
+# lapply(dem_list, raster_stack_extract)
 
 if(future::availableCores() > 16){
     corenum <-  4

@@ -17,8 +17,8 @@ export TMPDIR=/ibstorage/anthony/tmp
 module load R/4.4.3
 
 
-# include=(11 12 22 51 53 56 60 64 67 84 86 90 92 102 105 116 120 123 136 138 152 176 183 189 192 193 198 208 218 225 250)
-include=(208)
+include=(11 12 22 51 53 56 60 64 67 84 86 90 92 102 105 116 120 123 136 138 152 176 183 189 192 193 198 208 218 225 250)
+# include=(208)
 
 for number in "${include[@]}"; do
     echo "Running Rscript with argument: $number"
@@ -29,6 +29,7 @@ for number in "${include[@]}"; do
 	"Data/TerrainProcessed/HUC_Hydro/" \
 	"Data/NAIP/HUC_NAIP_Processed/" \
 	"Data/CHMs/HUC_CHMs/" \
+	"Data/Satellite/HUC_Processed_NY_Sentinel_Indices/" \
 	"Data/Training_Data/HUC_Extracted_Training_Data/" >> "Shell_Scripts/logs/training_data_extract_$(date +%Y%m%d).log" 2>&1 
 	
 done
