@@ -119,7 +119,7 @@ start_juice <- juice(start_prep)
 
 start_spec <- 
     rand_forest(
-        trees = 1000,
+        trees = 10,
         mtry = tune(),
         min_n = tune()
         ) %>% 
@@ -136,9 +136,9 @@ folds <- vfold_cv(train_data, v = 10)
 folds
 
 rf_grid <- grid_regular(
-    mtry(range = c(10, 30)),
-    min_n(range = c(2, 8)),
-    levels = 5
+    mtry(range = c(10, 12)),
+    min_n(range = c(2, 3)),
+    levels = 1
 )
 
 rf_grid
@@ -151,12 +151,37 @@ regular_res <- tune_grid(
 
 regular_res
 
+best_auc <- select_best(regular_res, metric = "roc_auc")
 
-best_auc <- select_best(regular_res, "roc_auc")
+################################################################################################### 
+
+final_rf <- finalize_model(
+    start_spec,
+    best_auc
+)
+
+final_rf %>%
+    set_engine("ranger", importance = "permutation") %>%
+    fit(as.formula(paste0(target_var, "~ .")),
+        data = start_juice
+    ) %>%
+    vip(geom = "point")
+
+final_wf <- workflow() %>%
+    add_recipe(start_recipe) %>%
+    add_model(final_rf)
+
+final_res <- final_wf %>%
+    last_fit(trees_split)
+
+final_res %>%
+    collect_metrics()
 
 ############ 
 # Ended Here 
 ##########
+
+
 
 ################################################################################################### 
 # === Step 5: Final Test Set Evaluation ===
