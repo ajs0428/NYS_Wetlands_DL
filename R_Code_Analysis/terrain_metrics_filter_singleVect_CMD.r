@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
 args = c("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
-         120,
+         84,
          "Data/TerrainProcessed/HUC_DEMs/",
          "slp",
          "Data/TerrainProcessed/HUC_TerrainMetrics/"
@@ -33,15 +33,15 @@ terraOptions(
 )
 ###############################################################################################
 
-process_scale <- function(dem_rast, scale_factor, output_file, metric, scale_label) {
+process_scale <- function(dem_path, scale_factor, output_file, metric, scale_label) {
     
-    if (file.exists(output_file)) {
-        message(paste0(metric, " ", scale_label, " already exists, skipping"))
-        return(invisible(NULL))
-    }
+    # if (file.exists(output_file)) {
+    #     message(paste0(metric, " ", scale_label, " already exists, skipping"))
+    #     return(invisible(NULL))
+    # }
     
     message(paste0("Creating ", metric, " ", scale_label, " for: ", output_file))
-    
+    dem_rast <- rast(dem_path)
     # Aggregate and resample - store intermediate to avoid re-computation
     smoothed <- dem_rast |>
         terra::aggregate(scale_factor, fun = "mean", na.rm = TRUE) |>
@@ -49,16 +49,29 @@ process_scale <- function(dem_rast, scale_factor, output_file, metric, scale_lab
     
     # Compute metric and write directly to file
     result <- switch(metric,
-                     "slp" = terra::terrain(
-                         smoothed,
-                         v = c("slope", "aspect", "TPI", "TRI"),
-                         filename = output_file,
-                         overwrite = TRUE, 
-                         names = c(paste0("slope_", scale_label),
-                                   paste0("aspect_", scale_label),
-                                   paste0("TPI_", scale_label),
-                                   paste0("TRI_", scale_label))
-                     ),
+                     "slp" = {
+                         slp <- terra::terrain(smoothed,
+                                               v = c("slope", "TPI"))
+                         
+                         sg <- rgeomorphon::geomorphons(elevation = smoothed, 
+                                                  search = 100, 
+                                                  use_meters = TRUE,
+                                                  skip = 5, 
+                                                  flat_angle_deg = 1.5)
+                         slp_sg <- c(slp, sg)
+                         writeRaster(slp_sg,
+                                     filename = output_file,
+                                     overwrite = TRUE, 
+                                     names = c(paste0("slope_", scale_label),
+                                               #paste0("aspect_", scale_label), #doesn't seem effective
+                                               paste0("TPI_", scale_label) ,
+                                               paste0("Geomorph_", scale_label)
+                                               #paste0("TRI_", scale_label) # very similar to slope
+                                     ))
+                         rm(slp)
+                         rm(sg)
+                         rm(slp_sg)
+                         },
                      "dmv" = {
                          dmv_result <- MultiscaleDTM::DMV(smoothed, w = c(3, 3), 
                                                           stand = "none", include_scale = FALSE)
@@ -99,14 +112,11 @@ terrain_function <- function(dem_path, metric) {
         "500m" = paste0(base_path, "_500m.tif")
     )
     
-    # Load DEM
-    dem_rast <- rast(dem_path)
-    
     tryCatch({
         # Process each scale - DEM loaded only once
-        process_scale(dem_rast, 5,   output_files[["5m"]],   metric, "5m")
-        process_scale(dem_rast, 100, output_files[["100m"]], metric, "100m")
-        process_scale(dem_rast, 500, output_files[["500m"]], metric, "500m")
+        process_scale(dem_path, 5,   output_files[["5m"]],   metric, "5m")
+        process_scale(dem_path, 100, output_files[["100m"]], metric, "100m")
+        process_scale(dem_path, 500, output_files[["500m"]], metric, "500m")
         
     }, error = function(e) {
         message(paste0("ERROR at: ", cluster_huc_name, " - ", e$message))
@@ -114,7 +124,6 @@ terrain_function <- function(dem_path, metric) {
     })
     
     # Cleanup
-    rm(dem_rast)
     gc(verbose = FALSE)
     tmpFiles(remove = TRUE)
     
@@ -126,7 +135,7 @@ list_of_huc_dems <- list.files(
     args[3],
     pattern = paste0("^cluster_", args[2], "_.*\\.tif$"),  
     full.names = TRUE
-) |> str_subset(pattern = "wbt", negate = TRUE)
+) |> str_subset(pattern = "wbt", negate = TRUE) 
 
 message(paste0("Found ", length(list_of_huc_dems), " DEMs to process"))
 
@@ -149,7 +158,9 @@ future_lapply(
     future.scheduling = 1.0  # Dynamic load balancing
 )
 
-# lapply(list_of_huc_dems, terrain_function, cluster_target)
+lapply(list_of_huc_dems[1],
+       terrain_function,
+       metric = args[4])
 # 
 # r <- rast("Data/TerrainProcessed/HUC_DEMs/cluster_120_huc_020200060609.tif")
 # 

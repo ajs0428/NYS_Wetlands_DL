@@ -140,7 +140,7 @@ process_huc <- function(i, cluster_target, final_crossing_features, args) {
         huc_chm_merge_mask <- terra::mask(huc_chm_merge, (!is.na(dem_rast) & is.na(huc_chm_merge)),
                                           maskvalues=TRUE, updatevalue = 0, filename = chm_filename,
                                           overwrite = TRUE)
-
+        
         return(chm_filename)
     # } else if(file.exists(chm_filename) & file.exists(dem_filename)){
     #     print(paste0("File already exists: ", chm_filename))
@@ -168,13 +168,13 @@ future_lapply(
 )
 
 # ### Non-parallel testing
-lapply(
-    seq_along(cluster_target$huc12),
-    process_huc,
-    cluster_target = cluster_target,
-    final_crossing_features = final_crossing_features,
-    args = args
-)
+# lapply(
+#     seq_along(cluster_target$huc12),
+#     process_huc,
+#     cluster_target = cluster_target,
+#     final_crossing_features = final_crossing_features,
+#     args = args
+# )
 
 
 
