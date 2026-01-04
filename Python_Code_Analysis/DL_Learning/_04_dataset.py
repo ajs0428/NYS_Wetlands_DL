@@ -1,6 +1,6 @@
 from pathlib import Path
 import os
-workdir = Path("/ibstorage/anthony/NYS_Wetlands_GHG/")
+workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_GHG/")
 print(workdir)
 os.chdir(workdir)
 current_working_dir = Path.cwd()
@@ -76,10 +76,10 @@ def get_dataloaders(train_X_path, train_y_path, val_X_path, val_y_path, batch_si
 # === TEST THE DATASET ===
 if __name__ == "__main__":
     train_loader, val_loader = get_dataloaders(
-        "Data/Patches/X_train.npy",
-        "Data/Patches/y_train.npy",
-        "Data/Patches/X_val.npy",
-        "Data/Patches/y_val.npy",
+        "Data/Patches_v2/X_train.npy",
+        "Data/Patches_v2/y_train.npy",
+        "Data/Patches_v2/X_val.npy",
+        "Data/Patches_v2/y_val.npy",
         batch_size=16
     )
     

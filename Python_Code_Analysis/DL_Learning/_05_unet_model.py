@@ -1,6 +1,6 @@
 from pathlib import Path
 import os
-workdir = Path("/ibstorage/anthony/NYS_Wetlands_GHG/")
+workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_GHG/")
 print(workdir)
 os.chdir(workdir)
 current_working_dir = Path.cwd()
