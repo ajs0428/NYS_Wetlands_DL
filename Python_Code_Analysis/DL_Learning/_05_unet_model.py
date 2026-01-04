@@ -1,13 +1,22 @@
 from pathlib import Path
 import os
+import json
+
 workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_GHG/")
-print(workdir)
 os.chdir(workdir)
-current_working_dir = Path.cwd()
-print(f"Current working directory is now: {current_working_dir}")
 
 import torch
 import torch.nn as nn
+
+
+def load_metadata(data_dir="Data/Patches_v2"):
+    """Load metadata from patches directory."""
+    metadata_path = Path(data_dir) / "metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path) as f:
+            return json.load(f)
+    else:
+        raise FileNotFoundError(f"Metadata not found at {metadata_path}. Run 03_create_patches_v2.ipynb first.")
 
 class ConvBlock(nn.Module):
     """Two consecutive conv layers with BatchNorm and ReLU."""
@@ -110,46 +119,53 @@ class UNet(nn.Module):
 
 # === TEST THE MODEL ===
 if __name__ == "__main__":
-    # Create model
-    model = UNet(in_channels=7, num_classes=5, base_filters=32)
-    
+    import numpy as np
+
+    # Load metadata from patches
+    metadata = load_metadata("Data/Patches_v2")
+    print(f"Loaded metadata: {metadata}")
+
+    in_channels = metadata["in_channels"]
+    num_classes = metadata["num_classes"]
+    patch_size = metadata["patch_size"]
+
+    # Create model using metadata
+    model = UNet(in_channels=in_channels, num_classes=num_classes, base_filters=32)
+
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Total parameters: {total_params:,}")
+    print(f"\nTotal parameters: {total_params:,}")
     print(f"Trainable parameters: {trainable_params:,}")
-    
+
     # Test forward pass
-    dummy_input = torch.randn(4, 7, 128, 128)  # Batch of 4, 7 channels, 128x128
+    dummy_input = torch.randn(4, in_channels, patch_size, patch_size)
     print(f"\nInput shape: {dummy_input.shape}")
-    
+
     output = model(dummy_input)
-    print(f"Output shape: {output.shape}")  # Should be (4, 5, 128, 128)
-    
+    print(f"Output shape: {output.shape}")
+
     # Verify output is correct shape for our task
-    assert output.shape == (4, 5, 128, 128), "Output shape mismatch!"
+    expected_shape = (4, num_classes, patch_size, patch_size)
+    assert output.shape == expected_shape, f"Output shape mismatch! Expected {expected_shape}, got {output.shape}"
     print("\nModel architecture verified successfully!")
 
-#### Check class distribution
-import numpy as np
+    # Check class distribution in training data
+    y_train = np.load("Data/Patches_v2/y_train.npy")
 
-y_train = np.load("Data/Patches/y_train.npy")
+    classes, counts = np.unique(y_train, return_counts=True)
+    total = counts.sum()
 
-# Count pixels per class
-classes, counts = np.unique(y_train, return_counts=True)
-total = counts.sum()
+    print("\nClass distribution:")
+    for c, count in zip(classes, counts):
+        print(f"  Class {c}: {count:,} pixels ({count/total*100:.2f}%)")
 
-print("Class distribution:")
-for c, count in zip(classes, counts):
-    print(f"  Class {c}: {count:,} pixels ({count/total*100:.2f}%)")
+    # Compute inverse frequency weights
+    frequencies = counts / total
+    weights = 1.0 / frequencies
+    weights = weights / weights.min()
 
-# Compute inverse frequency weights
-# Higher weight for rarer classes
-frequencies = counts / total
-weights = 1.0 / frequencies
-weights = weights / weights.min()  # Normalize so smallest weight is 1.0
-
-print("\nClass weights (inverse frequency):")
-class_names = ['Background', 'EMW', 'FSW', 'SSW', 'OWW']
-for c, w in zip(classes, weights):
-    print(f"  {class_names[c]}: {w:.2f}")
+    print("\nClass weights (inverse frequency):")
+    class_names = metadata["class_names"]
+    for c, w in zip(classes, weights):
+        print(f"  {class_names[c]}: {w:.2f}")
