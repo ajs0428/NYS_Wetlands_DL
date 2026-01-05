@@ -11,6 +11,7 @@
 !R_Code_Analysis/*
 !Python_Code_Analysis/*
 !Shell_Scripts/*.sh
+# But do ignore these
 R_Code_Analysis/raster_footprint*
 Python_Code_Analysis/raster_footprint*
 
@@ -20,6 +21,8 @@ R_Code_Analysis/*/
 # except the DL stuff now
 !Python_Code_Analysis/DL_Learning/*.ipynb
 !Python_Code_Analysis/DL_Learning/*.py
+!Python_Code_Analysis/DL_Implement/*.py
+!Python_Code_Analysis/DL_Implement/*.ipynb
 
 !.gitignore
 !.gitattributes
