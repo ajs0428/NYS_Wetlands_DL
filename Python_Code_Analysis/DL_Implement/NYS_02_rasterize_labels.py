@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # NYS_02_rasterize_labels
-
-# In[116]:
+# In[7]:
 
 
 from pathlib import Path
@@ -15,7 +13,7 @@ current_working_dir = Path.cwd()
 print(f"Current working directory is now: {current_working_dir}")
 
 
-# In[117]:
+# In[8]:
 
 
 import rasterio
@@ -25,25 +23,14 @@ import numpy as np
 import sys
 
 
-# In[118]:
-
-
-# === Testing Args ===
-args = ["Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
-        208,
-        "Data/Training_Data/Wetland_Polygons_For_DL/",
-        "Data/TerrainProcessed/HUC_DEMs/",
-        "Data/Training_Data/DL_HUC_Extracted_Training_Data"]
-
-
-# In[119]:
+# In[4]:
 
 
 # === Terminal Import Args ===
 # args = sys.argv
 
 
-# In[120]:
+# In[10]:
 
 
 # === Cluster Import ===
@@ -57,10 +44,4 @@ class_mapping = {
     'SSW': 3,  # Shrub Scrub Wetland
     'OWW': 4,  # Open Water Wetland
 }
-
-
-# In[ ]:
-
-
-
 
