@@ -9,6 +9,7 @@
 
 # Don't ignore files directly in these directories
 !Python_Code_Analysis/*
+!R_Code_Analysis/*
 !Shell_Scripts/*.sh
 # But do ignore these
 Python_Code_Analysis/raster_footprint*
