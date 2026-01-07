@@ -4,13 +4,13 @@
 # Except these directories
 !Python_Code_Analysis/
 !Documentation/
+!R_Code_Analysis/
 !Shell_Scripts/
 
 # Don't ignore files directly in these directories
 !Python_Code_Analysis/*
 !Shell_Scripts/*.sh
 # But do ignore these
-R_Code_Analysis/raster_footprint*
 Python_Code_Analysis/raster_footprint*
 
 # Ignore directories in directories (probably quarto stuff)
