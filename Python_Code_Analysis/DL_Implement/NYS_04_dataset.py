@@ -8,7 +8,7 @@ from pathlib import Path
 import os
 import json
 
-workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_GHG/")
+workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_DL/")
 os.chdir(workdir)
 print(f"Current working directory: {Path.cwd()}")
 

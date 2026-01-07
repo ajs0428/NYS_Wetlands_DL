@@ -230,7 +230,7 @@ if __name__ == "__main__":
     import numpy as np
 
     # Configuration
-    workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_GHG/")
+    workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_DL/")
     os.chdir(workdir)
     print(f"Current working directory: {Path.cwd()}")
 

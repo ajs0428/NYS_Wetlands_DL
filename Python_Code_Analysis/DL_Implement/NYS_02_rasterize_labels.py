@@ -6,7 +6,7 @@
 
 from pathlib import Path
 import os
-workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_GHG/")
+workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_DL/")
 print(workdir)
 os.chdir(workdir)
 current_working_dir = Path.cwd()
