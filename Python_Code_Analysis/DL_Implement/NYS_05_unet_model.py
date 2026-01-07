@@ -1,21 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
-"""
-NYS_05_unet_model.py
 
-U-Net model for wetland semantic segmentation.
-Generated from NYS_05_unet_model.ipynb
-
-Exports: UNet, ConvBlock, EncoderBlock, DecoderBlock,
-         find_patch_files, load_and_merge_metadata
-"""
-
-from pathlib import Path
-import os
-import json
-
-import torch
-import torch.nn as nn
+# In[10]:
 
 
 # === FILE LOADING UTILITIES ===
@@ -123,7 +109,36 @@ def load_and_merge_metadata(metadata_files):
     return merged
 
 
-# === U-NET MODEL COMPONENTS ===
+# === LOAD METADATA (only when running notebook directly) ===
+if __name__ == "__main__" or 'get_ipython' in dir():
+    # This block runs in notebook or as main script, but NOT when imported
+    files = find_patch_files(data_dir, cluster_id, huc_id)
+
+    if "metadata" in files:
+        metadata = load_and_merge_metadata(files["metadata"])
+    else:
+        metadata = load_and_merge_metadata(files["metadata_files"])
+
+    print(f"\nMetadata loaded:")
+    print(f"  in_channels: {metadata['in_channels']}")
+    print(f"  num_classes: {metadata['num_classes']}")
+    print(f"  patch_size: {metadata['patch_size']}")
+    print(f"  band_names: {metadata['band_names']}")
+    print(f"  n_train: {metadata.get('n_train', 'N/A')}")
+    print(f"  n_val: {metadata.get('n_val', 'N/A')}")
+    if "hucs_included" in metadata:
+        print(f"  HUCs included: {metadata['hucs_included']}")
+
+
+# In[11]:
+
+
+import torch
+import torch.nn as nn
+
+
+# In[12]:
+
 
 class ConvBlock(nn.Module):
     """Two consecutive conv layers with BatchNorm and ReLU."""
@@ -225,44 +240,69 @@ class UNet(nn.Module):
         return self.final(x)
 
 
-# === MAIN (only runs when script is executed directly) ===
-if __name__ == "__main__":
-    import numpy as np
+# In[13]:
 
-    # Configuration
-    workdir = Path("/Users/Anthony/Data and Analysis Local/NYS_Wetlands_DL/")
-    os.chdir(workdir)
-    print(f"Current working directory: {Path.cwd()}")
 
-    data_dir = Path("Data/Patches_v2")
-    cluster_id = 208
-    huc_id = None
+# === TEST THE MODEL ===
+if __name__ == "__main__" or 'get_ipython' in dir():
+    in_channels = metadata["in_channels"]
+    num_classes = metadata["num_classes"]
+    patch_size = metadata["patch_size"]
 
-    # Load metadata
-    files = find_patch_files(data_dir, cluster_id, huc_id)
-    if "metadata" in files:
-        metadata = load_and_merge_metadata(files["metadata"])
-    else:
-        metadata = load_and_merge_metadata(files["metadata_files"])
+    # Create model using metadata
+    model = UNet(in_channels=in_channels, num_classes=num_classes, base_filters=32)
 
-    print(f"\nMetadata loaded:")
-    print(f"  in_channels: {metadata['in_channels']}")
-    print(f"  num_classes: {metadata['num_classes']}")
-    print(f"  patch_size: {metadata['patch_size']}")
-
-    # Test model
-    model = UNet(
-        in_channels=metadata["in_channels"],
-        num_classes=metadata["num_classes"],
-        base_filters=32
-    )
-
+    # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"\nTotal parameters: {total_params:,}")
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
 
     # Test forward pass
-    dummy_input = torch.randn(4, metadata["in_channels"], metadata["patch_size"], metadata["patch_size"])
+    dummy_input = torch.randn(4, in_channels, patch_size, patch_size)
+    print(f"\nInput shape: {dummy_input.shape}")
+
     output = model(dummy_input)
-    print(f"Input shape: {dummy_input.shape}")
     print(f"Output shape: {output.shape}")
+
+    # Verify output is correct shape
+    expected_shape = (4, num_classes, patch_size, patch_size)
+    assert output.shape == expected_shape, f"Output shape mismatch! Expected {expected_shape}, got {output.shape}"
     print("\nModel architecture verified successfully!")
+
+
+# In[14]:
+
+
+import numpy as np
+
+# === COMPUTE CLASS WEIGHTS FROM TRAINING DATA ===
+if __name__ == "__main__" or 'get_ipython' in dir():
+    # Load all y_train files and concatenate
+    print(f"Loading {len(files['y_train'])} y_train file(s)...")
+    y_train_list = [np.load(f) for f in files['y_train']]
+    y_train = np.concatenate(y_train_list, axis=0)
+    print(f"Combined y_train shape: {y_train.shape}")
+
+    # Count pixels per class
+    classes, counts = np.unique(y_train, return_counts=True)
+    total = counts.sum()
+
+    print("\nClass distribution:")
+    class_names = metadata["class_names"]
+    for c, count in zip(classes, counts):
+        print(f"  {class_names[c]} (class {c}): {count:,} pixels ({count/total*100:.2f}%)")
+
+    # Compute inverse frequency weights
+    frequencies = counts / total
+    weights = 1.0 / frequencies
+    weights = weights / weights.min()  # Normalize so smallest weight is 1.0
+
+    print("\nClass weights (inverse frequency, normalized):")
+    for c, w in zip(classes, weights):
+        print(f"  {class_names[c]}: {w:.2f}")
+
+    # Store as tensor for use in loss function
+    class_weights = torch.tensor(weights, dtype=torch.float32)
+    print(f"\nclass_weights tensor: {class_weights}")
+

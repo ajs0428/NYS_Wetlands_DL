@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[5]:
 
 
 from pathlib import Path
@@ -24,7 +24,7 @@ print(f"  cluster_id: {cluster_id}")
 print(f"  huc_id: {huc_id or 'All HUCs in cluster'}")
 
 
-# In[2]:
+# In[6]:
 
 
 import torch
@@ -32,7 +32,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 
 
-# In[3]:
+# In[7]:
 
 
 class WetlandDataset(Dataset):
@@ -241,42 +241,6 @@ def get_dataloaders(data_dir, cluster_id=None, huc_id=None, batch_size=16):
     )
 
     return train_loader, val_loader, metadata
-
-
-# In[ ]:
-
-
-# === TEST THE DATASET ===
-train_loader, val_loader, metadata = get_dataloaders(
-    data_dir, 
-    cluster_id=cluster_id, 
-    huc_id=huc_id, 
-    batch_size=16
-)
-
-print(f"\nDataset Summary:")
-print(f"  Total training patches: {metadata.get('n_train', len(train_loader.dataset))}")
-print(f"  Total validation patches: {metadata.get('n_val', len(val_loader.dataset))}")
-print(f"  Training batches: {len(train_loader)}")
-print(f"  Validation batches: {len(val_loader)}")
-
-if "hucs_included" in metadata:
-    print(f"  HUCs included: {metadata['hucs_included']}")
-
-# Get one batch and check shapes/ranges
-X_batch, y_batch = next(iter(train_loader))
-
-print(f"\nBatch shapes:")
-print(f"  X: {X_batch.shape} (dtype: {X_batch.dtype})")
-print(f"  y: {y_batch.shape} (dtype: {y_batch.dtype})")
-
-print(f"\nNormalized band ranges (first batch):")
-for i, name in enumerate(metadata["band_names"]):
-    band = X_batch[:, i, :, :]
-    print(f"  {name}: min={band.min():.3f}, max={band.max():.3f}")
-
-print(f"\nLabel classes in batch: {torch.unique(y_batch).tolist()}")
-print(f"Class names: {metadata.get('class_names', ['Background', 'EMW', 'FSW', 'SSW', 'OWW'])}")
 
 
 # In[ ]:
