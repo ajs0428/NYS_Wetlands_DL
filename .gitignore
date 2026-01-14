@@ -15,12 +15,13 @@
 Python_Code_Analysis/raster_footprint*
 
 # Ignore directories in directories (probably quarto stuff)
-# Python_Code_Analysis/
 # except the DL stuff now
 !Python_Code_Analysis/DL_Learning/*.ipynb
 !Python_Code_Analysis/DL_Learning/*.py
 !Python_Code_Analysis/DL_Implement/*.py
 !Python_Code_Analysis/DL_Implement/*.ipynb
+!Python_Code_Analysis/torchgeo_testing/*.ipynb
+!Python_Code_Analysis/torchgeo_testing/*.py
 
 !.gitignore
 !.gitattributes

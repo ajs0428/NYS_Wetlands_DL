@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[10]:
+# In[ ]:
 
 
 # === FILE LOADING UTILITIES ===
@@ -109,6 +109,9 @@ def load_and_merge_metadata(metadata_files):
     return merged
 
 
+# In[4]:
+
+
 # === LOAD METADATA (only when running notebook directly) ===
 if __name__ == "__main__" or 'get_ipython' in dir():
     # This block runs in notebook or as main script, but NOT when imported
@@ -130,15 +133,11 @@ if __name__ == "__main__" or 'get_ipython' in dir():
         print(f"  HUCs included: {metadata['hucs_included']}")
 
 
-# In[11]:
+# In[1]:
 
 
 import torch
 import torch.nn as nn
-
-
-# In[12]:
-
 
 class ConvBlock(nn.Module):
     """Two consecutive conv layers with BatchNorm and ReLU."""
@@ -240,7 +239,7 @@ class UNet(nn.Module):
         return self.final(x)
 
 
-# In[13]:
+# In[6]:
 
 
 # === TEST THE MODEL ===
@@ -271,7 +270,7 @@ if __name__ == "__main__" or 'get_ipython' in dir():
     print("\nModel architecture verified successfully!")
 
 
-# In[14]:
+# In[7]:
 
 
 import numpy as np
