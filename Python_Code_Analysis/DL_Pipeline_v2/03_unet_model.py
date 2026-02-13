@@ -11,29 +11,46 @@ from typing import List
 
 
 class ConvBlock(nn.Module):
-    """Double convolution block: Conv-BN-ReLU x 2"""
+    """Double convolution block: Conv-BN-ReLU x 2, with optional residual connection."""
 
-    def __init__(self, in_channels: int, out_channels: int):
+    def __init__(self, in_channels: int, out_channels: int, residual: bool = False):
         super().__init__()
-        self.block = nn.Sequential(
+        self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+        )
+        self.relu = nn.ReLU(inplace=True)
+
+        # Residual shortcut: 1x1 projection when channels differ, identity otherwise
+        if residual and in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+        elif residual:
+            self.shortcut = nn.Identity()
+        else:
+            self.shortcut = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.block(x)
+        out = self.conv1(x)
+        out = self.conv2(out)
+        if self.shortcut is not None:
+            out = out + self.shortcut(x)
+        return self.relu(out)
 
 
 class EncoderBlock(nn.Module):
-    """Encoder block: ConvBlock + MaxPool"""
+    """Encoder block: ConvBlock (with residual) + MaxPool"""
 
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
-        self.conv = ConvBlock(in_channels, out_channels)
+        self.conv = ConvBlock(in_channels, out_channels, residual=True)
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
     def forward(self, x: torch.Tensor) -> tuple:
