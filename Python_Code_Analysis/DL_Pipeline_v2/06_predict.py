@@ -184,15 +184,19 @@ def predict_raster(
     print(f"Matched {len(predictor_names)} predictor bands by name")
     print(f"Patch size: {patch_size}, Overlap: {overlap}")
 
-    # Initialize output arrays
-    predictions = np.zeros((height, width), dtype=np.uint8)
+    # Initialize output arrays — always accumulate in probability space
+    probabilities = np.zeros((num_classes, height, width), dtype=np.float32)
     counts = np.zeros((height, width), dtype=np.float32)
-
-    if save_probabilities:
-        probabilities = np.zeros((num_classes, height, width), dtype=np.float32)
 
     # Calculate step size
     step = patch_size - overlap
+
+    # Build 2D Hanning blending kernel: smooth taper from 1.0 at center
+    # to ~0 at edges, eliminating hard tile boundaries
+    hann_1d = np.hanning(patch_size).astype(np.float32)
+    weight = np.outer(hann_1d, hann_1d)
+    # Clamp minimum so pixels still contribute even at corners
+    weight = np.clip(weight, 1e-3, None)
 
     # Generate window positions
     y_positions = list(range(0, height - patch_size + 1, step))
@@ -220,38 +224,17 @@ def predict_raster(
             tensor = torch.from_numpy(normalized).unsqueeze(0).to(device)
             output = model(tensor)
             probs = torch.softmax(output, dim=1).squeeze(0).cpu().numpy()
-            pred = probs.argmax(axis=0)
 
-            # Weight by distance from center for smooth blending
-            weight = np.ones((patch_size, patch_size), dtype=np.float32)
-
-            # Accumulate predictions
-            predictions[y:y+patch_size, x:x+patch_size] = np.where(
-                counts[y:y+patch_size, x:x+patch_size] == 0,
-                pred,
-                np.where(
-                    weight > 0.5,
-                    pred,
-                    predictions[y:y+patch_size, x:x+patch_size]
-                )
-            )
-
-            if save_probabilities:
-                probabilities[:, y:y+patch_size, x:x+patch_size] += probs * weight
-
+            # Accumulate weighted probabilities
+            probabilities[:, y:y+patch_size, x:x+patch_size] += probs * weight
             counts[y:y+patch_size, x:x+patch_size] += weight
 
-    # Normalize probabilities
-    if save_probabilities:
-        probabilities = np.divide(
-            probabilities,
-            counts[np.newaxis, :, :],
-            where=counts[np.newaxis, :, :] > 0
-        )
-        predictions = probabilities.argmax(axis=0).astype(np.uint8)
+    # Normalize accumulated probabilities by total weight
+    valid = counts > 0
+    probabilities[:, valid] /= counts[valid]
 
-    # Handle areas with no predictions (edges)
-    predictions = np.where(counts > 0, predictions, 255)
+    # Derive class predictions from blended probabilities
+    predictions = np.where(valid, probabilities.argmax(axis=0).astype(np.uint8), 255)
 
     # Write output
     profile.update(
@@ -278,6 +261,9 @@ def predict_raster(
             nodata=-1
         )
 
+        # Zero out probabilities where no predictions were made
+        probabilities[:, ~valid] = -1
+
         with rasterio.open(prob_path, 'w', **prob_profile) as dst:
             for i in range(num_classes):
                 dst.write(probabilities[i], i + 1)
@@ -301,7 +287,7 @@ def main(
     output_path: Path,
     stats_path: Path,
     patch_size: int = 128,
-    overlap: int = 12,
+    overlap: int = 64,
     base_filters: int = 32,
     depth: int = 4,
     save_probabilities: bool = False
@@ -355,7 +341,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=Path, default=Path("Models/best_model.pth"))
     parser.add_argument("--stats", type=Path, default=Path("Data/Training_Data/normalization_stats.json"))
     parser.add_argument("--patch-size", type=int, default=128)
-    parser.add_argument("--overlap", type=int, default=12)
+    parser.add_argument("--overlap", type=int, default=64)
     parser.add_argument("--base-filters", type=int, default=32)
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--probs", action="store_true", help="Save probability maps")
