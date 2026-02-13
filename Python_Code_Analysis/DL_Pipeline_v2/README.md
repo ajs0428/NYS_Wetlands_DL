@@ -332,15 +332,17 @@ Loads a sample batch and prints tensor shapes and value ranges to verify normali
 
 ## Step 3: Model Architecture (`03_unet_model.py`)
 
-U-Net encoder-decoder architecture with skip connections for semantic segmentation.
+U-Net encoder-decoder architecture with skip connections, residual encoder blocks, and squeeze-and-excitation (SE) channel attention in the decoder. See [UNet_Architecture_Overview.md](UNet_Architecture_Overview.md) for a detailed breakdown.
 
 ### Architecture
 
 ```
-Input (29 ch) → Encoder (progressive downsampling) → Bottleneck → Decoder (upsampling + skip) → Output (5 ch)
+Input (29 ch) → Residual Encoder (progressive downsampling) → Bottleneck → SE Decoder (upsampling + skip + attention) → Output (5 ch)
 ```
 
-Each encoder/decoder level consists of Conv → BatchNorm → ReLU blocks.
+- **Encoder blocks**: Double Conv-BN-ReLU with residual (shortcut) connections. A 1x1 projection handles channel mismatches. Improves gradient flow through the encoder.
+- **Decoder blocks**: Upsample + skip concatenation + Conv-BN-ReLU + Squeeze-and-Excitation. SE learns to reweight channels after fusing encoder and decoder features.
+- **Bottleneck**: Standard double Conv-BN-ReLU (no residual, no SE).
 
 ### Configuration
 
@@ -349,6 +351,7 @@ Each encoder/decoder level consists of Conv → BatchNorm → ReLU blocks.
 | `base_filters` | 32 | 64 |
 | `depth` | 4 | 5 |
 | Filter progression | 32→64→128→256→512 | 64→128→256→512→1024 |
+| Parameters (approx) | ~7.8M | ~125.3M |
 
 - `in_channels` and `num_classes` are read from `normalization_stats.json` — not hardcoded.
 
@@ -399,8 +402,8 @@ python 04_train.py \
 
 ### Training Details
 
-- **Loss**: `CrossEntropyLoss` with inverse frequency class weights and `ignore_index=255`
-- **Optimizer**: AdamW
+- **Loss**: Hybrid CrossEntropy + Dice (`HybridLoss`). CE carries inverse frequency class weights and `ignore_index=255`; Dice is computed per-class on softmax probabilities then averaged (inherently class-balanced). Combined as `CE + Dice` with equal weight.
+- **Optimizer**: AdamW (weight decay 1e-4)
 - **Scheduler**: ReduceLROnPlateau (reduces LR when validation loss plateaus)
 - **Metrics tracked**: loss, pixel accuracy, mean IoU (per epoch)
 - **Checkpointing**: saves best model (lowest validation loss) and final model
@@ -553,7 +556,7 @@ SEED = 42
 | "No band descriptions found" | Ensure GeoTIFF band descriptions are set (use `rasterio` to verify) |
 | DataLoader crashes on macOS | Set `--workers 0` (or `NUM_WORKERS=0` in notebook) |
 | Out of memory during training | Reduce `--batch-size` or `--base-filters` |
-| NaN values in loss | Verify `ignore_index=255` is set; check for corrupted patches |
+| NaN values in loss | Verify `ignore_index=255` is set; check for corrupted patches. HybridLoss handles all-ignored batches gracefully. |
 | Band mismatch during prediction | Input raster band descriptions must match the names in `normalization_stats.json` |
 | `--base-filters` / `--depth` mismatch | Evaluation and prediction must use the same values as training |
 
@@ -575,6 +578,7 @@ NYS_Wetlands_DL/
 └── Python_Code_Analysis/
     └── DL_Pipeline_v2/
         ├── README.md                   # This file
+        ├── UNet_Architecture_Overview.md        # Detailed model architecture reference
         ├── band_config.json            # Normalization rules
         ├── band_utils.py               # Shared band utilities
         ├── 01_compute_statistics.py     # Step 1: Stats
