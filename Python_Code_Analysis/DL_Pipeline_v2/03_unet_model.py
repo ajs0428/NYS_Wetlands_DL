@@ -59,8 +59,29 @@ class EncoderBlock(nn.Module):
         return pooled, conv_out  # Return both for skip connection
 
 
+class SqueezeExcitation(nn.Module):
+    """Squeeze-and-Excitation channel attention block."""
+
+    def __init__(self, channels: int, reduction: int = 16):
+        super().__init__()
+        mid = max(channels // reduction, 8)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channels, mid, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(mid, channels, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, _, _ = x.shape
+        scale = self.pool(x).view(b, c)
+        scale = self.fc(scale).view(b, c, 1, 1)
+        return x * scale
+
+
 class DecoderBlock(nn.Module):
-    """Decoder block: Upsample + Concat + ConvBlock"""
+    """Decoder block: Upsample + Concat + ConvBlock + Squeeze-and-Excitation"""
 
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
@@ -68,6 +89,7 @@ class DecoderBlock(nn.Module):
             in_channels, out_channels, kernel_size=2, stride=2
         )
         self.conv = ConvBlock(in_channels, out_channels)
+        self.se = SqueezeExcitation(out_channels)
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
         x = self.upsample(x)
@@ -82,7 +104,8 @@ class DecoderBlock(nn.Module):
             ])
 
         x = torch.cat([x, skip], dim=1)
-        return self.conv(x)
+        x = self.conv(x)
+        return self.se(x)
 
 
 class UNet(nn.Module):
