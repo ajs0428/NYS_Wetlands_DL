@@ -1,0 +1,12 @@
+{
+  "label_band": "MOD_CLASS",
+  "default_method": "min_max",
+  "band_normalization": {
+    "NDVI": {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
+    "MNDWI": {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
+    "NDYI": {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
+    "Geomorph_local": {"method": "one_hot", "num_classes": 10, "class_range": [1, 10]}
+  },
+  "class_names": ["EMW", "FSW", "OWW", "SSW", "UPL"],
+  "ignore_index": 255
+}
