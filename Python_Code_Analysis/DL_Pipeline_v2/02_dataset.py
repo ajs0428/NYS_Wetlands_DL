@@ -63,6 +63,17 @@ class WetlandPatchDataset(Dataset):
         self.ignore_index = self.stats.get("ignore_index", 255)
         self.in_channels = self.stats["in_channels"]
 
+        # Build label remap lookup table (for binary mode)
+        remap = self.stats.get("label_remap")
+        if remap:
+            max_src = max(int(k) for k in remap)
+            self._remap_lut = np.full(max(max_src + 1, 256), self.ignore_index, dtype=np.int64)
+            for src, dst in remap.items():
+                self._remap_lut[int(src)] = dst
+            self._remap_lut[self.ignore_index] = self.ignore_index
+        else:
+            self._remap_lut = None
+
         # Build predictor band indices (into the raw raster)
         self.predictor_indices = [
             self.band_names.index(name) for name in self.predictor_names
@@ -101,6 +112,10 @@ class WetlandPatchDataset(Dataset):
             nodata_mask |= (labels == nodata)
 
         labels = np.where(nodata_mask, self.ignore_index, labels).astype(np.int64)
+
+        # Apply label remap (e.g., multiclass -> binary)
+        if self._remap_lut is not None:
+            labels = self._remap_lut[labels]
 
         # Normalize predictors and one-hot encode categorical bands
         normalized = self._normalize_predictors(predictors, nodata)

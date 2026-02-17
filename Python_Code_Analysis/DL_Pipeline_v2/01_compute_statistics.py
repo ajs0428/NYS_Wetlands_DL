@@ -41,8 +41,9 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
     """
     config = load_band_config(config_path)
     label_band = config["label_band"]
-    class_names = config["class_names"]
+    original_class_names = config["class_names"]
     ignore_index = config["ignore_index"]
+    classification_mode = config.get("classification_mode", "multiclass")
 
     patch_files = sorted(patches_dir.glob("*.tif"))
 
@@ -139,6 +140,36 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
 
             total_pixels += label_data.size
 
+    # Build label remap for binary mode
+    label_remap = None
+    if classification_mode == "binary":
+        binary_mapping = config.get("binary_mapping", {})
+        if not binary_mapping:
+            raise ValueError("classification_mode is 'binary' but no binary_mapping defined in band_config.json")
+
+        # Map original class names -> original integer indices
+        orig_name_to_idx = {name: i for i, name in enumerate(original_class_names)}
+
+        # Build remap: original class index -> binary class index
+        binary_class_names = list(binary_mapping.keys())
+        label_remap = {}
+        for binary_idx, binary_name in enumerate(binary_class_names):
+            for orig_name in binary_mapping[binary_name]:
+                if orig_name in orig_name_to_idx:
+                    label_remap[orig_name_to_idx[orig_name]] = binary_idx
+
+        # Aggregate class counts under binary labels
+        remapped_counts = defaultdict(int)
+        for orig_idx, count in class_counts.items():
+            if orig_idx in label_remap:
+                remapped_counts[label_remap[orig_idx]] += count
+        class_counts = remapped_counts
+        class_names = binary_class_names
+        print(f"\nBinary mode: remapping {original_class_names} -> {class_names}")
+        print(f"  Label remap: {label_remap}")
+    else:
+        class_names = original_class_names
+
     # Compute means and stds
     band_means = {}
     band_stds = {}
@@ -211,6 +242,8 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
         "labeled_pixels": total_class_pixels,
         "unlabeled_pixels": nodata_pixels,
         "ignore_index": ignore_index,
+        "classification_mode": classification_mode,
+        "label_remap": {str(k): v for k, v in label_remap.items()} if label_remap else None,
         "label_band": label_band,
         "in_channels": in_channels,
         "band_names": band_names,

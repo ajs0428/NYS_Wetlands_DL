@@ -1,5 +1,10 @@
 {
   "label_band": "MOD_CLASS",
+  "classification_mode": "binary",
+  "binary_mapping": {
+    "WET": ["EMW", "FSW", "OWW", "SSW"],
+    "UPL": ["UPL"]
+  },
   "default_method": "min_max",
   "band_normalization": {
     "NDVI": {"method": "shift_scale", "shift": 1.0, "scale": 2.0},

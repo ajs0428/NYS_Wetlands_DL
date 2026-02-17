@@ -306,15 +306,20 @@ def train(
     num_classes = len(stats["class_names"])
     class_names = stats["class_names"]
     ignore_index = stats.get("ignore_index", 255)
+    classification_mode = stats.get("classification_mode", "multiclass")
+
+    # File naming: best_model_binary.pth, best_model_multiclass.pth, etc.
+    mode_suffix = f"_{classification_mode}"
 
     print(f"{'='*60}")
     print("Wetland Classification Training")
     print(f"{'='*60}")
     print(f"Device: {device}")
+    print(f"Classification mode: {classification_mode}")
     print(f"Patches: {patches_dir}")
     print(f"Output: {output_dir}")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
-    print(f"Input channels: {in_channels}, Classes: {num_classes}")
+    print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"{'='*60}\n")
 
     # Create data loaders
@@ -428,7 +433,7 @@ def train(
                 'val_iou': val_metrics["mean_iou"],
                 'in_channels': in_channels,
                 'num_classes': num_classes
-            }, output_dir / "best_model.pth")
+            }, output_dir / f"best_model{mode_suffix}.pth")
             print(f"  *** Saved best model (val_loss: {best_val_loss:.4f}) ***")
 
         print()
@@ -440,7 +445,7 @@ def train(
         'optimizer_state_dict': optimizer.state_dict(),
         'in_channels': in_channels,
         'num_classes': num_classes
-    }, output_dir / "final_model.pth")
+    }, output_dir / f"final_model{mode_suffix}.pth")
 
     # Save training history
     history["config"] = {
@@ -456,7 +461,7 @@ def train(
         "class_names": class_names
     }
 
-    with open(output_dir / "training_history.json", 'w') as f:
+    with open(output_dir / f"training_history{mode_suffix}.json", 'w') as f:
         json.dump(history, f, indent=2)
 
     # Training summary
@@ -467,6 +472,9 @@ def train(
     print(f"Total time: {total_time}")
     print(f"Best validation loss: {best_val_loss:.4f}")
     print(f"Models saved to: {output_dir}")
+    print(f"  best_model{mode_suffix}.pth")
+    print(f"  final_model{mode_suffix}.pth")
+    print(f"  training_history{mode_suffix}.json")
 
     return history
 

@@ -1,6 +1,6 @@
 # NYS Wetlands DL Pipeline v2 — User Guide
 
-Deep learning pipeline for wetland semantic segmentation in New York State using a U-Net architecture. Classifies each pixel into one of five categories based on multi-source remote sensing data.
+Deep learning pipeline for wetland semantic segmentation in New York State using a U-Net architecture. Supports two classification modes: **multiclass** (5-class: EMW, FSW, OWW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `band_config.json` — both modes use the same training patches with label remapping applied at runtime.
 
 ## Table of Contents
 
@@ -10,6 +10,7 @@ Deep learning pipeline for wetland semantic segmentation in New York State using
 - [Pipeline Overview](#pipeline-overview)
 - [Input Data Requirements](#input-data-requirements)
 - [Configuration: band_config.json](#configuration-band_configjson)
+- [Classification Mode: Multiclass vs Binary](#classification-mode-multiclass-vs-binary)
 - [Shared Utilities: band_utils.py](#shared-utilities-band_utilspy)
 - [Step 1: Compute Statistics](#step-1-compute-statistics-01_compute_statisticspy)
 - [Step 2: Dataset & DataLoaders](#step-2-dataset--dataloaders-02_datasetpy)
@@ -191,7 +192,7 @@ Each patch contains 21 bands (20 predictors + 1 label). Band names are stored in
 | 19 | VH_VV_ratio | SAR index |
 | 20 | MOD_CLASS | Label |
 
-**Classes:**
+**Classes (multiclass mode):**
 
 | Value | Code | Description |
 |-------|------|-------------|
@@ -202,6 +203,8 @@ Each patch contains 21 bands (20 predictors + 1 label). Band names are stored in
 | 4 | UPL | Upland / Background |
 | 255 | — | Unlabeled (excluded from training) |
 
+**Classes (binary mode):** EMW/FSW/OWW/SSW are remapped to WET (0), UPL stays as UPL (1). See [Classification Mode](#classification-mode-multiclass-vs-binary).
+
 ---
 
 ## Configuration: band_config.json
@@ -211,6 +214,11 @@ The single file to edit when changing band normalization. Located alongside the 
 ```json
 {
   "label_band": "MOD_CLASS",
+  "classification_mode": "multiclass",
+  "binary_mapping": {
+    "WET": ["EMW", "FSW", "OWW", "SSW"],
+    "UPL": ["UPL"]
+  },
   "default_method": "min_max",
   "band_normalization": {
     "NDVI":  {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
@@ -232,6 +240,42 @@ The single file to edit when changing band normalization. Located alongside the 
 | `one_hot` | Encode to N binary channels | Categorical bands (Geomorph) |
 
 Any band **not listed** in `band_normalization` automatically uses `min_max`. You only need to add entries for `shift_scale` or `one_hot` bands.
+
+---
+
+## Classification Mode: Multiclass vs Binary
+
+The pipeline supports two classification modes, controlled by `classification_mode` in `band_config.json`:
+
+| Mode | Classes | Output Bands | Use Case |
+|------|---------|--------------|----------|
+| `"multiclass"` | EMW, FSW, OWW, SSW, UPL (5) | 5 | Fine-grained wetland type mapping |
+| `"binary"` | WET, UPL (2) | 2 | Wetland presence/absence detection |
+
+### Switching Modes
+
+1. Edit `classification_mode` in `band_config.json` to `"binary"` or `"multiclass"`
+2. Re-run `01_compute_statistics.py` to regenerate `normalization_stats.json`
+3. Train, evaluate, and predict as usual — all downstream scripts adapt automatically
+
+### How It Works
+
+- The `binary_mapping` field in `band_config.json` defines how original classes group into binary classes. The key order determines integer encoding (WET=0, UPL=1).
+- `01_compute_statistics.py` builds a `label_remap` dict (e.g., `{0:0, 1:0, 2:0, 3:0, 4:1}`) and aggregates class counts under the binary labels. Both `label_remap` and `classification_mode` are stored in `normalization_stats.json`.
+- `02_dataset.py` reads `label_remap` from the stats and applies it on-the-fly via a vectorized numpy lookup table. The original training patches are never modified.
+- Downstream scripts (`04_train`, `05_evaluate`, `06_predict`) derive `num_classes` from `len(stats["class_names"])`, so they work with either 2 or 5 classes without any code changes.
+
+### Custom Groupings
+
+You can define any label grouping by editing `binary_mapping`. For example, to separate forested wetlands from other wetland types:
+
+```json
+"classification_mode": "binary",
+"binary_mapping": {
+  "FSW": ["FSW"],
+  "OTHER": ["EMW", "OWW", "SSW", "UPL"]
+}
+```
 
 ---
 
@@ -278,6 +322,7 @@ python 01_compute_statistics.py \
 - Per-class pixel counts and inverse frequency class weights
 - `in_channels` (total model input channels, including one-hot expansion)
 - `predictor_names` and `label_band` for downstream scripts
+- In binary mode: `label_remap` mapping and aggregated binary class counts
 
 ### Output
 
@@ -311,8 +356,9 @@ PyTorch `Dataset` class for lazy-loading GeoTIFF patches with on-the-fly normali
 2. Separates predictor bands from the label band by name
 3. Applies per-band normalization using rules from `normalization_stats.json`
 4. Converts NaN label pixels to `ignore_index=255`
-5. Optional data augmentation (random flips and rotations)
-6. Returns `(predictors, labels)` tensors
+5. Applies label remapping if present (e.g., multiclass to binary)
+6. Optional data augmentation (random flips and rotations)
+7. Returns `(predictors, labels)` tensors
 
 ### Key Components
 
@@ -494,8 +540,8 @@ python 06_predict.py \
 
 | File | Format | Description |
 |------|--------|-------------|
-| `output_classification.tif` | uint8, 1 band | Class IDs (0-4); 255 = unclassified |
-| `output_classification.probs.tif` | float32, 5 bands | Per-class probabilities (only if `--probs`) |
+| `output_classification.tif` | uint8, 1 band | Class IDs (0–4 multiclass, 0–1 binary); 255 = unclassified |
+| `output_classification.probs.tif` | float32, N bands | Per-class probabilities; N = num_classes (5 multiclass, 2 binary). Only if `--probs`. |
 
 ### How Band Matching Works
 
