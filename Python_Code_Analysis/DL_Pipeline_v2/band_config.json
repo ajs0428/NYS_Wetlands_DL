@@ -1,6 +1,6 @@
 {
   "label_band": "MOD_CLASS",
-  "classification_mode": "binary",
+  "classification_mode": "multiclass",
   "binary_mapping": {
     "WET": ["EMW", "FSW", "OWW", "SSW"],
     "UPL": ["UPL"]

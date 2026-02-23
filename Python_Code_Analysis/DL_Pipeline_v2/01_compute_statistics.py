@@ -25,11 +25,10 @@ from band_utils import (
     get_predictor_band_names,
     get_normalization_method,
     compute_in_channels,
-    filter_patches_by_review_log,
 )
 
 
-def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path = None, review_log: Path = None):
+def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path = None):
     """
     Compute normalization statistics from all training patches.
 
@@ -37,7 +36,6 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
         patches_dir: Directory containing GeoTIFF patches
         output_path: Path to save JSON statistics file
         config_path: Path to band_config.json (default: alongside this script)
-        review_log: Optional path to review log CSV; excludes patches marked 'invalid'
     """
     config = load_band_config(config_path)
     label_band = config["label_band"]
@@ -49,9 +47,6 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
 
     if not patch_files:
         raise ValueError(f"No .tif files found in {patches_dir}")
-
-    if review_log is not None:
-        patch_files = filter_patches_by_review_log(patch_files, review_log)
 
     print(f"Found {len(patch_files)} patch files")
 
@@ -312,19 +307,11 @@ if __name__ == "__main__":
         default=None,
         help="Path to band_config.json (default: alongside this script)"
     )
-    parser.add_argument(
-        "--review-log",
-        type=Path,
-        default=None,
-        help="Path to review log CSV; excludes patches marked 'invalid'"
-    )
-
     args = parser.parse_args()
 
     # Handle relative paths from project root
     project_root = Path(__file__).parent.parent.parent
     patches_dir = project_root / args.patches_dir if not args.patches_dir.is_absolute() else args.patches_dir
     output_path = project_root / args.output if not args.output.is_absolute() else args.output
-    review_log = project_root / args.review_log if args.review_log and not args.review_log.is_absolute() else args.review_log
 
-    compute_statistics(patches_dir, output_path, args.config, review_log=review_log)
+    compute_statistics(patches_dir, output_path, args.config)

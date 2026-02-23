@@ -249,7 +249,6 @@ def main(
     base_filters: int = 32,
     depth: int = 4,
     seed: int = 42,
-    review_log: Optional[Path] = None
 ):
     """
     Main evaluation function.
@@ -263,7 +262,6 @@ def main(
         base_filters: Model base filters
         depth: Model depth
         seed: Random seed (must match training)
-        review_log: Optional path to review log CSV; excludes patches marked 'invalid'
     """
     device = get_device()
     print(f"Using device: {device}")
@@ -286,7 +284,6 @@ def main(
         batch_size=batch_size,
         num_workers=4,
         seed=seed,
-        review_log=review_log
     )
 
     # Evaluate
@@ -315,9 +312,6 @@ if __name__ == "__main__":
     parser.add_argument("--base-filters", type=int, default=32)
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--review-log", type=Path, default=None,
-                        help="Path to review log CSV; excludes patches marked 'invalid'")
-
     args = parser.parse_args()
 
     # Handle relative paths
@@ -326,7 +320,6 @@ if __name__ == "__main__":
     patches_dir = project_root / args.patches_dir if not args.patches_dir.is_absolute() else args.patches_dir
     stats_path = project_root / args.stats_path if not args.stats_path.is_absolute() else args.stats_path
     output_path = project_root / args.output if args.output and not args.output.is_absolute() else args.output
-    review_log = project_root / args.review_log if args.review_log and not args.review_log.is_absolute() else args.review_log
 
     main(
         model_path=model_path,
@@ -337,5 +330,4 @@ if __name__ == "__main__":
         base_filters=args.base_filters,
         depth=args.depth,
         seed=args.seed,
-        review_log=review_log
     )

@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 import random
 
-from band_utils import filter_patches_by_review_log
 
 
 class WetlandPatchDataset(Dataset):
@@ -232,7 +231,6 @@ def create_data_splits(
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
     seed: int = 42,
-    review_log: Optional[Path] = None
 ) -> Tuple[List[Path], List[Path], List[Path]]:
     """
     Split patch files into train/val/test sets.
@@ -243,7 +241,6 @@ def create_data_splits(
         val_ratio: Fraction for validation
         test_ratio: Fraction for testing
         seed: Random seed for reproducibility
-        review_log: Optional path to review log CSV; excludes patches marked 'invalid'
 
     Returns:
         train_files, val_files, test_files
@@ -254,9 +251,6 @@ def create_data_splits(
 
     if not patch_files:
         raise ValueError(f"No .tif files found in {patches_dir}")
-
-    if review_log is not None:
-        patch_files = filter_patches_by_review_log(patch_files, review_log)
 
     # Shuffle with seed
     random.seed(seed)
@@ -285,7 +279,6 @@ def create_dataloaders(
     batch_size: int = 16,
     num_workers: int = 4,
     seed: int = 42,
-    review_log: Optional[Path] = None
 ) -> Tuple[DataLoader, DataLoader, DataLoader, torch.Tensor]:
     """
     Create train/val/test DataLoaders.
@@ -296,13 +289,12 @@ def create_dataloaders(
         batch_size: Batch size for DataLoaders
         num_workers: Number of worker processes
         seed: Random seed for data splitting
-        review_log: Optional path to review log CSV; excludes patches marked 'invalid'
 
     Returns:
         train_loader, val_loader, test_loader, class_weights
     """
     train_files, val_files, test_files = create_data_splits(
-        patches_dir, seed=seed, review_log=review_log
+        patches_dir, seed=seed
     )
 
     train_dataset = WetlandPatchDataset(train_files, stats_path, augment=True)

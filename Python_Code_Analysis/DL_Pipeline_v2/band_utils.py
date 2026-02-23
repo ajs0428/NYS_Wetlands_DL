@@ -134,39 +134,6 @@ def compute_in_channels_from_stats(stats_path: Path) -> int:
     return stats["in_channels"]
 
 
-def filter_patches_by_review_log(
-    patch_files: List[Path],
-    review_log_path: Path
-) -> List[Path]:
-    """
-    Filter patch files using a review log CSV (allowlist mode).
-
-    Only includes patches explicitly marked 'valid' or 'uncertain'.
-    Patches not in the review log are excluded (not yet reviewed).
-
-    Args:
-        patch_files: List of Path objects to patch files.
-        review_log_path: Path to review log CSV with 'patch_file' and 'status' columns.
-
-    Returns:
-        Filtered list of patch file Paths.
-    """
-    import csv
-
-    accepted = set()
-    with open(review_log_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            status = row["status"].strip().lower()
-            if status in ("valid", "uncertain"):
-                accepted.add(row["patch_file"].strip())
-
-    before = len(patch_files)
-    filtered = [f for f in patch_files if f.name in accepted]
-    n_excluded = before - len(filtered)
-    print(f"Review log: {len(accepted)} accepted entries, {n_excluded} patches excluded, {len(filtered)} remaining")
-    return filtered
-
 
 def validate_prediction_bands(
     raster_bands: List[str],
