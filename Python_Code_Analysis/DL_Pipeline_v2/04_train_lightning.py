@@ -19,6 +19,8 @@ from lightning.pytorch.callbacks import (
     EarlyStopping,
     LearningRateMonitor,
 )
+from lightning.pytorch.loggers import CSVLogger
+import pandas as pd
 from pathlib import Path
 from typing import Optional
 import importlib.util
@@ -157,8 +159,28 @@ class WetlandSegmentationModule(L.LightningModule):
         else:
             acc = torch.tensor(0.0, device=self.device)
 
+        # Mean IoU on valid pixels
+        if valid.any():
+            iou_sum = 0.0
+            valid_classes = 0
+            for c in range(self.num_classes):
+                pred_c = preds[valid] == c
+                true_c = y[valid] == c
+                intersection = (pred_c & true_c).sum().float()
+                union = (pred_c | true_c).sum().float()
+                if union > 0:
+                    iou_sum += (intersection / union).item()
+                    valid_classes += 1
+            iou = torch.tensor(
+                iou_sum / valid_classes if valid_classes > 0 else 0.0,
+                device=self.device,
+            )
+        else:
+            iou = torch.tensor(0.0, device=self.device)
+
         self.log(f"{stage}/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(f"{stage}/acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log(f"{stage}/iou", iou, on_step=False, on_epoch=True, prog_bar=True)
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -285,9 +307,12 @@ def train(
         LearningRateMonitor(logging_interval="epoch"),
     ]
 
+    csv_logger = CSVLogger(save_dir=output_dir, name="lightning_logs")
+
     trainer = L.Trainer(
         max_epochs=epochs,
         callbacks=callbacks,
+        logger=csv_logger,
         default_root_dir=output_dir,
         log_every_n_steps=10,
         enable_progress_bar=True,
@@ -295,6 +320,34 @@ def train(
 
     trainer.fit(module, datamodule=dm)
     trainer.test(module, datamodule=dm)
+
+    # ── Build history dict from CSV log ──────────────────────────────
+    metrics_file = Path(csv_logger.log_dir) / "metrics.csv"
+    history = {
+        "train_loss": [], "val_loss": [],
+        "train_accuracy": [], "val_accuracy": [],
+        "train_iou": [], "val_iou": [],
+    }
+
+    if metrics_file.exists():
+        df = pd.read_csv(metrics_file)
+        col_map = {
+            "train/loss": "train_loss", "val/loss": "val_loss",
+            "train/acc": "train_accuracy", "val/acc": "val_accuracy",
+            "train/iou": "train_iou", "val/iou": "val_iou",
+        }
+        for csv_col, hist_key in col_map.items():
+            if csv_col in df.columns:
+                values = df[csv_col].dropna().tolist()
+                history[hist_key] = values
+
+    # Save JSON (parity with legacy 04_train.py)
+    history_path = output_dir / f"training_history_{mode}.json"
+    with open(history_path, "w") as f:
+        json.dump(history, f, indent=2)
+    print(f"Training history saved to {history_path}")
+
+    return history
 
 
 # ── CLI ──────────────────────────────────────────────────────────────
