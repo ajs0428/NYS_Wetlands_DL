@@ -9,4 +9,28 @@ The pipeline supports two classification modes, toggled via `band_config.json`:
 
 Binary mode remaps labels at runtime so both modes use the same training patches. See the [pipeline README](Python_Code_Analysis/DL_Pipeline_v2/README.md) for details.
 
-Training patches are currently 128x128 pixels, but the pipeline is patch-size agnostic — the U-Net is fully convolutional and all dimensions are discovered at runtime. To use larger patches (e.g., 256x256), just create patches at the desired size, set `PATCH_SIZE` accordingly for prediction, and retrain. The only constraint is that the patch size must be divisible by 2^depth (e.g., 16 for depth=4, 32 for depth=5).
+Training patches are currently 256x256 pixels, but the pipeline is patch-size agnostic — the U-Net is fully convolutional and all dimensions are discovered at runtime. To use different patch sizes, just create patches at the desired size, set `PATCH_SIZE` accordingly for prediction, and retrain. The only constraint is that the patch size must be divisible by 2^depth (e.g., 16 for depth=4, 32 for depth=5).
+
+## Environment Setup
+
+**Conda** (current local setup):
+
+```bash
+conda env create -f Python_Code_Analysis/wetland-cnn-env.yml
+conda activate wetland-cnn
+```
+
+**uv** (alternative, recommended for HPC deployment):
+
+```bash
+uv sync                        # core dependencies
+uv sync --extra notebooks      # include Jupyter and SHAP
+```
+
+For CUDA-enabled PyTorch on HPC, add the appropriate index:
+
+```bash
+uv sync --extra-index-url https://download.pytorch.org/whl/cu121
+```
+
+Dependencies are defined in `pyproject.toml`.
