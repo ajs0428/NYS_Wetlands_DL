@@ -15,10 +15,12 @@ Deep learning pipeline for wetland semantic segmentation in New York State using
 - [Step 1: Compute Statistics](#step-1-compute-statistics-01_compute_statisticspy)
 - [Step 2: Dataset & DataLoaders](#step-2-dataset--dataloaders-02_datasetpy)
 - [Step 3: Model Architecture](#step-3-model-architecture-03_unet_modelpy)
-- [Step 4: Train](#step-4-train-04_trainpy)
+- [Step 4: Train (Lightning)](#step-4-train-lightning-04_train_lightningpy)
+- [Step 4 (Legacy): Train](#step-4-legacy-train-04_trainpy)
 - [Step 5: Evaluate](#step-5-evaluate-05_evaluatepy)
 - [Step 6: Predict](#step-6-predict-06_predictpy)
 - [Interactive Notebook](#interactive-notebook-wetland_pipelineipynb)
+- [Swappable Architectures](#swappable-architectures)
 - [Adding a New Band](#adding-a-new-band)
 - [Patch Size](#patch-size)
 - [Troubleshooting](#troubleshooting)
@@ -28,8 +30,9 @@ Deep learning pipeline for wetland semantic segmentation in New York State using
 ## Quick Start
 
 ```bash
-# 1. Activate the environment
-conda activate wetland-cnn
+# 1. Install dependencies and activate the environment
+uv sync                        # from project root (NYS_Wetlands_DL/)
+source .venv/bin/activate
 
 # 2. Navigate to the pipeline directory
 cd "Python_Code_Analysis/DL_Pipeline_v2"
@@ -38,11 +41,11 @@ cd "Python_Code_Analysis/DL_Pipeline_v2"
 python 01_compute_statistics.py \
   --patches-dir "../../Data/Training_Data/R_Patches"
 
-# 4. Train the model
-python 04_train.py --epochs 50 --batch-size 16
+# 4. Train the model (Lightning)
+python 04_train_lightning.py --epochs 50 --batch-size 16
 
 # 5. Evaluate on the held-out test set
-python 05_evaluate.py --model "../../Models/best_model.pth"
+python 05_evaluate.py --model "../../Models/best_multiclass.ckpt"
 
 # 6. Run inference on a new raster
 python 06_predict.py input_raster.tif output_classification.tif --probs
@@ -52,12 +55,27 @@ python 06_predict.py input_raster.tif output_classification.tif --probs
 
 ## Environment Setup
 
+**Using uv (recommended):**
+
 ```bash
-conda env create -f Python_Code_Analysis/wetland-cnn-env.yml
+# From project root (NYS_Wetlands_DL/)
+uv sync                        # Mac/CPU — auto-detects MPS
+source .venv/bin/activate
+
+# On HPC with CUDA:
+uv sync --extra-index-url https://download.pytorch.org/whl/cu121
+
+# For notebook extras (ipykernel, shap):
+uv sync --extra notebooks
+```
+
+**Using conda (legacy):**
+
+```bash
 conda activate wetland-cnn
 ```
 
-Key dependencies: PyTorch, rasterio, NumPy, scikit-learn, matplotlib.
+Key dependencies: PyTorch, Lightning, rasterio, NumPy, scikit-learn, matplotlib. All managed via `pyproject.toml` at the project root.
 
 ---
 
@@ -126,7 +144,7 @@ Key dependencies: PyTorch, rasterio, NumPy, scikit-learn, matplotlib.
 ## Pipeline Overview
 
 ```
-GeoTIFF Patches (21 bands: 20 predictors + 1 label)
+GeoTIFF Patches (27 bands: 26 predictors + 1 label)
         │
         ▼
  ┌──────────────────┐
@@ -140,13 +158,14 @@ GeoTIFF Patches (21 bands: 20 predictors + 1 label)
         │
         ▼
  ┌──────────────────┐
- │ 03_unet_model     │ → U-Net architecture
+ │ 03_unet_model     │ → U-Net architecture (swappable — see 03b_resunet34.py)
  └──────────────────┘
         │
         ▼
- ┌──────────────────┐
- │ 04_train          │ → best_model.pth, final_model.pth, training_history.json
- └──────────────────┘
+ ┌──────────────────────────┐
+ │ 04_train_lightning        │ → best_{mode}.ckpt (Lightning checkpoints)
+ │  (or 04_train.py legacy)  │    + CSV/TensorBoard logs
+ └──────────────────────────┘
         │
         ▼
  ┌──────────────────┐
@@ -157,15 +176,18 @@ GeoTIFF Patches (21 bands: 20 predictors + 1 label)
  ┌──────────────────┐
  │ 06_predict        │ → Classification GeoTIFF + probability maps
  └──────────────────┘
+
+Shared modules: losses.py (DiceLoss, HybridLoss), model_utils.py (checkpoint loading),
+                band_utils.py (band discovery/config)
 ```
 
 ---
 
 ## Input Data Requirements
 
-Training patches are GeoTIFF files located in `Data/Training_Data/R_Patches/`. The current patches are 128x128 pixels, but the pipeline supports any square patch size (see [Patch Size](#patch-size) below).
+Training patches are GeoTIFF files located in `Data/Training_Data/R_Patches/`. The current patches are 256x256 pixels, but the pipeline supports any square patch size (see [Patch Size](#patch-size) below).
 
-Each patch contains 21 bands (20 predictors + 1 label). Band names are stored in the GeoTIFF band descriptions and are discovered at runtime — no hardcoded indices.
+Each patch contains 27 bands (26 predictors + 1 label). Band names are stored in the GeoTIFF band descriptions and are discovered at runtime — no hardcoded indices.
 
 **Current band layout:**
 
@@ -412,14 +434,14 @@ Runs a forward pass with dummy data to verify the model builds correctly.
 
 ---
 
-## Step 4: Train (`04_train.py`)
+## Step 4: Train (Lightning) (`04_train_lightning.py`)
 
-Full training loop with class weighting, learning rate scheduling, and model checkpointing.
+Primary training script using PyTorch Lightning. Provides automatic checkpointing, early stopping, LR monitoring, and progress bars. The network architecture is swappable — see [Swappable Architectures](#swappable-architectures).
 
 ### Usage
 
 ```bash
-python 04_train.py \
+python 04_train_lightning.py \
   --patches-dir ../../Data/Training_Data/R_Patches \
   --stats-path ../../Data/Training_Data/normalization_stats.json \
   --output-dir ../../Models \
@@ -429,7 +451,8 @@ python 04_train.py \
   --base-filters 32 \
   --depth 4 \
   --workers 4 \
-  --seed 42
+  --seed 42 \
+  --early-stopping 15
 ```
 
 ### Arguments
@@ -438,30 +461,59 @@ python 04_train.py \
 |----------|---------|-------------|
 | `--patches-dir` | `Data/Training_Data/R_Patches` | Training patches directory |
 | `--stats-path` | `Data/Training_Data/normalization_stats.json` | Normalization stats |
-| `--output-dir` | `Models` | Where to save models and history |
-| `--epochs` | 50 | Number of training epochs |
+| `--output-dir` | `Models` | Where to save checkpoints and logs |
+| `--epochs` | 50 | Maximum training epochs |
 | `--batch-size` | 16 | Batch size |
 | `--lr` | 1e-4 | Initial learning rate |
 | `--base-filters` | 32 | U-Net base filter count |
 | `--depth` | 4 | U-Net encoder/decoder depth |
 | `--workers` | 4 | DataLoader worker processes (use 0 on macOS if issues arise) |
 | `--seed` | 42 | Random seed for reproducibility |
+| `--early-stopping` | 15 | Early stopping patience (epochs without improvement) |
 
 ### Training Details
 
-- **Loss**: Hybrid CrossEntropy + Dice (`HybridLoss`). CE carries inverse frequency class weights and `ignore_index=255`; Dice is computed per-class on softmax probabilities then averaged (inherently class-balanced). Combined as `CE + Dice` with equal weight.
+- **Loss**: Hybrid CrossEntropy + Dice (`HybridLoss` in `losses.py`). CE carries inverse frequency class weights and `ignore_index=255`; Dice is computed per-class on softmax probabilities then averaged (inherently class-balanced). Combined as `CE + Dice` with equal weight.
 - **Optimizer**: AdamW (weight decay 1e-4)
 - **Scheduler**: ReduceLROnPlateau (reduces LR when validation loss plateaus)
-- **Metrics tracked**: loss, pixel accuracy, mean IoU (per epoch)
-- **Checkpointing**: saves best model (lowest validation loss) and final model
+- **Callbacks**: ModelCheckpoint (best val/loss), EarlyStopping, LearningRateMonitor
+- **Metrics logged**: train/loss, train/acc, val/loss, val/acc (via Lightning's built-in logging)
+- **Device**: Auto-detected (MPS on Mac, CUDA on Linux, CPU fallback)
 
 ### Output Files
 
 | File | Description |
 |------|-------------|
-| `Models/best_model.pth` | Best checkpoint (lowest validation loss) |
-| `Models/final_model.pth` | Final epoch checkpoint |
-| `Models/training_history.json` | Per-epoch loss, accuracy, and IoU |
+| `Models/best_{mode}.ckpt` | Best Lightning checkpoint (lowest validation loss) |
+| `Models/lightning_logs/` | CSV logs and optional TensorBoard logs |
+
+### Key Components
+
+- **`WetlandDataModule`**: Wraps `create_dataloaders()` from `02_dataset.py` as a Lightning data module
+- **`WetlandSegmentationModule`**: Lightning module accepting any `nn.Module` as the backbone network
+- **`train()`**: Entry point that wires up data, model, callbacks, and Trainer
+
+---
+
+## Step 4 (Legacy): Train (`04_train.py`)
+
+Manual training loop kept as a reference and fallback. Same loss, optimizer, and training logic as the Lightning version but without automatic callbacks.
+
+### Usage
+
+```bash
+python 04_train.py --epochs 50 --batch-size 16
+```
+
+### Output Files
+
+| File | Description |
+|------|-------------|
+| `Models/best_model_{mode}.pth` | Best checkpoint (lowest validation loss) |
+| `Models/final_model_{mode}.pth` | Final epoch checkpoint |
+| `Models/training_history_{mode}.json` | Per-epoch loss, accuracy, and IoU |
+
+> **Note:** Both legacy `.pth` and Lightning `.ckpt` checkpoints are supported by `05_evaluate.py` and `06_predict.py` via `model_utils.py`.
 
 ---
 
@@ -587,6 +639,36 @@ SEED = 42
 
 ---
 
+## Swappable Architectures
+
+The Lightning training script (`04_train_lightning.py`) accepts any `nn.Module` as the backbone network. To swap architectures, change one line in the `train()` function:
+
+```python
+# Current (default):
+net = UNet(in_channels=in_channels, num_classes=num_classes, base_filters=32, depth=4)
+
+# Future example:
+net = ResUNet34(in_channels=in_channels, num_classes=num_classes, base_filters=64)
+```
+
+The `WetlandSegmentationModule` wraps the network — loss, optimizer, metrics, checkpointing, and data loading all stay the same regardless of which backbone is used.
+
+### Requirements for a new architecture
+
+Any `nn.Module` that satisfies this contract:
+- **Input**: `(batch, in_channels, H, W)` tensor
+- **Output**: `(batch, num_classes, H, W)` raw logits
+- **Constructor**: Must accept `in_channels` and `num_classes` (no hardcoded defaults)
+
+### Available architectures
+
+| File | Architecture | Status |
+|------|-------------|--------|
+| `03_unet_model.py` | U-Net (residual + SE attention) | Production |
+| `03b_resunet34.py` | ResUNet34 | Scaffold (not yet implemented) |
+
+---
+
 ## Adding a New Band
 
 1. Include the new band in your GeoTIFF patches with a descriptive band name set in the metadata
@@ -646,26 +728,35 @@ No changes are needed in `01_compute_statistics.py`, `02_dataset.py`, `03_unet_m
 
 ```
 NYS_Wetlands_DL/
+├── pyproject.toml                      # Dependencies + uv config
+├── uv.lock                            # Lockfile for reproducible installs
+├── .venv/                             # Virtual environment (uv-managed)
 ├── Data/
 │   ├── Training_Data/
-│   │   ├── R_Patches/                  # GeoTIFF training patches (e.g., 128x128 or 256x256)
+│   │   ├── R_Patches/                  # GeoTIFF training patches (256x256)
 │   │   └── normalization_stats.json    # Generated by Step 1
 │   └── Predictions/                    # Output from Step 6
 ├── Models/
-│   ├── best_model.pth                  # Best checkpoint
-│   ├── final_model.pth                 # Final epoch checkpoint
-│   └── training_history.json           # Training metrics
+│   ├── best_{mode}.ckpt               # Best Lightning checkpoint
+│   ├── lightning_logs/                 # Training logs (CSV/TensorBoard)
+│   └── (legacy .pth files)            # From 04_train.py if used
 └── Python_Code_Analysis/
     └── DL_Pipeline_v2/
         ├── README.md                   # This file
-        ├── UNet_Architecture_Overview.md        # Detailed model architecture reference
+        ├── UNet_Architecture_Overview.md
         ├── band_config.json            # Normalization rules
         ├── band_utils.py               # Shared band utilities
+        ├── losses.py                   # DiceLoss + HybridLoss
+        ├── model_utils.py              # Shared model loading (legacy + Lightning)
         ├── 01_compute_statistics.py     # Step 1: Stats
-        ├── 02_dataset.py               # Step 2: Dataset
-        ├── 03_unet_model.py            # Step 3: Model
-        ├── 04_train.py                 # Step 4: Train
+        ├── 02_dataset.py               # Step 2: Dataset + normalize_bands()
+        ├── 03_unet_model.py            # Step 3: U-Net architecture
+        ├── 03b_resunet34.py            # ResUNet34 scaffold
+        ├── 04_train_lightning.py        # Step 4: Train (Lightning, primary)
+        ├── 04_train.py                 # Step 4: Train (legacy fallback)
         ├── 05_evaluate.py              # Step 5: Evaluate
+        ├── 05b_evaluate_patches.py     # Step 5b: Per-patch evaluation
         ├── 06_predict.py               # Step 6: Predict
+        ├── 07_shap_analysis.ipynb      # Feature importance
         └── wetland_pipeline.ipynb      # Interactive notebook
 ```

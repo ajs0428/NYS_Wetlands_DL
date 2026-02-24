@@ -29,6 +29,7 @@ _dataset = _import_module("dataset", _script_dir / "02_dataset.py")
 _model = _import_module("unet_model", _script_dir / "03_unet_model.py")
 
 from band_utils import compute_in_channels_from_stats
+from model_utils import load_model
 
 create_dataloaders = _dataset.create_dataloaders
 WetlandPatchDataset = _dataset.WetlandPatchDataset
@@ -208,36 +209,6 @@ def print_metrics(metrics: Dict, class_names: List[str]):
         for j in range(len(class_names)):
             print(f"{cm[i, j]:>8,}", end="")
         print()
-
-
-def load_model(
-    model_path: Path,
-    device: torch.device,
-    in_channels: int,
-    num_classes: int,
-    base_filters: int = 32,
-    depth: int = 4
-) -> nn.Module:
-    """Load a trained model from checkpoint."""
-    model = UNet(
-        in_channels=in_channels,
-        num_classes=num_classes,
-        base_filters=base_filters,
-        depth=depth
-    )
-
-    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model = model.to(device)
-    model.eval()
-
-    print(f"Loaded model from {model_path}")
-    if 'epoch' in checkpoint:
-        print(f"  Epoch: {checkpoint['epoch']}")
-    if 'val_loss' in checkpoint:
-        print(f"  Val loss: {checkpoint['val_loss']:.4f}")
-
-    return model
 
 
 def main(

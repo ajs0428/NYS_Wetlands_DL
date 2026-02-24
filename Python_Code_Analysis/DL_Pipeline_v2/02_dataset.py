@@ -19,6 +19,74 @@ import random
 
 
 
+def normalize_bands(
+    data: np.ndarray,
+    normalization: dict,
+    predictor_names: List[str],
+    nodata: Optional[float] = None
+) -> np.ndarray:
+    """
+    Apply per-band normalization and one-hot encode categorical bands.
+
+    Shared by WetlandPatchDataset (training) and 06_predict.py (inference).
+
+    Args:
+        data: Array of shape (num_predictors, H, W)
+        normalization: Dict keyed by band name with normalization config
+        predictor_names: Ordered list of predictor band names matching data axis 0
+        nodata: NoData value from raster
+
+    Returns:
+        Normalized array of shape (in_channels, H, W) as float32
+    """
+    normalized_bands = []
+
+    for i, band_name in enumerate(predictor_names):
+        band = data[i]
+        norm_config = normalization[band_name]
+        method = norm_config["method"]
+
+        # Create valid data mask
+        valid_mask = ~np.isnan(band)
+        if nodata is not None and not np.isnan(nodata):
+            valid_mask &= (band != nodata)
+
+        if method == "min_max":
+            min_val = norm_config["min"]
+            max_val = norm_config["max"]
+            range_val = max_val - min_val
+
+            if range_val > 0:
+                normalized = (band - min_val) / range_val
+            else:
+                normalized = np.zeros_like(band)
+
+            # Clip to [0, 1] and handle nodata
+            normalized = np.clip(normalized, 0, 1)
+            normalized = np.where(valid_mask, normalized, 0)
+            normalized_bands.append(normalized)
+
+        elif method == "shift_scale":
+            shift = norm_config["shift"]
+            scale = norm_config["scale"]
+            normalized = (band + shift) / scale
+            normalized = np.clip(normalized, 0, 1)
+            normalized = np.where(valid_mask, normalized, 0)
+            normalized_bands.append(normalized)
+
+        elif method == "one_hot":
+            num_classes = norm_config["num_classes"]
+            class_range = norm_config.get("class_range", [1, num_classes])
+            one_hot = np.zeros((num_classes, band.shape[0], band.shape[1]), dtype=np.float32)
+
+            for class_idx in range(class_range[0], class_range[1] + 1):
+                one_hot[class_idx - class_range[0]] = (band == class_idx).astype(np.float32)
+
+            normalized_bands.extend([one_hot[j] for j in range(num_classes)])
+
+    return np.stack(normalized_bands, axis=0).astype(np.float32)
+
+
 class WetlandPatchDataset(Dataset):
     """
     PyTorch Dataset for wetland classification GeoTIFF patches.
@@ -130,62 +198,8 @@ class WetlandPatchDataset(Dataset):
         predictors: np.ndarray,
         nodata: Optional[float]
     ) -> np.ndarray:
-        """
-        Apply per-band normalization and one-hot encode categorical bands.
-
-        Args:
-            predictors: Array of shape (num_predictors, H, W)
-            nodata: NoData value from raster
-
-        Returns:
-            Normalized array of shape (in_channels, H, W)
-        """
-        normalized_bands = []
-
-        for i, band_name in enumerate(self.predictor_names):
-            band = predictors[i]
-            norm_config = self.normalization[band_name]
-            method = norm_config["method"]
-
-            # Create valid data mask
-            valid_mask = ~np.isnan(band)
-            if nodata is not None and not np.isnan(nodata):
-                valid_mask &= (band != nodata)
-
-            if method == "min_max":
-                min_val = norm_config["min"]
-                max_val = norm_config["max"]
-                range_val = max_val - min_val
-
-                if range_val > 0:
-                    normalized = (band - min_val) / range_val
-                else:
-                    normalized = np.zeros_like(band)
-
-                # Clip to [0, 1] and handle nodata
-                normalized = np.clip(normalized, 0, 1)
-                normalized = np.where(valid_mask, normalized, 0)
-                normalized_bands.append(normalized)
-
-            elif method == "shift_scale":
-                shift = norm_config["shift"]
-                scale = norm_config["scale"]
-                normalized = (band + shift) / scale
-                normalized = np.clip(normalized, 0, 1)
-                normalized = np.where(valid_mask, normalized, 0)
-                normalized_bands.append(normalized)
-
-            elif method == "one_hot":
-                num_classes = norm_config["num_classes"]
-                class_range = norm_config.get("class_range", [1, num_classes])
-                one_hot = np.zeros((num_classes, band.shape[0], band.shape[1]), dtype=np.float32)
-
-                for class_idx in range(class_range[0], class_range[1] + 1):
-                    one_hot[class_idx - class_range[0]] = (band == class_idx).astype(np.float32)
-
-                normalized_bands.extend([one_hot[j] for j in range(num_classes)])
-
-        return np.stack(normalized_bands, axis=0).astype(np.float32)
+        """Apply per-band normalization. Delegates to module-level normalize_bands()."""
+        return normalize_bands(predictors, self.normalization, self.predictor_names, nodata)
 
     def _augment(
         self,

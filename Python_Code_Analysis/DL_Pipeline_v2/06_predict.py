@@ -32,13 +32,15 @@ def _import_module(name, path):
 
 _script_dir = Path(__file__).parent
 _model = _import_module("unet_model", _script_dir / "03_unet_model.py")
+_dataset = _import_module("dataset", _script_dir / "02_dataset.py")
 
 from band_utils import (
     discover_bands_from_raster,
     validate_prediction_bands,
 )
+from model_utils import load_model
 
-UNet = _model.UNet
+normalize_bands = _dataset.normalize_bands
 get_device = _model.get_device
 
 
@@ -46,96 +48,6 @@ def load_normalization_stats(stats_path: Path) -> dict:
     """Load normalization statistics from JSON."""
     with open(stats_path) as f:
         return json.load(f)
-
-
-def normalize_patch(
-    data: np.ndarray,
-    stats: dict,
-    predictor_names: List[str],
-    nodata: Optional[float] = None
-) -> np.ndarray:
-    """
-    Normalize a patch using the same logic as training.
-
-    Args:
-        data: Input array of shape (num_predictors, H, W)
-        stats: Normalization statistics dictionary
-        predictor_names: Ordered list of predictor band names
-        nodata: NoData value to handle
-
-    Returns:
-        Normalized array of shape (in_channels, H, W)
-    """
-    normalization = stats["normalization"]
-    normalized_bands = []
-
-    for i, band_name in enumerate(predictor_names):
-        band = data[i]
-        norm_config = normalization[band_name]
-        method = norm_config["method"]
-
-        # Create valid data mask
-        valid_mask = ~np.isnan(band)
-        if nodata is not None and not np.isnan(nodata):
-            valid_mask &= (band != nodata)
-
-        if method == "min_max":
-            min_val = norm_config["min"]
-            max_val = norm_config["max"]
-            range_val = max_val - min_val
-
-            if range_val > 0:
-                normalized = (band - min_val) / range_val
-            else:
-                normalized = np.zeros_like(band)
-
-            normalized = np.clip(normalized, 0, 1)
-            normalized = np.where(valid_mask, normalized, 0)
-            normalized_bands.append(normalized)
-
-        elif method == "shift_scale":
-            shift = norm_config["shift"]
-            scale = norm_config["scale"]
-            normalized = (band + shift) / scale
-            normalized = np.clip(normalized, 0, 1)
-            normalized = np.where(valid_mask, normalized, 0)
-            normalized_bands.append(normalized)
-
-        elif method == "one_hot":
-            num_classes = norm_config["num_classes"]
-            class_range = norm_config.get("class_range", [1, num_classes])
-            one_hot = np.zeros((num_classes, band.shape[0], band.shape[1]), dtype=np.float32)
-
-            for class_idx in range(class_range[0], class_range[1] + 1):
-                one_hot[class_idx - class_range[0]] = (band == class_idx).astype(np.float32)
-
-            normalized_bands.extend([one_hot[j] for j in range(num_classes)])
-
-    return np.stack(normalized_bands, axis=0).astype(np.float32)
-
-
-def load_model(
-    model_path: Path,
-    device: torch.device,
-    in_channels: int,
-    num_classes: int,
-    base_filters: int = 32,
-    depth: int = 4
-) -> nn.Module:
-    """Load a trained model from checkpoint."""
-    model = UNet(
-        in_channels=in_channels,
-        num_classes=num_classes,
-        base_filters=base_filters,
-        depth=depth
-    )
-
-    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model = model.to(device)
-    model.eval()
-
-    return model
 
 
 @torch.no_grad()
@@ -218,7 +130,7 @@ def predict_raster(
             patch = data[:, y:y+patch_size, x:x+patch_size]
 
             # Normalize
-            normalized = normalize_patch(patch, stats, predictor_names, nodata)
+            normalized = normalize_bands(patch, stats["normalization"], predictor_names, nodata)
 
             # Convert to tensor and predict
             tensor = torch.from_numpy(normalized).unsqueeze(0).to(device)
