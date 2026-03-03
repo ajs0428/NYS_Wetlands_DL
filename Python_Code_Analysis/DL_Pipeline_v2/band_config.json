@@ -2,7 +2,7 @@
   "label_band": "MOD_CLASS",
   "classification_mode": "multiclass",
   "binary_mapping": {
-    "WET": ["EMW", "FSW", "OWW", "SSW"],
+    "WET": ["EMW", "FSW", "SSW"],
     "UPL": ["UPL"]
   },
   "default_method": "min_max",
@@ -12,6 +12,6 @@
     "NDYI": {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
     "Geomorph_local": {"method": "one_hot", "num_classes": 10, "class_range": [1, 10]}
   },
-  "class_names": ["EMW", "FSW", "OWW", "SSW", "UPL"],
+  "class_names": ["EMW", "FSW", "SSW", "UPL"],
   "ignore_index": 255
 }
