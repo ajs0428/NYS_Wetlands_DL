@@ -16,8 +16,8 @@ set.seed(11)
 ########################################################################################
 
 args <- c(
-    225,
-    "Data/Training_Data/ADK_HUC_Processed/", #Path to wetland polygons
+    208,
+    "Data/Training_Data/TompkinsCounty_Reclass/", #Path to wetland polygons
     128 # Patch size radius
 )
 
@@ -32,7 +32,7 @@ cat("these are the arguments: \n",
 
 setGDALconfig("GDAL_PAM_ENABLED", "FALSE") # does not create aux.xml files but maybe needed
 ########################################################################################
-l_wet <- list.files(args[2], pattern = ".gpkg$", full.names = TRUE) |> keep(\(x) str_detect(x, "ADK_WCT"))
+l_wet <- list.files(args[2], pattern = ".gpkg$", full.names = TRUE) ## |> keep(\(x) str_detect(x, "ADK_WCT"))
 l_wet_cluster <- l_wet[str_detect(l_wet, paste0("cluster_", args[1]))]
 
 print(l_wet_cluster)
