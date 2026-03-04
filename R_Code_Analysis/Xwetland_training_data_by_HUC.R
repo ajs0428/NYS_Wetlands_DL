@@ -1,5 +1,3 @@
-### This script is meant to be run on a remote cluster 
-
 library(terra)
 library(sf)
 library(tidyverse)
@@ -9,7 +7,7 @@ lf <- l[str_detect(l, "cluster_208") & !str_detect(l, "wbt")]
 
 args <- c(
     "Data/NWI/NY_NWI_6347.gpkg", 
-    "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg", # 
+    "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg", # 
     208 # 
 )
 ########################################################################################
@@ -30,13 +28,13 @@ wetlands_filter <- wetlands |>
         str_detect(ATTRIBUTE, "PSS") & !str_detect(ATTRIBUTE, "PFO|PEM") ~ "SSW",
         str_detect(ATTRIBUTE, "PEM") & !str_detect(ATTRIBUTE, "PFO|PSS") ~ "EMW",
         str_detect(ATTRIBUTE, "PFO") & !str_detect(ATTRIBUTE, "PSS|PEM") ~ "FSW",
-        str_detect(ATTRIBUTE, "PSS") & str_detect(ATTRIBUTE, "PFO") ~ "FSW",
+        str_detect(ATTRIBUTE, "PSS") & str_detect(ATTRIBUTE, "FO") ~ "SSW", #Change here because SSW is confused with FSW
         str_detect(ATTRIBUTE, "PSS") & str_detect(ATTRIBUTE, "PEM") ~ "EMW",
         .default = ATTRIBUTE
     ))
 
 ########################################################################################
-ny_areas <- st_read(args[2], quiet = TRUE, query = "SELECT * FROM \"NY_Cluster_Zones_250_NAomit\" WHERE cluster = 208")
+ny_areas <- st_read(args[2], quiet = TRUE, query = "SELECT * FROM \"NY_Cluster_Zones_250_NAomit_6347\" WHERE cluster = 208")
 
 if(st_crs(ny_areas) != st_crs("EPSG:6347")){
     print("Needs reprojection to EPSG:6347")
@@ -66,12 +64,13 @@ if(st_crs(nhp_wetlands) != st_crs("EPSG:6347")){
 }
 
 nhp_wetlands_filter <- nhp_wetlands |> 
-    filter(!str_detect(cowardin, "Marine|Estuarine|Terrestrial|Subterranean|Tidal")) |> # remove marine/estuarine
+    filter(!str_detect(cowardin, "Marine|Estuarine|Subterranean|Tidal")) |> # remove marine/estuarine
     mutate(MOD_CLASS = case_when(
         str_detect(cowardin, "Open water|Lacustrine|Riverine|Palustrine-AB") ~ "OWW",
         str_detect(cowardin, "Palustrine-SS") ~ "SSW",
         str_detect(cowardin, "Palustrine-EM") ~ "EMW",
-        str_detect(cowardin, "Palustrine-FO") ~ "FSW"
+        str_detect(cowardin, "Palustrine-FO") ~ "FSW",
+        str_detect(cowardin, "Terrestrial") ~ "UPL"
     )) 
 unique(nhp_wetlands_filter$MOD_CLASS)
 ########################################################################################

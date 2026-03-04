@@ -68,7 +68,8 @@ length(l_naip_cluster) == length(l_dem_cluster) & length(l_dem_cluster) == lengt
 
 logpath <- "Data/R_Patches_Vector/Vector_Patch_Checklist.csv"
 ########################################################################################
-fct_df <- data.frame(ID = 0:4, MOD_CLASS = c("EMW", "FSW", "OWW", "SSW", "UPL"))
+# fct_df <- data.frame(ID = 0:4, MOD_CLASS = c("EMW", "FSW", "OWW", "SSW", "UPL"))
+fct_df <- data.frame(ID = 0:3, MOD_CLASS = c("EMW", "FSW", "SSW", "UPL"))
 patchsize = as.numeric(args[2])
 ########################################################################################
 set.seed(420)
@@ -93,8 +94,10 @@ rast_chip_patch_create <- function(wetland_file){
     dem_rast <- l_dem_cluster[grepl(huc_num, l_dem_cluster) & grepl(paste0("cluster_", cluster_num), l_dem_cluster)] |> rast()
     set.names(dem_rast, "DEM")
     chm_rast <- l_chm_cluster[grepl(huc_num, l_chm_cluster) & grepl(paste0("cluster_", cluster_num), l_chm_cluster)] |> rast()
-    sat_rast <- l_sat_cluster[grepl(huc_num, l_sat_cluster)& grepl(paste0("cluster_", cluster_num), l_sat_cluster)] |> rast()
-    terr_rast <- l_terr_cluster[grepl(huc_num, l_terr_cluster)& grepl(paste0("cluster_", cluster_num), l_terr_cluster)] |> rast()
+    sat_rast <- l_sat_cluster[grepl(huc_num, l_sat_cluster)& grepl(paste0("cluster_", cluster_num), l_sat_cluster)] |> rast() |> 
+        tidyterra::select(-NDVI, -MNDWI, -PSRI, -DPSVI, -RVI, -VH_VV_ratio)
+    terr_rast <- l_terr_cluster[grepl(huc_num, l_terr_cluster)& grepl(paste0("cluster_", cluster_num), l_terr_cluster)] |> rast() |> 
+        tidyterra::select(-Geomorph_local)
     naip_rast <- l_naip_cluster[grepl(huc_num, l_naip_cluster)& grepl(paste0("cluster_", cluster_num), l_naip_cluster)] |> rast()
     set.names(naip_rast, c("r", "g", "b", "nir", "n_ndvi", "n_ndwi"))
     

@@ -39,7 +39,8 @@ print(l_wet_cluster)
 
 logpath <- "Data/R_Patches_Vector/Vector_Patch_Checklist.csv"
 ########################################################################################
-fct_df <- data.frame(ID = 0:4, MOD_CLASS = c("EMW", "FSW", "OWW", "SSW", "UPL"))
+# fct_df <- data.frame(ID = 0:4, MOD_CLASS = c("EMW", "FSW", "OWW", "SSW", "UPL"))
+fct_df <- data.frame(ID = 0:3, MOD_CLASS = c("EMW", "FSW", "SSW", "UPL"))
 patchsize = as.numeric(args[3])
 ########################################################################################
 set.seed(420)
@@ -64,7 +65,9 @@ vect_chip_patch_create <- function(wetland_file){
     huc_poly <- sf::st_read("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg", quiet = TRUE,
                                   query = paste0("SELECT * FROM NY_Cluster_Zones_250_NAomit_6347 WHERE huc12 = '", huc_num, "'"))
     
-    target_wetlands <- st_read(wetland_file, quiet = TRUE) # target wetlands
+    target_wetlands <- st_read(wetland_file, quiet = TRUE) |> # target wetlands
+        filter(MOD_CLASS != "OWW")
+    
     tw_centroid <- st_centroid(target_wetlands) |> st_geometry() |> st_cast(to = "MULTIPOINT") #centroid cast to multipoint
     
     tw_boundary <- st_boundary(target_wetlands) |> st_cast("LINESTRING") # cast to linestring
@@ -83,28 +86,28 @@ vect_chip_patch_create <- function(wetland_file){
                                                                sparse = FALSE,
                                                                remove_self = T)) == 0,] # filter out points that are too close
 
-    ### upland points and bounding boxes
-    rand_pts <- st_sample(huc_poly, 10)
-    target_wetlands_buffer <- st_buffer(target_wetlands, dist = 250)
-    rand_pts_intersect <- st_intersects(rand_pts, target_wetlands_buffer, sparse = FALSE)
-    pts_outside_target <- rowSums(rand_pts_intersect) == 0
-    upl_pts <- rand_pts[pts_outside_target, ]
-    upl_pts_box <- st_buffer(upl_pts, dist = patchsize, endCapStyle = "SQUARE") |> #set the size of the patch here (x2)
-        st_sf()
-    st_geometry(upl_pts_box) <- "geom"
-    upl_pts_box["MOD_CLASS"] <- "UPL"
-    upl_pts_box["huc12"] <- huc_num
-    upl_pts_box["cluster"] <- as.integer(args[1])
-    target_wetlands_uplands <- bind_rows(upl_pts_box, target_wetlands)
-    
+    # ### upland points and bounding boxes
+    # rand_pts <- st_sample(huc_poly, 10)
+    # target_wetlands_buffer <- st_buffer(target_wetlands, dist = 250)
+    # rand_pts_intersect <- st_intersects(rand_pts, target_wetlands_buffer, sparse = FALSE)
+    # pts_outside_target <- rowSums(rand_pts_intersect) == 0
+    # upl_pts <- rand_pts[pts_outside_target, ]
+    # upl_pts_box <- st_buffer(upl_pts, dist = patchsize, endCapStyle = "SQUARE") |> #set the size of the patch here (x2)
+    #     st_sf()
+    # st_geometry(upl_pts_box) <- "geom"
+    # upl_pts_box["MOD_CLASS"] <- "UPL"
+    # upl_pts_box["huc12"] <- huc_num
+    # upl_pts_box["cluster"] <- as.integer(args[1])
+    # target_wetlands_uplands <- bind_rows(upl_pts_box, target_wetlands)
+    target_wetlands_uplands <- target_wetlands
     ###combine points
     print(length(tw_bl_point))
     print(length(tw_c_point))
-    print(length(upl_pts))
+    # print(length(upl_pts))
     tw_bl_c_cmb <- rbind(
         st_sf(geometry = tw_bl_point),
-        st_sf(geometry = tw_c_point),
-        st_sf(geometry = upl_pts)
+        st_sf(geometry = tw_c_point) # ,
+        # st_sf(geometry = upl_pts)
     )
     
     tw_bl_c_cmbbuff <- st_buffer(tw_bl_c_cmb, dist = patchsize, endCapStyle = "SQUARE")
