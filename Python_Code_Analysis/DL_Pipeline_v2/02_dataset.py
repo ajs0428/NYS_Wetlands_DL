@@ -207,7 +207,10 @@ class WetlandPatchDataset(Dataset):
         labels: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Apply random augmentations (flips and rotations).
+        Apply random augmentations.
+
+        Geometric: flips, 90° rotations (label-safe)
+        Spectral: Gaussian noise, per-band brightness jitter (predictors only)
 
         Args:
             predictors: Array of shape (in_channels, H, W)
@@ -216,6 +219,8 @@ class WetlandPatchDataset(Dataset):
         Returns:
             Augmented predictors and labels
         """
+        # --- Geometric (applied to both predictors and labels) ---
+
         # Random horizontal flip
         if random.random() > 0.5:
             predictors = np.flip(predictors, axis=2).copy()
@@ -231,6 +236,19 @@ class WetlandPatchDataset(Dataset):
         if k > 0:
             predictors = np.rot90(predictors, k, axes=(1, 2)).copy()
             labels = np.rot90(labels, k, axes=(0, 1)).copy()
+
+        # --- Spectral (applied to predictors only) ---
+
+        # Gaussian noise (sigma 0.01-0.03, simulates sensor noise)
+        if random.random() > 0.5:
+            sigma = random.uniform(0.01, 0.03)
+            noise = np.random.normal(0, sigma, predictors.shape).astype(np.float32)
+            predictors = np.clip(predictors + noise, 0, 1)
+
+        # Per-band brightness jitter (+-5%, simulates illumination variation)
+        if random.random() > 0.5:
+            scales = np.random.uniform(0.95, 1.05, size=(predictors.shape[0], 1, 1)).astype(np.float32)
+            predictors = np.clip(predictors * scales, 0, 1)
 
         return predictors, labels
 

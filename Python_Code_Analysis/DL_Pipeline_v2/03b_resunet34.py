@@ -147,9 +147,12 @@ class ResUNet34(nn.Module):
         super().__init__()
         bf = base_filters
 
-        # Stem: 7x7 conv (preserves spatial size with padding=3)
+        # Stem: two 3x3 convs (preserves spatial detail better than single 7x7)
         self.stem = nn.Sequential(
-            nn.Conv2d(in_channels, bf, kernel_size=7, stride=1, padding=3, bias=False),
+            nn.Conv2d(in_channels, bf, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(bf),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(bf, bf, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(bf),
             nn.ReLU(inplace=True),
         )
