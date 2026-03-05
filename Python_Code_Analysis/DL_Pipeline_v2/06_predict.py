@@ -202,7 +202,8 @@ def main(
     overlap: int = 64,
     base_filters: int = 32,
     depth: int = 4,
-    save_probabilities: bool = False
+    save_probabilities: bool = False,
+    architecture: str = "unet",
 ):
     """
     Main prediction function.
@@ -228,7 +229,8 @@ def main(
 
     # Load model
     print(f"\nLoading model from {model_path}")
-    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth)
+    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
+                       architecture=architecture)
 
     # Run prediction
     print(f"\nProcessing {input_path}")
@@ -257,6 +259,9 @@ if __name__ == "__main__":
     parser.add_argument("--base-filters", type=int, default=32)
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--probs", action="store_true", help="Save probability maps")
+    parser.add_argument("--architecture", type=str, default="unet",
+                        choices=["unet", "resunet34"],
+                        help="Model architecture (default: unet)")
 
     args = parser.parse_args()
 
@@ -274,5 +279,6 @@ if __name__ == "__main__":
         overlap=args.overlap,
         base_filters=args.base_filters,
         depth=args.depth,
-        save_probabilities=args.probs
+        save_probabilities=args.probs,
+        architecture=args.architecture,
     )

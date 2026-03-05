@@ -19,7 +19,7 @@ from lightning.pytorch.callbacks import (
     EarlyStopping,
     LearningRateMonitor,
 )
-from lightning.pytorch.loggers import CSVLogger
+from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 import pandas as pd
 from pathlib import Path
 from typing import Optional
@@ -40,11 +40,13 @@ def _import_module(name, path):
 _script_dir = Path(__file__).parent
 _dataset = _import_module("dataset", _script_dir / "02_dataset.py")
 _model = _import_module("unet_model", _script_dir / "03_unet_model.py")
+_resunet = _import_module("resunet34", _script_dir / "03b_resunet34.py")
 
 from losses import HybridLoss
 
 create_dataloaders = _dataset.create_dataloaders
 UNet = _model.UNet
+ResUNet34 = _resunet.ResUNet34
 get_device = _model.get_device
 
 
@@ -224,6 +226,7 @@ def train(
     num_workers: int = 4,
     seed: int = 42,
     early_stopping_patience: int = 15,
+    architecture: str = "unet",
 ):
     """
     Full training pipeline using PyTorch Lightning.
@@ -255,6 +258,7 @@ def train(
     print(f"{'='*60}")
     print("Wetland Classification Training (Lightning)")
     print(f"{'='*60}")
+    print(f"Architecture: {architecture}")
     print(f"Classification mode: {mode}")
     print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
@@ -271,13 +275,20 @@ def train(
     class_weights = dm.class_weights
     print(f"Class weights: {class_weights.numpy()}")
 
-    # Network — swap this line for other architectures
-    net = UNet(
-        in_channels=in_channels,
-        num_classes=num_classes,
-        base_filters=base_filters,
-        depth=depth,
-    )
+    # Network — select architecture
+    if architecture == "resunet34":
+        net = ResUNet34(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            base_filters=base_filters,
+        )
+    else:
+        net = UNet(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            base_filters=base_filters,
+            depth=depth,
+        )
 
     # Lightning module
     module = WetlandSegmentationModule(
@@ -294,7 +305,7 @@ def train(
     callbacks = [
         ModelCheckpoint(
             dirpath=output_dir,
-            filename=f"best_{mode}",
+            filename=f"best_{mode}_{architecture}",
             monitor="val/loss",
             save_top_k=1,
             mode="min",
@@ -308,11 +319,12 @@ def train(
     ]
 
     csv_logger = CSVLogger(save_dir=output_dir, name="lightning_logs")
+    tb_logger = TensorBoardLogger(save_dir=output_dir, name="tb_logs")
 
     trainer = L.Trainer(
         max_epochs=epochs,
         callbacks=callbacks,
-        logger=csv_logger,
+        logger=[csv_logger, tb_logger],
         default_root_dir=output_dir,
         log_every_n_steps=10,
         enable_progress_bar=True,
@@ -342,7 +354,7 @@ def train(
                 history[hist_key] = values
 
     # Save JSON (parity with legacy 04_train.py)
-    history_path = output_dir / f"training_history_{mode}.json"
+    history_path = output_dir / f"training_history_{mode}_{architecture}.json"
     with open(history_path, "w") as f:
         json.dump(history, f, indent=2)
     print(f"Training history saved to {history_path}")
@@ -372,6 +384,9 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--early-stopping", type=int, default=15,
                         help="Early stopping patience (epochs)")
+    parser.add_argument("--architecture", type=str, default="unet",
+                        choices=["unet", "resunet34"],
+                        help="Model architecture (default: unet)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -392,4 +407,5 @@ if __name__ == "__main__":
         num_workers=args.workers,
         seed=args.seed,
         early_stopping_patience=args.early_stopping,
+        architecture=args.architecture,
     )

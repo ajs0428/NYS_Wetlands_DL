@@ -25,7 +25,15 @@ def _import_module(name, path):
 
 _script_dir = Path(__file__).parent
 _model = _import_module("unet_model", _script_dir / "03_unet_model.py")
+_resunet = _import_module("resunet34", _script_dir / "03b_resunet34.py")
 UNet = _model.UNet
+ResUNet34 = _resunet.ResUNet34
+
+# Registry for architecture dispatch
+_ARCHITECTURES = {
+    "unet": UNet,
+    "resunet34": ResUNet34,
+}
 
 
 def load_model_from_checkpoint(
@@ -81,17 +89,40 @@ def load_model(
     num_classes: int,
     base_filters: int = 32,
     depth: int = 4,
+    architecture: str = "unet",
 ) -> nn.Module:
     """
-    Construct a UNet and load weights from checkpoint.
+    Construct a model and load weights from checkpoint.
 
-    Drop-in replacement for the load_model() functions previously
-    defined locally in 05_evaluate.py and 06_predict.py.
+    Args:
+        model_path: Path to .pth or .ckpt checkpoint
+        device: Target device
+        in_channels: Number of input channels
+        num_classes: Number of output classes
+        base_filters: Base filter count
+        depth: Network depth (used by UNet only)
+        architecture: Model architecture ("unet" or "resunet34")
     """
-    net = UNet(
-        in_channels=in_channels,
-        num_classes=num_classes,
-        base_filters=base_filters,
-        depth=depth,
-    )
+    if architecture not in _ARCHITECTURES:
+        raise ValueError(
+            f"Unknown architecture '{architecture}'. "
+            f"Choose from: {list(_ARCHITECTURES.keys())}"
+        )
+
+    if architecture == "unet":
+        net = UNet(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            base_filters=base_filters,
+            depth=depth,
+        )
+    elif architecture == "resunet34":
+        net = ResUNet34(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            base_filters=base_filters,
+        )
+    else:
+        raise ValueError(f"Unknown architecture '{architecture}'")
+
     return load_model_from_checkpoint(model_path, net, device)

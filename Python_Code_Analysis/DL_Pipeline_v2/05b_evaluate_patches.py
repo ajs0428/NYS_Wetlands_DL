@@ -135,6 +135,7 @@ def main(
     depth: int = 4,
     seed: int = 42,
     sort_by: str = "overall_accuracy",
+    architecture: str = "unet",
 ):
     """
     Evaluate every test patch individually and save results to CSV.
@@ -161,7 +162,8 @@ def main(
     ignore_index = stats.get("ignore_index", 255)
 
     # Load model
-    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth)
+    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
+                       architecture=architecture)
 
     # Create test split (no DataLoader — we need per-patch access)
     print("\nCreating test split...")
@@ -228,6 +230,9 @@ if __name__ == "__main__":
         "--sort-by", type=str, default="overall_accuracy",
         help="Column to sort by ascending (worst first). Options: overall_accuracy, mean_iou, macro_f1"
     )
+    parser.add_argument("--architecture", type=str, default="unet",
+                        choices=["unet", "resunet34"],
+                        help="Model architecture (default: unet)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -255,4 +260,5 @@ if __name__ == "__main__":
         depth=args.depth,
         seed=args.seed,
         sort_by=args.sort_by,
+        architecture=args.architecture,
     )

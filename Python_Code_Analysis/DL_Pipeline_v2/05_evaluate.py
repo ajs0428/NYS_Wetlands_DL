@@ -220,6 +220,7 @@ def main(
     base_filters: int = 32,
     depth: int = 4,
     seed: int = 42,
+    architecture: str = "unet",
 ):
     """
     Main evaluation function.
@@ -246,7 +247,8 @@ def main(
     ignore_index = stats.get("ignore_index", 255)
 
     # Load model
-    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth)
+    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
+                       architecture=architecture)
 
     # Create test loader
     print("\nLoading test data...")
@@ -283,6 +285,9 @@ if __name__ == "__main__":
     parser.add_argument("--base-filters", type=int, default=32)
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--architecture", type=str, default="unet",
+                        choices=["unet", "resunet34"],
+                        help="Model architecture (default: unet)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -301,4 +306,5 @@ if __name__ == "__main__":
         base_filters=args.base_filters,
         depth=args.depth,
         seed=args.seed,
+        architecture=args.architecture,
     )
