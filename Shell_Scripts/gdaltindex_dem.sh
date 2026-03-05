@@ -1,6 +1,6 @@
 #!/bin/bash -l
 
-cd /ibstorage/anthony/NYS_Wetlands_GHG/Data/DEMs/
+cd /ibstorage/anthony/NYS_Wetlands_DL/Data/DEMs/
 export PATH=/programs/gdal-3.5.2/bin:$PATH
 export LD_LIBRARY_PATH=/programs/gdal-3.5.2/lib
 
@@ -20,7 +20,7 @@ for dir in "${directories[@]}"; do
     if [ ! -f "$gpkg_file" ]; then
         echo "Creating index: $gpkg_file"
         find "$dir" \( -name "*.tif" -o -name "*.tiff" \) -print0 | xargs -0 gdaltindex "$gpkg_file"
-        mv "$gpkg_file" /ibstorage/anthony/NYS_Wetlands_GHG/Data/NYS_DEM_Indexes/
+        mv "$gpkg_file" /ibstorage/anthony/NYS_Wetlands_DL/Data/NYS_DEM_Indexes/
     else
         echo "Index '$gpkg_file' already exists, skipping..."
     fi

@@ -11,7 +11,7 @@
 #SBATCH --mail-user=ajs544@cornell.edu
 #SBATCH --mail-type=ALL
 
-cd /ibstorage/anthony/NYS_Wetlands_GHG/
+cd /ibstorage/anthony/NYS_Wetlands_DL/
 module load R/4.4.3
 
 

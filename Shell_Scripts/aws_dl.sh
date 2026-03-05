@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 #change to the directory you wish to put things into 
-cd /ibstorage/anthony/NYS_Wetlands_GHG/Data/CHMs/AWS/
+cd /ibstorage/anthony/NYS_Wetlands_DL/Data/CHMs/AWS/
 export PATH=/programs/AWS2:$PATH
 
 # Array of directory names

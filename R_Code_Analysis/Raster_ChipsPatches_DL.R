@@ -16,7 +16,7 @@ set.seed(11)
 ########################################################################################
 
 args <- c(
-    "Data/R_Patches_Vector_Reviewed/", #Path to GIS reviewed wetland vector patches
+    "Data/Training_Data/R_Patches_Vector_Reviewed/", #Path to GIS reviewed wetland vector patches
     128
 )
 
@@ -66,7 +66,7 @@ l_sat_cluster <- l_sat[l_sat_extracted_clusters %in% as.character(l_wet_cluster_
 
 length(l_naip_cluster) == length(l_dem_cluster) & length(l_dem_cluster) == length(l_sat_cluster)
 
-logpath <- "Data/R_Patches_Vector/Vector_Patch_Checklist.csv"
+logpath <- "Data/Training_Data/R_Patches_Vector/Vector_Patch_Checklist.csv"
 ########################################################################################
 # fct_df <- data.frame(ID = 0:4, MOD_CLASS = c("EMW", "FSW", "OWW", "SSW", "UPL"))
 fct_df <- data.frame(ID = 0:3, MOD_CLASS = c("EMW", "FSW", "SSW", "UPL"))
@@ -142,8 +142,8 @@ rast_chip_patch_create <- function(wetland_file){
             tw_rast_sub <- subst(tw_rast, from = tw_rast_ln, to = fct_n, raw = TRUE)
             levels(tw_rast_sub) <- fct_df
 
-            fn <- paste0("Data/R_Patches/", sourceWetlands,"_cluster_", cluster_num, "_huc_", huc_num, "_patch_", i, "_", patchsize*2, "m.tif" )
-            fn_labels <- paste0("Data/R_Patches_Labels/", "labels_only_", sourceWetlands, "_cluster_", cluster_num, "_huc_", huc_num, "_patch_", i, "_", patchsize*2, "m.tif" )
+            fn <- paste0("Data/Training_Data/R_Patches/", sourceWetlands,"_cluster_", cluster_num, "_huc_", huc_num, "_patch_", i, "_", patchsize*2, "m.tif" )
+            fn_labels <- paste0("Data/Training_Data/R_Patches_Labels/", "labels_only_", sourceWetlands, "_cluster_", cluster_num, "_huc_", huc_num, "_patch_", i, "_", patchsize*2, "m.tif" )
 
             # Regular Patches with all predictors
             if(!file.exists(fn)){
@@ -199,16 +199,16 @@ future_lapply(l_wet_cluster, rast_chip_patch_create,
 # system.time({lapply(l_wet_cluster, rast_chip_patch_create)})
 
 
-# l_patches <- list.files("Data/R_Patches_Vector")
+# l_patches <- list.files("Data/Training_Data/R_Patches_Vector")
 # 
 # check_df <- data.frame(patch_file_name = l_patches,
 #                        reviewer = rep("NAME", length(l_patches)),
 #                        boundaries_altered = rep("TBD", length(l_patches)),
 #                        confidence = rep("TBD", length(l_patches)))
 # 
-# readr::write_csv(check_df, "Data/R_Patches_Vector/Vector_Patch_Checklist.csv")
+# readr::write_csv(check_df, "Data/Training_Data/R_Patches_Vector/Vector_Patch_Checklist.csv")
 # ### Checks
-# list_patches <- list.files("Data/R_Patches_Labels/", full.names = T)
+# list_patches <- list.files("Data/Training_Data/R_Patches_Labels/", full.names = T)
 # lapply(list_patches, \(x) rast(x))
 # lp <- lapply(list_patches, FUN = \(x) {rast(x) |> nlyr()}) |> unlist()
 # # lapply(list_patches, FUN = \(x) {rast(x) |> nlyr()}) |> unlist() |> table()

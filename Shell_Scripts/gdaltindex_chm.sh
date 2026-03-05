@@ -1,6 +1,6 @@
 #!/bin/bash -l
 
-cd /ibstorage/anthony/NYS_Wetlands_GHG/Data/CHMs/AWS/
+cd /ibstorage/anthony/NYS_Wetlands_DL/Data/CHMs/AWS/
 export PATH=/programs/gdal-3.5.2/bin:$PATH
 export LD_LIBRARY_PATH=/programs/gdal-3.5.2/lib
 

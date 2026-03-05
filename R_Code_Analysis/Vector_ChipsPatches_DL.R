@@ -37,7 +37,7 @@ l_wet_cluster <- l_wet[str_detect(l_wet, paste0("cluster_", args[1]))]
 
 print(l_wet_cluster)
 
-logpath <- "Data/R_Patches_Vector/Vector_Patch_Checklist.csv"
+logpath <- "Data/Training_Data/R_Patches_Vector/Vector_Patch_Checklist.csv"
 ########################################################################################
 # fct_df <- data.frame(ID = 0:4, MOD_CLASS = c("EMW", "FSW", "OWW", "SSW", "UPL"))
 fct_df <- data.frame(ID = 0:3, MOD_CLASS = c("EMW", "FSW", "SSW", "UPL"))
@@ -117,7 +117,7 @@ vect_chip_patch_create <- function(wetland_file){
     #### Vector polygon patches
 
     for(i in seq_len(nrow(tw_bl_c_cmbbuff_o))){
-        fn_vector <- paste0("Data/R_Patches_Vector/individual_patches/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_patch_", i, "_", patchsize*2, "m.gpkg" )
+        fn_vector <- paste0("Data/Training_Data/R_Patches_Vector/individual_patches/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_patch_", i, "_", patchsize*2, "m.gpkg" )
         if(!file.exists(fn_vector)){
             wet_patch <-  st_intersection(target_wetlands_uplands, tw_bl_c_cmbbuff_o[i,])
             upl_patch <- st_difference(tw_bl_c_cmbbuff_o[i,] |>
@@ -153,24 +153,24 @@ vect_chip_patch_create <- function(wetland_file){
             }
        }
 
-    fn_full_patch <- paste0("Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" )
+    fn_full_patch <- paste0("Data/Training_Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" )
     if(!file.exists(fn_full_patch)){
-        full_patch_file <- list.files("Data/R_Patches_Vector/individual_patches/",
+        full_patch_file <- list.files("Data/Training_Data/R_Patches_Vector/individual_patches/",
                                       full.names = TRUE,
                                       pattern = paste0("_cluster_", args[1], "_huc_", huc_num, "_", "patch.*\\.gpkg$")) |>
             purrr::map(st_read, quiet = TRUE) |>
             bind_rows()
         st_write(full_patch_file,
-                 dsn =  paste0("Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" ),
+                 dsn =  paste0("Data/Training_Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" ),
                  append = FALSE)
     } else {
-        # full_patch_file <- list.files("Data/R_Patches_Vector/",
+        # full_patch_file <- list.files("Data/Training_Data/R_Patches_Vector/",
         #                               full.names = TRUE,
         #                               pattern = paste0("_cluster_", args[1], "_huc_", huc_num, "_", "patch.*\\.gpkg$")) |>
         #     purrr::map(st_read, quiet = TRUE) |>
         #     bind_rows()
         # st_write(full_patch_file,
-        #          dsn =  paste0("Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" ),
+        #          dsn =  paste0("Data/Training_Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" ),
         #          append = FALSE)
         message("Already file")
     }
@@ -202,16 +202,16 @@ future_lapply(l_wet_cluster, vect_chip_patch_create,
 
 
 #### Checks
-# l_patches <- list.files("Data/R_Patches_Vector")
+# l_patches <- list.files("Data/Training_Data/R_Patches_Vector")
 # 
 # check_df <- data.frame(patch_file_name = l_patches,
 #                        reviewer = rep("NAME", length(l_patches)),
 #                        boundaries_altered = rep("TBD", length(l_patches)),
 #                        confidence = rep("TBD", length(l_patches)))
 # 
-# readr::write_csv(check_df, "Data/R_Patches_Vector/Vector_Patch_Checklist.csv")
+# readr::write_csv(check_df, "Data/Training_Data/R_Patches_Vector/Vector_Patch_Checklist.csv")
 # 
-# list_patches <- list.files("Data/R_Patches_Labels/", full.names = T)
+# list_patches <- list.files("Data/Training_Data/R_Patches_Labels/", full.names = T)
 # lapply(list_patches, \(x) rast(x))
 # lp <- lapply(list_patches, FUN = \(x) {rast(x) |> nlyr()}) |> unlist()
 # # lapply(list_patches, FUN = \(x) {rast(x) |> nlyr()}) |> unlist() |> table()

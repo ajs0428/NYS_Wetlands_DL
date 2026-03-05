@@ -8,7 +8,7 @@
 #SBATCH --ntasks=2
 #SBATCH --output=Shell_Scripts/SLURM/slurm-nwi-rcl-%j.out
 
-cd /ibstorage/anthony/NYS_Wetlands_GHG/
+cd /ibstorage/anthony/NYS_Wetlands_DL/
 
 export TMPDIR=/ibstorage/anthony/tmp
 
