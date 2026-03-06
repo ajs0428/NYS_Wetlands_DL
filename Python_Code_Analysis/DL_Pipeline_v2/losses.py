@@ -94,6 +94,12 @@ class DiceLoss(nn.Module):
         cardinality = probs.sum(dim=dims) + targets_onehot.sum(dim=dims)
 
         dice = (2.0 * intersection + self.smooth) / (cardinality + self.smooth)
+
+        # Only average over classes present in the batch (ground-truth pixels > 0).
+        # Absent classes get an inflated score from smoothing and bias the mean.
+        present = targets_onehot.sum(dim=dims) > 0
+        if present.any():
+            return 1.0 - dice[present].mean()
         return 1.0 - dice.mean()
 
 

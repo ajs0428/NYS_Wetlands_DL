@@ -114,6 +114,7 @@ class WetlandSegmentationModule(L.LightningModule):
         net: nn.Module,
         num_classes: int,
         class_weights: Optional[torch.Tensor] = None,
+        class_names: Optional[list] = None,
         ignore_index: int = 255,
         learning_rate: float = 1e-4,
         weight_decay: float = 1e-4,
@@ -126,6 +127,7 @@ class WetlandSegmentationModule(L.LightningModule):
         super().__init__()
         self.net = net
         self.num_classes = num_classes
+        self.class_names = class_names or [f"class_{i}" for i in range(num_classes)]
         self.ignore_index = ignore_index
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
@@ -147,6 +149,14 @@ class WetlandSegmentationModule(L.LightningModule):
             label_smoothing=label_smoothing,
         )
 
+        # Confusion matrices for epoch-level IoU (avoids biased per-batch averaging)
+        for stage in ("train", "val", "test"):
+            self.register_buffer(
+                f"_cm_{stage}",
+                torch.zeros(num_classes, num_classes, dtype=torch.long),
+                persistent=False,
+            )
+
         self.save_hyperparameters(ignore=["net", "class_weights"])
 
     def forward(self, x):
@@ -157,37 +167,47 @@ class WetlandSegmentationModule(L.LightningModule):
         logits = self(X)
         loss = self.criterion(logits, y)
 
-        # Pixel accuracy on valid pixels
         preds = logits.argmax(dim=1)
         valid = y != self.ignore_index
         if valid.any():
             acc = (preds[valid] == y[valid]).float().mean()
+            # Accumulate confusion matrix for epoch-level IoU
+            p = preds[valid].view(-1)
+            t = y[valid].view(-1)
+            cm = getattr(self, f"_cm_{stage}")
+            indices = t * self.num_classes + p
+            cm += torch.bincount(
+                indices, minlength=self.num_classes ** 2
+            ).reshape(self.num_classes, self.num_classes).to(cm.device)
         else:
             acc = torch.tensor(0.0, device=self.device)
 
-        # Mean IoU on valid pixels
-        if valid.any():
-            iou_sum = 0.0
-            valid_classes = 0
-            for c in range(self.num_classes):
-                pred_c = preds[valid] == c
-                true_c = y[valid] == c
-                intersection = (pred_c & true_c).sum().float()
-                union = (pred_c | true_c).sum().float()
-                if union > 0:
-                    iou_sum += (intersection / union).item()
-                    valid_classes += 1
-            iou = torch.tensor(
-                iou_sum / valid_classes if valid_classes > 0 else 0.0,
-                device=self.device,
-            )
-        else:
-            iou = torch.tensor(0.0, device=self.device)
-
         self.log(f"{stage}/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(f"{stage}/acc", acc, on_step=False, on_epoch=True, prog_bar=True)
-        self.log(f"{stage}/iou", iou, on_step=False, on_epoch=True, prog_bar=True)
         return loss
+
+    def _compute_and_log_iou(self, stage: str):
+        """Compute mean and per-class IoU from the accumulated confusion matrix and reset."""
+        cm = getattr(self, f"_cm_{stage}")
+        intersection = cm.diag()
+        union = cm.sum(dim=1) + cm.sum(dim=0) - intersection
+        valid = union > 0
+
+        # Per-class IoU
+        per_class_iou = torch.zeros(self.num_classes, device=self.device)
+        if valid.any():
+            per_class_iou[valid] = intersection[valid].float() / union[valid].float()
+        for i, name in enumerate(self.class_names):
+            if valid[i]:
+                self.log(f"{stage}/iou_{name}", per_class_iou[i], on_epoch=True)
+
+        # Mean IoU (over classes present in the data)
+        if valid.any():
+            iou = per_class_iou[valid].mean()
+        else:
+            iou = torch.tensor(0.0, device=self.device)
+        self.log(f"{stage}/iou", iou, prog_bar=True)
+        cm.zero_()
 
     def training_step(self, batch, batch_idx):
         return self._shared_step(batch, "train")
@@ -197,6 +217,15 @@ class WetlandSegmentationModule(L.LightningModule):
 
     def test_step(self, batch, batch_idx):
         self._shared_step(batch, "test")
+
+    def on_train_epoch_end(self):
+        self._compute_and_log_iou("train")
+
+    def on_validation_epoch_end(self):
+        self._compute_and_log_iou("val")
+
+    def on_test_epoch_end(self):
+        self._compute_and_log_iou("test")
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
@@ -228,7 +257,7 @@ def train(
     base_filters: int = 32,
     depth: int = 4,
     num_workers: int = 4,
-    seed: int = 42,
+    seed: Optional[int] = None,
     early_stopping_patience: int = 15,
     architecture: str = "unet",
     precision: str = "32-true",
@@ -236,6 +265,8 @@ def train(
     dice_weight: float = 1.0,
     focal_gamma: float = 2.0,
     label_smoothing: float = 0.0,
+    gradient_clip_val: float = 1.0,
+    dropout: float = 0.2,
 ):
     """
     Full training pipeline using PyTorch Lightning.
@@ -253,6 +284,9 @@ def train(
         seed: Random seed
         early_stopping_patience: Epochs to wait before stopping
     """
+    if seed is None:
+        seed = int(torch.randint(0, 2**31, (1,)).item())
+        print(f"No seed specified — using random seed: {seed}")
     L.seed_everything(seed, workers=True)
 
     # Read configuration from stats
@@ -298,6 +332,7 @@ def train(
             num_classes=num_classes,
             base_filters=base_filters,
             depth=depth,
+            dropout=dropout,
         )
 
     # Lightning module
@@ -305,6 +340,7 @@ def train(
         net=net,
         num_classes=num_classes,
         class_weights=class_weights,
+        class_names=class_names,
         ignore_index=ignore_index,
         learning_rate=learning_rate,
         ce_weight=ce_weight,
@@ -332,7 +368,9 @@ def train(
         LearningRateMonitor(logging_interval="epoch"),
     ]
 
-    run_name = f"{architecture}_bf{base_filters}"
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"{architecture}_bf{base_filters}_s{seed}_{timestamp}"
     csv_logger = CSVLogger(save_dir=output_dir, name="lightning_logs", version=run_name)
     tb_logger = TensorBoardLogger(save_dir=output_dir, name="tb_logs", version=run_name)
 
@@ -342,6 +380,7 @@ def train(
         logger=[csv_logger, tb_logger],
         default_root_dir=output_dir,
         precision=precision,
+        gradient_clip_val=gradient_clip_val or None,
         log_every_n_steps=10,
         enable_progress_bar=True,
     )
@@ -397,7 +436,8 @@ if __name__ == "__main__":
     parser.add_argument("--base-filters", type=int, default=32)
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Random seed (default: random each run, set for reproducibility)")
     parser.add_argument("--early-stopping", type=int, default=15,
                         help="Early stopping patience (epochs)")
     parser.add_argument("--architecture", type=str, default="unet",
@@ -414,6 +454,10 @@ if __name__ == "__main__":
                         help="Focal loss gamma (0=plain CE, default: 2.0)")
     parser.add_argument("--label-smoothing", type=float, default=0.0,
                         help="Label smoothing factor (default: 0.0)")
+    parser.add_argument("--gradient-clip-val", type=float, default=1.0,
+                        help="Max gradient norm for clipping (0=disabled, default: 1.0)")
+    parser.add_argument("--dropout", type=float, default=0.2,
+                        help="Spatial dropout after bottleneck (0=disabled, default: 0.2)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -440,4 +484,6 @@ if __name__ == "__main__":
         dice_weight=args.dice_weight,
         focal_gamma=args.focal_gamma,
         label_smoothing=args.label_smoothing,
+        gradient_clip_val=args.gradient_clip_val,
+        dropout=args.dropout,
     )

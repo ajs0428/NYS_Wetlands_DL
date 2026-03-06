@@ -12,26 +12,20 @@ Usage in 04_train_lightning.py:
 import torch
 import torch.nn as nn
 
+import importlib.util, sys
+from pathlib import Path as _Path
 
-class SqueezeExcitation(nn.Module):
-    """Squeeze-and-Excitation channel attention block."""
+def _import_module(name, path):
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
-    def __init__(self, channels: int, reduction: int = 16):
-        super().__init__()
-        mid = max(channels // reduction, 8)
-        self.pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(channels, mid, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(mid, channels, bias=False),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        b, c, _, _ = x.shape
-        scale = self.pool(x).view(b, c)
-        scale = self.fc(scale).view(b, c, 1, 1)
-        return x * scale
+_unet = _import_module("unet_model", _Path(__file__).parent / "03_unet_model.py")
+SqueezeExcitation = _unet.SqueezeExcitation
 
 
 class BasicBlock(nn.Module):
@@ -119,7 +113,7 @@ class ResUNet34(nn.Module):
     U-Net with ResNet-34 encoder (from scratch, no pretrained weights).
 
     Encoder layout (ResNet-34 block counts [3, 4, 6, 3]):
-        Stem:    in_channels -> bf   (7x7 conv, BN, ReLU)  — keeps spatial size
+        Stem:    in_channels -> bf   (two 3x3 convs, BN, ReLU)  — keeps spatial size
         Pool:    bf -> bf            (3x3 maxpool stride 2) — /2
         Stage 1: bf -> bf            (3 BasicBlocks)        — /2 (same)
         Stage 2: bf -> 2*bf          (4 BasicBlocks)        — /4

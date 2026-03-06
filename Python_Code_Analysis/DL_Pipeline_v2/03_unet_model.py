@@ -130,7 +130,8 @@ class UNet(nn.Module):
         in_channels: int,
         num_classes: int = 5,
         base_filters: int = 32,
-        depth: int = 4
+        depth: int = 4,
+        dropout: float = 0.0,
     ):
         super().__init__()
 
@@ -151,6 +152,7 @@ class UNet(nn.Module):
 
         # Bottleneck
         self.bottleneck = ConvBlock(filters[depth - 1], filters[depth])
+        self.bottleneck_dropout = nn.Dropout2d(p=dropout) if dropout > 0 else nn.Identity()
 
         # Build decoder
         self.decoders = nn.ModuleList()
@@ -178,6 +180,7 @@ class UNet(nn.Module):
 
         # Bottleneck
         x = self.bottleneck(x)
+        x = self.bottleneck_dropout(x)
 
         # Decoder path - use skip connections in reverse order
         for decoder, skip in zip(self.decoders, reversed(skips)):

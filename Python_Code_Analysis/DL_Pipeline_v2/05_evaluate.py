@@ -28,13 +28,9 @@ _script_dir = Path(__file__).parent
 _dataset = _import_module("dataset", _script_dir / "02_dataset.py")
 _model = _import_module("unet_model", _script_dir / "03_unet_model.py")
 
-from band_utils import compute_in_channels_from_stats
 from model_utils import load_model
 
 create_dataloaders = _dataset.create_dataloaders
-WetlandPatchDataset = _dataset.WetlandPatchDataset
-create_data_splits = _dataset.create_data_splits
-UNet = _model.UNet
 get_device = _model.get_device
 
 
@@ -56,11 +52,8 @@ def compute_confusion_matrix(
         where cm[i, j] = count of pixels with true class i predicted as class j
     """
     cm = np.zeros((num_classes, num_classes), dtype=np.int64)
-    for true_class in range(num_classes):
-        for pred_class in range(num_classes):
-            cm[true_class, pred_class] = np.sum(
-                (targets == true_class) & (preds == pred_class)
-            )
+    valid = (targets >= 0) & (targets < num_classes) & (preds >= 0) & (preds < num_classes)
+    np.add.at(cm, (targets[valid], preds[valid]), 1)
     return cm
 
 

@@ -35,11 +35,8 @@ _dataset = _import_module("dataset", _script_dir / "02_dataset.py")
 _model = _import_module("unet_model", _script_dir / "03_unet_model.py")
 _evaluate = _import_module("evaluate", _script_dir / "05_evaluate.py")
 
-from band_utils import compute_in_channels_from_stats
-
 create_data_splits = _dataset.create_data_splits
 WetlandPatchDataset = _dataset.WetlandPatchDataset
-UNet = _model.UNet
 get_device = _model.get_device
 load_model = _evaluate.load_model
 compute_confusion_matrix = _evaluate.compute_confusion_matrix
@@ -247,7 +244,7 @@ if __name__ == "__main__":
     else:
         with open(stats_path) as f:
             _stats = json.load(f)
-        mode = "binary" if len(_stats["class_names"]) == 2 else "multiclass"
+        mode = _stats.get("classification_mode", "multiclass")
         output_csv = project_root / "Data" / "Training_Data" / f"patch_evaluation_{mode}.csv"
         print(f"Detected {mode} classification ({len(_stats['class_names'])} classes)")
 

@@ -103,13 +103,17 @@ class WetlandPatchDataset(Dataset):
         self,
         patch_files: List[Path],
         stats_path: Path,
-        augment: bool = False
+        augment: bool = False,
+        validate_bands: bool = True,
     ):
         """
         Args:
             patch_files: List of paths to GeoTIFF patch files
             stats_path: Path to normalization_stats.json
             augment: Whether to apply data augmentation
+            validate_bands: Check each file's band count at init (slower but
+                            catches bad patches upfront). Set False if data is
+                            known-clean or on slow network storage.
         """
         self.patch_files = patch_files
         self.augment = augment
@@ -145,19 +149,22 @@ class WetlandPatchDataset(Dataset):
         self.predictor_indices = [
             self.band_names.index(name) for name in self.predictor_names
         ]
+        self._expected_bands = len(self.band_names)
 
-        # Filter out patches with fewer bands than expected
-        expected_bands = len(self.band_names)
-        valid_files = []
-        for pf in self.patch_files:
-            with rasterio.open(pf) as src:
-                if src.count >= expected_bands:
-                    valid_files.append(pf)
-                else:
-                    print(f"  Skipping {pf.name}: {src.count} bands (expected {expected_bands})")
-        if len(valid_files) < len(self.patch_files):
-            print(f"  Filtered: {len(valid_files)}/{len(self.patch_files)} patches have all bands")
-        self.patch_files = valid_files
+        # Filter out patches with wrong band count
+        if validate_bands:
+            valid_files = []
+            for pf in self.patch_files:
+                with rasterio.open(pf) as src:
+                    if src.count >= self._expected_bands:
+                        valid_files.append(pf)
+                    else:
+                        print(f"  Skipping {pf.name}: {src.count} bands "
+                              f"(expected {self._expected_bands})")
+            if len(valid_files) < len(self.patch_files):
+                print(f"  Filtered: {len(valid_files)}/{len(self.patch_files)} "
+                      f"patches have all bands")
+            self.patch_files = valid_files
 
         # Build class weight tensor
         class_weights = self.stats.get("class_weights", {})
@@ -173,12 +180,17 @@ class WetlandPatchDataset(Dataset):
         Load and process a single patch.
 
         Returns:
-            predictors: Tensor of shape (in_channels, 128, 128)
-            labels: Tensor of shape (128, 128) with class values
+            predictors: Tensor of shape (in_channels, H, W)
+            labels: Tensor of shape (H, W) with class values
         """
         patch_path = self.patch_files[idx]
 
         with rasterio.open(patch_path) as src:
+            if src.count < self._expected_bands:
+                raise ValueError(
+                    f"{patch_path.name} has {src.count} bands, expected "
+                    f"{self._expected_bands}. Remove it or re-run 01_compute_statistics.py."
+                )
             data = src.read().astype(np.float32)
             nodata = src.nodata
 
@@ -346,12 +358,15 @@ def create_dataloaders(
     val_dataset = WetlandPatchDataset(val_files, stats_path, augment=False)
     test_dataset = WetlandPatchDataset(test_files, stats_path, augment=False)
 
+    persist = num_workers > 0
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=True,
+        persistent_workers=persist,
     )
 
     val_loader = DataLoader(
@@ -359,7 +374,8 @@ def create_dataloaders(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=True,
+        persistent_workers=persist,
     )
 
     test_loader = DataLoader(
@@ -367,7 +383,8 @@ def create_dataloaders(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True
+        pin_memory=True,
+        persistent_workers=persist,
     )
 
     class_weights = train_dataset.get_class_weights()

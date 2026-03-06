@@ -8,7 +8,6 @@ Handles both legacy (04_train.py) and Lightning (04_train_lightning.py) checkpoi
 import torch
 import torch.nn as nn
 from pathlib import Path
-from typing import Optional
 import importlib.util
 import sys
 
@@ -29,10 +28,10 @@ _resunet = _import_module("resunet34", _script_dir / "03b_resunet34.py")
 UNet = _model.UNet
 ResUNet34 = _resunet.ResUNet34
 
-# Registry for architecture dispatch
+# Registry: architecture name -> (class, constructor kwargs beyond in_channels/num_classes/base_filters)
 _ARCHITECTURES = {
-    "unet": UNet,
-    "resunet34": ResUNet34,
+    "unet": {"cls": UNet, "extra_kwargs": ["depth"]},
+    "resunet34": {"cls": ResUNet34, "extra_kwargs": []},
 }
 
 
@@ -109,20 +108,11 @@ def load_model(
             f"Choose from: {list(_ARCHITECTURES.keys())}"
         )
 
-    if architecture == "unet":
-        net = UNet(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            base_filters=base_filters,
-            depth=depth,
-        )
-    elif architecture == "resunet34":
-        net = ResUNet34(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            base_filters=base_filters,
-        )
-    else:
-        raise ValueError(f"Unknown architecture '{architecture}'")
+    entry = _ARCHITECTURES[architecture]
+    kwargs = dict(in_channels=in_channels, num_classes=num_classes,
+                  base_filters=base_filters)
+    if "depth" in entry["extra_kwargs"]:
+        kwargs["depth"] = depth
 
+    net = entry["cls"](**kwargs)
     return load_model_from_checkpoint(model_path, net, device)

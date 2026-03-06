@@ -11,11 +11,10 @@ so prediction rasters can have bands in any order or extra bands.
 import json
 import numpy as np
 import rasterio
-from rasterio.windows import Window
 import torch
 import torch.nn as nn
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional
 import importlib.util
 import sys
 from tqdm import tqdm
@@ -34,10 +33,7 @@ _script_dir = Path(__file__).parent
 _model = _import_module("unet_model", _script_dir / "03_unet_model.py")
 _dataset = _import_module("dataset", _script_dir / "02_dataset.py")
 
-from band_utils import (
-    discover_bands_from_raster,
-    validate_prediction_bands,
-)
+from band_utils import validate_prediction_bands
 from model_utils import load_model
 
 normalize_bands = _dataset.normalize_bands
