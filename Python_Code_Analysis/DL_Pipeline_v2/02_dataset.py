@@ -146,6 +146,19 @@ class WetlandPatchDataset(Dataset):
             self.band_names.index(name) for name in self.predictor_names
         ]
 
+        # Filter out patches with fewer bands than expected
+        expected_bands = len(self.band_names)
+        valid_files = []
+        for pf in self.patch_files:
+            with rasterio.open(pf) as src:
+                if src.count >= expected_bands:
+                    valid_files.append(pf)
+                else:
+                    print(f"  Skipping {pf.name}: {src.count} bands (expected {expected_bands})")
+        if len(valid_files) < len(self.patch_files):
+            print(f"  Filtered: {len(valid_files)}/{len(self.patch_files)} patches have all bands")
+        self.patch_files = valid_files
+
         # Build class weight tensor
         class_weights = self.stats.get("class_weights", {})
         self.class_weights = torch.tensor([

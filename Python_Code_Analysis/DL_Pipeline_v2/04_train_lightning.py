@@ -120,6 +120,8 @@ class WetlandSegmentationModule(L.LightningModule):
         lr_patience: int = 5,
         ce_weight: float = 1.0,
         dice_weight: float = 1.0,
+        focal_gamma: float = 2.0,
+        label_smoothing: float = 0.0,
     ):
         super().__init__()
         self.net = net
@@ -141,6 +143,8 @@ class WetlandSegmentationModule(L.LightningModule):
             ignore_index=ignore_index,
             ce_weight=ce_weight,
             dice_weight=dice_weight,
+            focal_gamma=focal_gamma,
+            label_smoothing=label_smoothing,
         )
 
         self.save_hyperparameters(ignore=["net", "class_weights"])
@@ -227,6 +231,11 @@ def train(
     seed: int = 42,
     early_stopping_patience: int = 15,
     architecture: str = "unet",
+    precision: str = "32-true",
+    ce_weight: float = 1.0,
+    dice_weight: float = 1.0,
+    focal_gamma: float = 2.0,
+    label_smoothing: float = 0.0,
 ):
     """
     Full training pipeline using PyTorch Lightning.
@@ -262,6 +271,7 @@ def train(
     print(f"Classification mode: {mode}")
     print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
+    print(f"Precision: {precision}")
     print(f"{'='*60}\n")
 
     # Data
@@ -297,6 +307,10 @@ def train(
         class_weights=class_weights,
         ignore_index=ignore_index,
         learning_rate=learning_rate,
+        ce_weight=ce_weight,
+        dice_weight=dice_weight,
+        focal_gamma=focal_gamma,
+        label_smoothing=label_smoothing,
     )
 
     output_dir = Path(output_dir)
@@ -318,14 +332,16 @@ def train(
         LearningRateMonitor(logging_interval="epoch"),
     ]
 
-    csv_logger = CSVLogger(save_dir=output_dir, name="lightning_logs")
-    tb_logger = TensorBoardLogger(save_dir=output_dir, name="tb_logs")
+    run_name = f"{architecture}_bf{base_filters}"
+    csv_logger = CSVLogger(save_dir=output_dir, name="lightning_logs", version=run_name)
+    tb_logger = TensorBoardLogger(save_dir=output_dir, name="tb_logs", version=run_name)
 
     trainer = L.Trainer(
         max_epochs=epochs,
         callbacks=callbacks,
         logger=[csv_logger, tb_logger],
         default_root_dir=output_dir,
+        precision=precision,
         log_every_n_steps=10,
         enable_progress_bar=True,
     )
@@ -387,6 +403,17 @@ if __name__ == "__main__":
     parser.add_argument("--architecture", type=str, default="unet",
                         choices=["unet", "resunet34"],
                         help="Model architecture (default: unet)")
+    parser.add_argument("--precision", type=str, default="32-true",
+                        choices=["32-true", "16-mixed", "bf16-mixed"],
+                        help="Training precision (default: 32-true)")
+    parser.add_argument("--ce-weight", type=float, default=1.0,
+                        help="Cross-entropy weight in hybrid loss (default: 1.0)")
+    parser.add_argument("--dice-weight", type=float, default=1.0,
+                        help="Dice weight in hybrid loss (default: 1.0)")
+    parser.add_argument("--focal-gamma", type=float, default=2.0,
+                        help="Focal loss gamma (0=plain CE, default: 2.0)")
+    parser.add_argument("--label-smoothing", type=float, default=0.0,
+                        help="Label smoothing factor (default: 0.0)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -408,4 +435,9 @@ if __name__ == "__main__":
         seed=args.seed,
         early_stopping_patience=args.early_stopping,
         architecture=args.architecture,
+        precision=args.precision,
+        ce_weight=args.ce_weight,
+        dice_weight=args.dice_weight,
+        focal_gamma=args.focal_gamma,
+        label_smoothing=args.label_smoothing,
     )

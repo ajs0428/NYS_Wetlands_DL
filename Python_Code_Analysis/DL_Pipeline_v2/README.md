@@ -1,6 +1,6 @@
 # NYS Wetlands DL Pipeline v2 — User Guide
 
-Deep learning pipeline for wetland semantic segmentation in New York State using a U-Net architecture. Supports two classification modes: **multiclass** (5-class: EMW, FSW, OWW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `band_config.json` — both modes use the same training patches with label remapping applied at runtime.
+Deep learning pipeline for wetland semantic segmentation in New York State using a U-Net architecture. Supports two classification modes: **multiclass** (4-class: EMW, FSW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `band_config.json` — both modes use the same training patches with label remapping applied at runtime.
 
 ## Table of Contents
 
@@ -21,6 +21,7 @@ Deep learning pipeline for wetland semantic segmentation in New York State using
 - [Step 6: Predict](#step-6-predict-06_predictpy)
 - [Interactive Notebook](#interactive-notebook-wetland_pipelineipynb)
 - [Swappable Architectures](#swappable-architectures)
+- [Loss Function: Hybrid Focal + Dice](#loss-function-hybrid-focal--dice)
 - [Adding a New Band](#adding-a-new-band)
 - [Patch Size](#patch-size)
 - [Troubleshooting](#troubleshooting)
@@ -177,7 +178,7 @@ GeoTIFF Patches (27 bands: 26 predictors + 1 label)
  │ 06_predict        │ → Classification GeoTIFF + probability maps
  └──────────────────┘
 
-Shared modules: losses.py (DiceLoss, HybridLoss), model_utils.py (checkpoint loading),
+Shared modules: losses.py (FocalLoss, DiceLoss, HybridLoss), model_utils.py (checkpoint loading),
                 band_utils.py (band discovery/config)
 ```
 
@@ -221,12 +222,13 @@ Each patch contains 27 bands (26 predictors + 1 label). Band names are stored in
 |-------|------|-------------|
 | 0 | EMW | Emergent Wetland |
 | 1 | FSW | Forested Wetland |
-| 2 | OWW | Open Water Wetland |
-| 3 | SSW | Scrub-Shrub Wetland |
-| 4 | UPL | Upland / Background |
+| 2 | SSW | Scrub-Shrub Wetland |
+| 3 | UPL | Upland / Background |
 | 255 | — | Unlabeled (excluded from training) |
 
-**Classes (binary mode):** EMW/FSW/OWW/SSW are remapped to WET (0), UPL stays as UPL (1). See [Classification Mode](#classification-mode-multiclass-vs-binary).
+> **Note:** Open Water Wetland (OWW) has been removed from the current classification. OWW patches were excluded from training data because open water is reliably detectable via spectral indices (MNDWI, NDWI) and does not require a deep learning model. OWW can be reintroduced by adding it back to `class_names` in `band_config.json` and regenerating training patches that include OWW labels.
+
+**Classes (binary mode):** EMW/FSW/SSW are remapped to WET (0), UPL stays as UPL (1). See [Classification Mode](#classification-mode-multiclass-vs-binary).
 
 ---
 
@@ -272,7 +274,7 @@ The pipeline supports two classification modes, controlled by `classification_mo
 
 | Mode | Classes | Output Bands | Use Case |
 |------|---------|--------------|----------|
-| `"multiclass"` | EMW, FSW, OWW, SSW, UPL (5) | 5 | Fine-grained wetland type mapping |
+| `"multiclass"` | EMW, FSW, SSW, UPL (4) | 4 | Fine-grained wetland type mapping |
 | `"binary"` | WET, UPL (2) | 2 | Wetland presence/absence detection |
 
 ### Switching Modes
@@ -470,14 +472,19 @@ python 04_train_lightning.py \
 | `--workers` | 4 | DataLoader worker processes (use 0 on macOS if issues arise) |
 | `--seed` | 42 | Random seed for reproducibility |
 | `--early-stopping` | 15 | Early stopping patience (epochs without improvement) |
+| `--architecture` | `unet` | Model architecture (`unet` or `resunet34`) |
+| `--ce-weight` | 0.5 | Weight for Focal Loss component |
+| `--dice-weight` | 1.0 | Weight for Dice Loss component |
+| `--focal-gamma` | 2.0 | Focal Loss gamma (0 = plain CE, 2 = standard focal) |
+| `--label-smoothing` | 0.0 | Label smoothing factor (0.0 = off) |
 
 ### Training Details
 
-- **Loss**: Hybrid CrossEntropy + Dice (`HybridLoss` in `losses.py`). CE carries inverse frequency class weights and `ignore_index=255`; Dice is computed per-class on softmax probabilities then averaged (inherently class-balanced). Combined as `CE + Dice` with equal weight.
+- **Loss**: Hybrid Focal + Dice (`HybridLoss` in `losses.py`). Focal Loss replaces plain CrossEntropy — it applies a `(1 - p_t)^gamma` modulation that down-weights easy/well-classified pixels (mostly the dominant UPL class) and focuses training on hard examples (minority wetland classes, boundary pixels). Class weights from inverse frequency are still applied. Dice is computed per-class on softmax probabilities then averaged (inherently class-balanced). Default combination: `0.5 * Focal + 1.0 * Dice`.
 - **Optimizer**: AdamW (weight decay 1e-4)
 - **Scheduler**: ReduceLROnPlateau (reduces LR when validation loss plateaus)
 - **Callbacks**: ModelCheckpoint (best val/loss), EarlyStopping, LearningRateMonitor
-- **Metrics logged**: train/loss, train/acc, val/loss, val/acc (via Lightning's built-in logging)
+- **Metrics logged**: train/loss, train/acc, train/iou, val/loss, val/acc, val/iou (via Lightning's built-in logging)
 - **Device**: Auto-detected (MPS on Mac, CUDA on Linux, CPU fallback)
 
 ### Output Files
@@ -624,6 +631,13 @@ BASE_FILTERS = 32      # 32 for local (M1), 64 for HPC
 DEPTH = 4              # 4 for local, 5 for HPC
 NUM_WORKERS = 4        # Set to 0 if issues on macOS
 SEED = 42
+ARCHITECTURE = "unet"  # "unet" or "resunet34"
+
+# Loss parameters
+CE_WEIGHT = 0.5        # Weight for Focal Loss component
+DICE_WEIGHT = 1.0      # Weight for Dice Loss component
+FOCAL_GAMMA = 2.0      # 0 = plain CE, 2 = standard focal
+LABEL_SMOOTHING = 0.0  # 0.0 = off
 ```
 
 ### Workflow
@@ -665,7 +679,51 @@ Any `nn.Module` that satisfies this contract:
 | File | Architecture | Status |
 |------|-------------|--------|
 | `03_unet_model.py` | U-Net (residual + SE attention) | Production |
-| `03b_resunet34.py` | ResUNet34 | Scaffold (not yet implemented) |
+| `03b_resunet34.py` | ResUNet34 (ResNet-34 encoder + U-Net decoder + SE attention) | Production |
+
+---
+
+## Loss Function: Hybrid Focal + Dice
+
+The training loss (`losses.py`) combines two complementary components to handle severe class imbalance (e.g., UPL at ~80% of pixels vs. wetland classes at 3–12%):
+
+### Focal Loss (replaces plain CrossEntropy)
+
+Standard CrossEntropy treats all pixels equally — the model can achieve low loss by simply predicting the dominant class everywhere. Focal Loss adds a modulating factor `(1 - p_t)^gamma` that **down-weights easy, well-classified pixels** and focuses training on hard examples:
+
+```
+FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+```
+
+| `gamma` | Effect |
+|---------|--------|
+| 0 | Plain CrossEntropy (no modulation) |
+| 1 | Mild down-weighting of easy examples |
+| **2** | **Standard focal loss (default)** — a UPL pixel classified at 95% confidence contributes only 0.25% of its original loss |
+| 3+ | More aggressive; may under-weight even moderately confident predictions |
+
+Focal Loss still carries the inverse-frequency **class weights** from the training data, so it combines both pixel-level difficulty weighting and class-level imbalance correction.
+
+### Dice Loss
+
+Dice Loss is computed per-class then averaged, making it **inherently class-balanced** — each class contributes equally regardless of pixel count. It directly optimizes the overlap (IoU-like) between predicted and true segmentation masks.
+
+### Combined Loss
+
+```
+total_loss = ce_weight * FocalLoss + dice_weight * DiceLoss
+```
+
+Default: `0.5 * Focal + 1.0 * Dice`. This shifts the balance toward Dice (class-balanced) while retaining Focal's pixel-level difficulty weighting. Both components use `ignore_index=255` to exclude unlabeled pixels.
+
+### Tuning Guidelines
+
+| Goal | Adjustment |
+|------|-----------|
+| More focus on minority classes | Increase `--dice-weight` or decrease `--ce-weight` |
+| Revert to plain CE behavior | Set `--focal-gamma 0` |
+| Prevent overconfident UPL predictions | Add `--label-smoothing 0.05` |
+| More aggressive hard-example mining | Increase `--focal-gamma` to 3 or higher |
 
 ---
 
@@ -746,12 +804,12 @@ NYS_Wetlands_DL/
         ├── UNet_Architecture_Overview.md
         ├── band_config.json            # Normalization rules
         ├── band_utils.py               # Shared band utilities
-        ├── losses.py                   # DiceLoss + HybridLoss
+        ├── losses.py                   # FocalLoss + DiceLoss + HybridLoss
         ├── model_utils.py              # Shared model loading (legacy + Lightning)
         ├── 01_compute_statistics.py     # Step 1: Stats
         ├── 02_dataset.py               # Step 2: Dataset + normalize_bands()
         ├── 03_unet_model.py            # Step 3: U-Net architecture
-        ├── 03b_resunet34.py            # ResUNet34 scaffold
+        ├── 03b_resunet34.py            # ResUNet34 architecture
         ├── 04_train_lightning.py        # Step 4: Train (Lightning, primary)
         ├── 04_train.py                 # Step 4: Train (legacy fallback)
         ├── 05_evaluate.py              # Step 5: Evaluate
