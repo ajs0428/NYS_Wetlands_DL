@@ -137,7 +137,8 @@ class ResUNet34(nn.Module):
         base_filters: Base filter count (default 64 mirrors ResNet convention).
     """
 
-    def __init__(self, in_channels: int, num_classes: int, base_filters: int = 64):
+    def __init__(self, in_channels: int, num_classes: int, base_filters: int = 64,
+                 dropout: float = 0.0):
         super().__init__()
         bf = base_filters
 
@@ -159,6 +160,9 @@ class ResUNet34(nn.Module):
         self.stage3 = _make_stage(2 * bf, 4 * bf, num_blocks=6, stride=2)  # /8
         self.stage4 = _make_stage(4 * bf, 8 * bf, num_blocks=3, stride=2)  # /16
 
+        # Spatial dropout after bottleneck (stage4)
+        self.bottleneck_dropout = nn.Dropout2d(p=dropout) if dropout > 0 else nn.Identity()
+
         # Decoder
         self.up4 = DecoderBlock(8 * bf, 4 * bf, 4 * bf)   # skip from stage3
         self.up3 = DecoderBlock(4 * bf, 2 * bf, 2 * bf)   # skip from stage2
@@ -176,6 +180,7 @@ class ResUNet34(nn.Module):
         s2 = self.stage2(s1)       # (B, 2bf, H/4, W/4)  — skip for up3
         s3 = self.stage3(s2)       # (B, 4bf, H/8, W/8)  — skip for up4
         s4 = self.stage4(s3)       # (B, 8bf, H/16, W/16) — bottleneck
+        s4 = self.bottleneck_dropout(s4)
 
         # Decoder
         x = self.up4(s4, s3)       # (B, 4bf, H/8, W/8)

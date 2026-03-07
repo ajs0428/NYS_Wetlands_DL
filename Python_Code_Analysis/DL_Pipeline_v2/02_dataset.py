@@ -245,22 +245,28 @@ class WetlandPatchDataset(Dataset):
             Augmented predictors and labels
         """
         # --- Geometric (applied to both predictors and labels) ---
+        # Defer .copy() — apply all view-based transforms first, then make
+        # contiguous once at the end to avoid ~9MB allocation per transform.
 
         # Random horizontal flip
         if random.random() > 0.5:
-            predictors = np.flip(predictors, axis=2).copy()
-            labels = np.flip(labels, axis=1).copy()
+            predictors = np.flip(predictors, axis=2)
+            labels = np.flip(labels, axis=1)
 
         # Random vertical flip
         if random.random() > 0.5:
-            predictors = np.flip(predictors, axis=1).copy()
-            labels = np.flip(labels, axis=0).copy()
+            predictors = np.flip(predictors, axis=1)
+            labels = np.flip(labels, axis=0)
 
         # Random 90-degree rotations
         k = random.randint(0, 3)
         if k > 0:
-            predictors = np.rot90(predictors, k, axes=(1, 2)).copy()
-            labels = np.rot90(labels, k, axes=(0, 1)).copy()
+            predictors = np.rot90(predictors, k, axes=(1, 2))
+            labels = np.rot90(labels, k, axes=(0, 1))
+
+        # Single contiguous copy for all geometric transforms
+        predictors = np.ascontiguousarray(predictors)
+        labels = np.ascontiguousarray(labels)
 
         # --- Spectral (applied to predictors only) ---
 
@@ -367,6 +373,7 @@ def create_dataloaders(
         num_workers=num_workers,
         pin_memory=True,
         persistent_workers=persist,
+        drop_last=True,
     )
 
     val_loader = DataLoader(

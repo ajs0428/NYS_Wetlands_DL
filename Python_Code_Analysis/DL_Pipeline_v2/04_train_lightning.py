@@ -10,10 +10,11 @@ with signature (B, C, H, W) -> (B, num_classes, H, W).
 """
 
 import json
-import numpy as np
 import torch
 import torch.nn as nn
 import lightning as L
+from datetime import datetime
+
 from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     EarlyStopping,
@@ -47,7 +48,6 @@ from losses import HybridLoss
 create_dataloaders = _dataset.create_dataloaders
 UNet = _model.UNet
 ResUNet34 = _resunet.ResUNet34
-get_device = _model.get_device
 
 
 # ── Data Module ──────────────────────────────────────────────────────
@@ -149,7 +149,7 @@ class WetlandSegmentationModule(L.LightningModule):
             label_smoothing=label_smoothing,
         )
 
-        # Confusion matrices for epoch-level IoU (avoids biased per-batch averaging)
+        # Confusion matrices for epoch-level IoU (on-device, updated via scatter_add_)
         for stage in ("train", "val", "test"):
             self.register_buffer(
                 f"_cm_{stage}",
@@ -167,20 +167,21 @@ class WetlandSegmentationModule(L.LightningModule):
         logits = self(X)
         loss = self.criterion(logits, y)
 
-        preds = logits.argmax(dim=1)
-        valid = y != self.ignore_index
-        if valid.any():
-            acc = (preds[valid] == y[valid]).float().mean()
-            # Accumulate confusion matrix for epoch-level IoU
-            p = preds[valid].view(-1)
-            t = y[valid].view(-1)
-            cm = getattr(self, f"_cm_{stage}")
-            indices = t * self.num_classes + p
-            cm += torch.bincount(
-                indices, minlength=self.num_classes ** 2
-            ).reshape(self.num_classes, self.num_classes).to(cm.device)
-        else:
-            acc = torch.tensor(0.0, device=self.device)
+        # Metrics — detach from autograd, stay on-device
+        with torch.no_grad():
+            preds = logits.argmax(dim=1)
+            valid = y != self.ignore_index
+            if valid.any():
+                acc = (preds[valid] == y[valid]).float().mean()
+                # Accumulate confusion matrix via scatter_add_ (GPU-native on CUDA & MPS)
+                p = preds[valid].view(-1)
+                t = y[valid].view(-1)
+                indices = t * self.num_classes + p
+                cm = getattr(self, f"_cm_{stage}")
+                ones = torch.ones_like(indices, dtype=torch.long)
+                cm.view(-1).scatter_add_(0, indices, ones)
+            else:
+                acc = torch.tensor(0.0, device=self.device)
 
         self.log(f"{stage}/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(f"{stage}/acc", acc, on_step=False, on_epoch=True, prog_bar=True)
@@ -189,24 +190,21 @@ class WetlandSegmentationModule(L.LightningModule):
     def _compute_and_log_iou(self, stage: str):
         """Compute mean and per-class IoU from the accumulated confusion matrix and reset."""
         cm = getattr(self, f"_cm_{stage}")
-        intersection = cm.diag()
-        union = cm.sum(dim=1) + cm.sum(dim=0) - intersection
+        intersection = cm.diag().float()
+        union = (cm.sum(dim=1) + cm.sum(dim=0)).float() - intersection
         valid = union > 0
 
         # Per-class IoU
-        per_class_iou = torch.zeros(self.num_classes, device=self.device)
+        per_class_iou = torch.zeros(self.num_classes, device=cm.device)
         if valid.any():
-            per_class_iou[valid] = intersection[valid].float() / union[valid].float()
+            per_class_iou[valid] = intersection[valid] / union[valid]
         for i, name in enumerate(self.class_names):
             if valid[i]:
-                self.log(f"{stage}/iou_{name}", per_class_iou[i], on_epoch=True)
+                self.log(f"{stage}/iou_{name}", per_class_iou[i].item(), on_epoch=True)
 
         # Mean IoU (over classes present in the data)
-        if valid.any():
-            iou = per_class_iou[valid].mean()
-        else:
-            iou = torch.tensor(0.0, device=self.device)
-        self.log(f"{stage}/iou", iou, prog_bar=True)
+        mean_iou = per_class_iou[valid].mean().item() if valid.any() else 0.0
+        self.log(f"{stage}/iou", mean_iou, prog_bar=True)
         cm.zero_()
 
     def training_step(self, batch, batch_idx):
@@ -254,11 +252,13 @@ def train(
     epochs: int = 50,
     batch_size: int = 16,
     learning_rate: float = 1e-4,
+    weight_decay: float = 1e-4,
     base_filters: int = 32,
     depth: int = 4,
     num_workers: int = 4,
     seed: Optional[int] = None,
     early_stopping_patience: int = 15,
+    lr_patience: int = 5,
     architecture: str = "unet",
     precision: str = "32-true",
     ce_weight: float = 1.0,
@@ -278,11 +278,21 @@ def train(
         epochs: Maximum training epochs
         batch_size: Batch size
         learning_rate: Initial learning rate
+        weight_decay: AdamW weight decay
         base_filters: U-Net base filter count
         depth: U-Net depth
         num_workers: DataLoader workers
         seed: Random seed
-        early_stopping_patience: Epochs to wait before stopping
+        early_stopping_patience: Epochs to wait before early stopping
+        lr_patience: Epochs to wait before reducing LR
+        architecture: Model architecture ('unet' or 'resunet34')
+        precision: Training precision ('32-true', '16-mixed', 'bf16-mixed')
+        ce_weight: Cross-entropy weight in hybrid loss
+        dice_weight: Dice weight in hybrid loss
+        focal_gamma: Focal loss gamma (0 = plain CE)
+        label_smoothing: Label smoothing factor
+        gradient_clip_val: Max gradient norm for clipping (0 = disabled)
+        dropout: Spatial dropout rate after bottleneck (0 = disabled)
     """
     if seed is None:
         seed = int(torch.randint(0, 2**31, (1,)).item())
@@ -317,7 +327,7 @@ def train(
     )
     dm.setup()
     class_weights = dm.class_weights
-    print(f"Class weights: {class_weights.numpy()}")
+    print(f"Class weights: {class_weights.tolist()}")
 
     # Network — select architecture
     if architecture == "resunet34":
@@ -325,6 +335,7 @@ def train(
             in_channels=in_channels,
             num_classes=num_classes,
             base_filters=base_filters,
+            dropout=dropout,
         )
     else:
         net = UNet(
@@ -343,6 +354,8 @@ def train(
         class_names=class_names,
         ignore_index=ignore_index,
         learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        lr_patience=lr_patience,
         ce_weight=ce_weight,
         dice_weight=dice_weight,
         focal_gamma=focal_gamma,
@@ -368,9 +381,8 @@ def train(
         LearningRateMonitor(logging_interval="epoch"),
     ]
 
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"{architecture}_bf{base_filters}_s{seed}_{timestamp}"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    run_name = f"{architecture}_bf{base_filters}_{timestamp}"
     csv_logger = CSVLogger(save_dir=output_dir, name="lightning_logs", version=run_name)
     tb_logger = TensorBoardLogger(save_dir=output_dir, name="tb_logs", version=run_name)
 
@@ -388,6 +400,14 @@ def train(
     trainer.fit(module, datamodule=dm)
     trainer.test(module, datamodule=dm)
 
+    # Report best checkpoint
+    best_path = trainer.checkpoint_callback.best_model_path
+    best_score = trainer.checkpoint_callback.best_model_score
+    print(f"\n{'='*60}")
+    print(f"Best model: {best_path}")
+    print(f"Best val/loss: {best_score:.4f}")
+    print(f"{'='*60}\n")
+
     # ── Build history dict from CSV log ──────────────────────────────
     metrics_file = Path(csv_logger.log_dir) / "metrics.csv"
     history = {
@@ -403,6 +423,14 @@ def train(
             "train/acc": "train_accuracy", "val/acc": "val_accuracy",
             "train/iou": "train_iou", "val/iou": "val_iou",
         }
+        # Add per-class IoU columns
+        for name in class_names:
+            for stage in ("train", "val"):
+                csv_col = f"{stage}/iou_{name}"
+                hist_key = f"{stage}_iou_{name}"
+                col_map[csv_col] = hist_key
+                history[hist_key] = []
+
         for csv_col, hist_key in col_map.items():
             if csv_col in df.columns:
                 values = df[csv_col].dropna().tolist()
@@ -433,6 +461,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--weight-decay", type=float, default=1e-4,
+                        help="AdamW weight decay (default: 1e-4)")
     parser.add_argument("--base-filters", type=int, default=32)
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--workers", type=int, default=4)
@@ -440,6 +470,8 @@ if __name__ == "__main__":
                         help="Random seed (default: random each run, set for reproducibility)")
     parser.add_argument("--early-stopping", type=int, default=15,
                         help="Early stopping patience (epochs)")
+    parser.add_argument("--lr-patience", type=int, default=5,
+                        help="ReduceLROnPlateau patience (epochs, default: 5)")
     parser.add_argument("--architecture", type=str, default="unet",
                         choices=["unet", "resunet34"],
                         help="Model architecture (default: unet)")
@@ -473,11 +505,13 @@ if __name__ == "__main__":
         epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.lr,
+        weight_decay=args.weight_decay,
         base_filters=args.base_filters,
         depth=args.depth,
         num_workers=args.workers,
         seed=args.seed,
         early_stopping_patience=args.early_stopping,
+        lr_patience=args.lr_patience,
         architecture=args.architecture,
         precision=args.precision,
         ce_weight=args.ce_weight,

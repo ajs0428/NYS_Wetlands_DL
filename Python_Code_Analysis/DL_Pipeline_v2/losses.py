@@ -18,6 +18,9 @@ class FocalLoss(nn.Module):
     FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
 
     When gamma=0 this reduces to standard weighted CrossEntropy.
+
+    Class weights are applied *after* focal modulation so that pt remains
+    a true probability and the focal term works correctly for rare classes.
     """
 
     def __init__(
@@ -33,26 +36,31 @@ class FocalLoss(nn.Module):
         self.gamma = gamma
         self.label_smoothing = label_smoothing
 
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor,
+                probs: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
             inputs: (B, C, H, W) raw logits
             targets: (B, H, W) integer class labels
+            probs: (B, C, H, W) pre-computed softmax (optional, avoids recomputation)
         """
-        ce_loss = nn.functional.cross_entropy(
+        # Unweighted CE to get true pt for focal modulation
+        ce_unweighted = nn.functional.cross_entropy(
             inputs, targets,
-            weight=self.weight,
             ignore_index=self.ignore_index,
             reduction="none",
             label_smoothing=self.label_smoothing,
         )
-        # p_t = probability of the correct class
-        log_pt = -ce_loss
-        pt = torch.exp(log_pt)
-        focal = ((1.0 - pt) ** self.gamma) * ce_loss
+        # p_t = true probability of the correct class
+        pt = torch.exp(-ce_unweighted)
+        focal = ((1.0 - pt) ** self.gamma) * ce_unweighted
 
-        # Average over valid pixels
+        # Apply class weights post-hoc (preserves focal modulation)
         valid = targets != self.ignore_index
+        if self.weight is not None and valid.any():
+            per_pixel_weight = self.weight[targets.clamp(0, self.weight.shape[0] - 1)]
+            focal = focal * per_pixel_weight
+
         if valid.any():
             return focal[valid].mean()
         return focal.mean()
@@ -61,19 +69,22 @@ class FocalLoss(nn.Module):
 class DiceLoss(nn.Module):
     """Per-class Dice loss averaged over classes, with ignore_index support."""
 
-    def __init__(self, num_classes: int, ignore_index: int = 255, smooth: float = 1.0):
+    def __init__(self, num_classes: int, ignore_index: int = 255, smooth: float = 0.1):
         super().__init__()
         self.num_classes = num_classes
         self.ignore_index = ignore_index
         self.smooth = smooth
 
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor,
+                probs: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
-            inputs: (B, C, H, W) raw logits
+            inputs: (B, C, H, W) raw logits (unused if probs provided)
             targets: (B, H, W) integer class labels
+            probs: (B, C, H, W) pre-computed softmax (optional, avoids recomputation)
         """
-        probs = torch.softmax(inputs, dim=1)  # (B, C, H, W)
+        if probs is None:
+            probs = torch.softmax(inputs, dim=1)
 
         # Mask for valid (labeled) pixels
         valid_mask = (targets != self.ignore_index).unsqueeze(1)  # (B, 1, H, W)
@@ -106,8 +117,9 @@ class DiceLoss(nn.Module):
 class HybridLoss(nn.Module):
     """Combined Focal + Dice loss.
 
-    Focal Loss (replaces plain CE) down-weights easy examples and carries
-    class weights for imbalance handling.
+    Softmax is computed once and shared by both sub-losses.
+    Focal Loss handles hard-example focus; class weights are applied post-hoc
+    so they don't distort the focal probability term.
     Dice is inherently class-balanced (per-class then averaged).
     """
 
@@ -133,8 +145,9 @@ class HybridLoss(nn.Module):
         self.dice_weight = dice_weight
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        focal_loss = self.focal(inputs, targets)
-        dice_loss = self.dice(inputs, targets)
+        probs = torch.softmax(inputs, dim=1)
+        focal_loss = self.focal(inputs, targets, probs=probs)
+        dice_loss = self.dice(inputs, targets, probs=probs)
         if torch.isnan(focal_loss):
             return self.dice_weight * dice_loss
         return self.ce_weight * focal_loss + self.dice_weight * dice_loss
