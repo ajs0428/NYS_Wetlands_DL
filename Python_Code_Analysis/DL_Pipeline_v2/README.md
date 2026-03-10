@@ -1,6 +1,6 @@
 # NYS Wetlands DL Pipeline v2 — User Guide
 
-Deep learning pipeline for wetland semantic segmentation in New York State using a U-Net architecture. Supports two classification modes: **multiclass** (4-class: EMW, FSW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `band_config.json` — both modes use the same training patches with label remapping applied at runtime.
+Deep learning pipeline for wetland semantic segmentation in New York State using a U-Net architecture. Supports two classification modes: **multiclass** (4-class: EMW, FSW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `dl_band_config.json` — both modes use the same training patches with label remapping applied at runtime.
 
 ## Table of Contents
 
@@ -9,16 +9,16 @@ Deep learning pipeline for wetland semantic segmentation in New York State using
 - [Glossary of Acronyms](#glossary-of-acronyms)
 - [Pipeline Overview](#pipeline-overview)
 - [Input Data Requirements](#input-data-requirements)
-- [Configuration: band_config.json](#configuration-band_configjson)
+- [Configuration: dl_band_config.json](#configuration-dl_band_configjson)
 - [Classification Mode: Multiclass vs Binary](#classification-mode-multiclass-vs-binary)
-- [Shared Utilities: band_utils.py](#shared-utilities-band_utilspy)
-- [Step 1: Compute Statistics](#step-1-compute-statistics-01_compute_statisticspy)
-- [Step 2: Dataset & DataLoaders](#step-2-dataset--dataloaders-02_datasetpy)
-- [Step 3: Model Architecture](#step-3-model-architecture-03_unet_modelpy)
-- [Step 4: Train (Lightning)](#step-4-train-lightning-04_train_lightningpy)
-- [Step 4 (Legacy): Train](#step-4-legacy-train-04_trainpy)
-- [Step 5: Evaluate](#step-5-evaluate-05_evaluatepy)
-- [Step 6: Predict](#step-6-predict-06_predictpy)
+- [Shared Utilities: dl_band_utils.py](#shared-utilities-dl_band_utilspy)
+- [Step 1: Compute Statistics](#step-1-compute-statistics-dl_01_compute_statisticspy)
+- [Step 2: Dataset & DataLoaders](#step-2-dataset--dataloaders-dl_02_datasetpy)
+- [Step 3: Model Architecture](#step-3-model-architecture-dl_03_unet_modelpy)
+- [Step 4: Train (Lightning)](#step-4-train-lightning-dl_04_train_lightningpy)
+- [Step 4 (Legacy): Train](#step-4-legacy-train-dl_04_trainpy)
+- [Step 5: Evaluate](#step-5-evaluate-dl_05_evaluatepy)
+- [Step 6: Predict](#step-6-predict-dl_06_predictpy)
 - [Interactive Notebook](#interactive-notebook-wetland_pipelineipynb)
 - [Swappable Architectures](#swappable-architectures)
 - [Loss Function: Hybrid Focal + Dice](#loss-function-hybrid-focal--dice)
@@ -39,17 +39,17 @@ source .venv/bin/activate
 cd "Python_Code_Analysis/DL_Pipeline_v2"
 
 # 3. Compute normalization statistics from training patches
-python 01_compute_statistics.py \
+python dl_01_compute_statistics.py \
   --patches-dir "../../Data/Training_Data/R_Patches"
 
 # 4. Train the model (Lightning)
-python 04_train_lightning.py --epochs 50 --batch-size 16
+python dl_04_train_lightning.py --epochs 50 --batch-size 16
 
 # 5. Evaluate on the held-out test set
-python 05_evaluate.py --model "../../Models/best_multiclass.ckpt"
+python dl_05_evaluate.py --model "../../Models/best_multiclass.ckpt"
 
 # 6. Run inference on a new raster
-python 06_predict.py input_raster.tif output_classification.tif --probs
+python dl_06_predict.py input_raster.tif output_classification.tif --probs
 ```
 
 ---
@@ -95,38 +95,50 @@ Key dependencies: PyTorch, Lightning, rasterio, NumPy, scikit-learn, matplotlib.
 
 ### Remote Sensing Bands — Terrain
 
-| Acronym | Full Name | Description |
-|---------|-----------|-------------|
-| DEM | Digital Elevation Model | Ground surface elevation (meters) |
-| CHM | Canopy Height Model | Vegetation height above ground (meters), derived from LiDAR |
-| TPI | Topographic Position Index | Relative elevation compared to surrounding area; positive = ridge, negative = valley |
-| meanc | Mean Curvature | Average surface curvature (concavity/convexity) |
-| planc | Plan Curvature | Curvature perpendicular to slope direction; indicates flow convergence/divergence |
-| profc | Profile Curvature | Curvature in the direction of slope; indicates acceleration/deceleration of flow |
-| dmv | Deviation from Mean Value | Local deviation of elevation from the neighborhood mean |
-| Geomorph | Geomorphon | Landform classification (10 categories: flat, peak, ridge, shoulder, spur, slope, hollow, footslope, valley, pit) |
+| Acronym | Full Name | Description | In Current Patches? |
+|---------|-----------|-------------|---------------------|
+| DEM | Digital Elevation Model | Ground surface elevation (meters) | Yes |
+| CHM | Canopy Height Model | Vegetation height above ground (meters), derived from LiDAR | Yes |
+| TPI | Topographic Position Index | Relative elevation compared to surrounding area; positive = ridge, negative = valley | Yes (TPI_local) |
+| meanc | Mean Curvature | Average surface curvature (concavity/convexity) | Yes (meanc_local) |
+| planc | Plan Curvature | Curvature perpendicular to slope direction; indicates flow convergence/divergence | Yes (planc_local) |
+| profc | Profile Curvature | Curvature in the direction of slope; indicates acceleration/deceleration of flow | Yes (profc_local) |
+| dmv | Deviation from Mean Value | Local deviation of elevation from the neighborhood mean | Yes (dmv_local) |
+| slope | Slope | Surface gradient in degrees | Yes (slope_local) |
+| Geomorph | Geomorphon | Landform classification (10 categories: flat, peak, ridge, shoulder, spur, slope, hollow, footslope, valley, pit) | No (removed) |
 
 ### Remote Sensing Bands — Spectral Indices (Optical)
 
-| Acronym | Full Name | Formula Concept | What It Measures |
-|---------|-----------|-----------------|------------------|
-| NDVI | Normalized Difference Vegetation Index | (NIR - Red) / (NIR + Red) | Live green vegetation vigor |
-| MNDWI | Modified Normalized Difference Water Index | (Green - SWIR) / (Green + SWIR) | Surface water presence |
-| EVI | Enhanced Vegetation Index | Adjusted NIR/Red ratio | Vegetation with atmospheric correction |
-| NDYI | Normalized Difference Yellowness Index | (Green - Blue) / (Green + Blue) | Vegetation senescence / yellow coloring |
-| PSRI | Plant Senescence Reflectance Index | (Red - Green) / NIR | Leaf aging and carotenoid pigments |
-| GDVI | Green Difference Vegetation Index | NIR - Green | Green vegetation density |
+| Acronym | Full Name | Formula Concept | What It Measures | In Current Patches? |
+|---------|-----------|-----------------|------------------|---------------------|
+| EVI | Enhanced Vegetation Index | Adjusted NIR/Red ratio | Vegetation with atmospheric correction | Yes |
+| NDYI | Normalized Difference Yellowness Index | (Green - Blue) / (Green + Blue) | Vegetation senescence / yellow coloring | Yes |
+| GDVI | Green Difference Vegetation Index | NIR - Green | Green vegetation density | Yes |
+| NDVI | Normalized Difference Vegetation Index | (NIR - Red) / (NIR + Red) | Live green vegetation vigor | No (see n_ndvi) |
+| MNDWI | Modified Normalized Difference Water Index | (Green - SWIR) / (Green + SWIR) | Surface water presence | No |
+| PSRI | Plant Senescence Reflectance Index | (Red - Green) / NIR | Leaf aging and carotenoid pigments | No |
+
+### Remote Sensing Bands — NAIP Imagery
+
+| Acronym | Full Name | Description | In Current Patches? |
+|---------|-----------|-------------|---------------------|
+| r | Red | NAIP red band | Yes |
+| g | Green | NAIP green band | Yes |
+| b | Blue | NAIP blue band | Yes |
+| nir | Near-Infrared | NAIP near-infrared band | Yes |
+| n_ndvi | NAIP NDVI | (nir - r) / (nir + r), derived from NAIP imagery | Yes |
+| n_ndwi | NAIP NDWI | (g - nir) / (g + nir), derived from NAIP imagery | Yes |
 
 ### Remote Sensing Bands — SAR (Radar)
 
-| Acronym | Full Name | Description |
-|---------|-----------|-------------|
-| SAR | Synthetic Aperture Radar | Active microwave sensor; penetrates clouds and captures surface structure |
-| VV | Vertical-Vertical Polarization | SAR backscatter with vertical transmit and vertical receive |
-| VH | Vertical-Horizontal Polarization | SAR backscatter with vertical transmit and horizontal receive; sensitive to vegetation volume |
-| DPSVI | Dual-Pol SAR Vegetation Index | Vegetation index derived from VV and VH polarizations |
-| RVI | Radar Vegetation Index | Ratio-based vegetation measure from SAR polarizations |
-| VH/VV ratio | Cross-pol Ratio | VH divided by VV; indicates depolarization from vegetation scattering |
+| Acronym | Full Name | Description | In Current Patches? |
+|---------|-----------|-------------|---------------------|
+| SAR | Synthetic Aperture Radar | Active microwave sensor; penetrates clouds and captures surface structure | — |
+| VV | Vertical-Vertical Polarization | SAR backscatter with vertical transmit and vertical receive | Yes |
+| VH | Vertical-Horizontal Polarization | SAR backscatter with vertical transmit and horizontal receive; sensitive to vegetation volume | Yes |
+| DPSVI | Dual-Pol SAR Vegetation Index | Vegetation index derived from VV and VH polarizations | No |
+| RVI | Radar Vegetation Index | Ratio-based vegetation measure from SAR polarizations | No |
+| VH/VV ratio | Cross-pol Ratio | VH divided by VV; indicates depolarization from vegetation scattering | No |
 
 ### Machine Learning Terms
 
@@ -145,41 +157,41 @@ Key dependencies: PyTorch, Lightning, rasterio, NumPy, scikit-learn, matplotlib.
 ## Pipeline Overview
 
 ```
-GeoTIFF Patches (27 bands: 26 predictors + 1 label)
+GeoTIFF Patches (19 bands: 18 predictors + 1 label)
         │
         ▼
- ┌──────────────────┐
- │ 01_compute_stats  │ → normalization_stats.json
- └──────────────────┘
+ ┌─────────────────────┐
+ │ dl_01_compute_stats  │ → normalization_stats.json
+ └─────────────────────┘
         │
         ▼
- ┌──────────────────┐
- │ 02_dataset        │ → PyTorch DataLoaders (train / val / test)
- └──────────────────┘
+ ┌─────────────────────┐
+ │ dl_02_dataset        │ → PyTorch DataLoaders (train / val / test)
+ └─────────────────────┘
         │
         ▼
- ┌──────────────────┐
- │ 03_unet_model     │ → U-Net architecture (swappable — see 03b_resunet34.py)
- └──────────────────┘
+ ┌─────────────────────┐
+ │ dl_03_unet_model     │ → U-Net architecture (swappable — see dl_03b_resunet34.py)
+ └─────────────────────┘
         │
         ▼
- ┌──────────────────────────┐
- │ 04_train_lightning        │ → best_{mode}.ckpt (Lightning checkpoints)
- │  (or 04_train.py legacy)  │    + CSV/TensorBoard logs
- └──────────────────────────┘
+ ┌─────────────────────────────────┐
+ │ dl_04_train_lightning            │ → best_{mode}.ckpt (Lightning checkpoints)
+ │  (or dl_04_train.py legacy)     │    + CSV/TensorBoard logs
+ └─────────────────────────────────┘
         │
         ▼
- ┌──────────────────┐
- │ 05_evaluate       │ → Per-class metrics, confusion matrix
- └──────────────────┘
+ ┌─────────────────────┐
+ │ dl_05_evaluate       │ → Per-class metrics, confusion matrix
+ └─────────────────────┘
         │
         ▼
- ┌──────────────────┐
- │ 06_predict        │ → Classification GeoTIFF + probability maps
- └──────────────────┘
+ ┌─────────────────────┐
+ │ dl_06_predict        │ → Classification GeoTIFF + probability maps
+ └─────────────────────┘
 
-Shared modules: losses.py (FocalLoss, DiceLoss, HybridLoss), model_utils.py (checkpoint loading),
-                band_utils.py (band discovery/config)
+Shared modules: dl_losses.py (FocalLoss, DiceLoss, HybridLoss), dl_model_utils.py (checkpoint loading),
+                dl_band_utils.py (band discovery/config)
 ```
 
 ---
@@ -188,9 +200,9 @@ Shared modules: losses.py (FocalLoss, DiceLoss, HybridLoss), model_utils.py (che
 
 Training patches are GeoTIFF files located in `Data/Training_Data/R_Patches/`. The current patches are 256x256 pixels, but the pipeline supports any square patch size (see [Patch Size](#patch-size) below).
 
-Each patch contains 27 bands (26 predictors + 1 label). Band names are stored in the GeoTIFF band descriptions and are discovered at runtime — no hardcoded indices.
+Each patch contains 19 bands (18 predictors + 1 label). Band names are stored in the GeoTIFF band descriptions and are discovered at runtime — no hardcoded indices.
 
-**Current band layout:**
+**Current band layout (245 patches):**
 
 | Index | Band Name | Category |
 |-------|-----------|----------|
@@ -201,20 +213,19 @@ Each patch contains 27 bands (26 predictors + 1 label). Band names are stored in
 | 4 | dmv_local | Terrain |
 | 5 | slope_local | Terrain |
 | 6 | TPI_local | Terrain |
-| 7 | Geomorph_local | Categorical (10 classes) |
-| 8 | CHM | Terrain |
-| 9 | NDVI | Spectral index |
-| 10 | MNDWI | Spectral index |
-| 11 | EVI | Spectral index |
-| 12 | NDYI | Spectral index |
-| 13 | PSRI | Spectral index |
-| 14 | GDVI | Spectral index |
-| 15 | VV | SAR backscatter |
-| 16 | VH | SAR backscatter |
-| 17 | DPSVI | SAR index |
-| 18 | RVI | SAR index |
-| 19 | VH_VV_ratio | SAR index |
-| 20 | MOD_CLASS | Label |
+| 7 | CHM | Vegetation structure |
+| 8 | EVI | Spectral index |
+| 9 | NDYI | Spectral index |
+| 10 | GDVI | Spectral index |
+| 11 | VV | SAR backscatter |
+| 12 | VH | SAR backscatter |
+| 13 | r | NAIP imagery |
+| 14 | g | NAIP imagery |
+| 15 | b | NAIP imagery |
+| 16 | nir | NAIP imagery |
+| 17 | n_ndvi | NAIP-derived index |
+| 18 | n_ndwi | NAIP-derived index |
+| 19 | MOD_CLASS | Label |
 
 **Classes (multiclass mode):**
 
@@ -226,13 +237,13 @@ Each patch contains 27 bands (26 predictors + 1 label). Band names are stored in
 | 3 | UPL | Upland / Background |
 | 255 | — | Unlabeled (excluded from training) |
 
-> **Note:** Open Water Wetland (OWW) has been removed from the current classification. OWW patches were excluded from training data because open water is reliably detectable via spectral indices (MNDWI, NDWI) and does not require a deep learning model. OWW can be reintroduced by adding it back to `class_names` in `band_config.json` and regenerating training patches that include OWW labels.
+> **Note:** Open Water Wetland (OWW) has been removed from the current classification. OWW patches were excluded from training data because open water is reliably detectable via spectral indices (MNDWI, NDWI) and does not require a deep learning model. OWW can be reintroduced by adding it back to `class_names` in `dl_band_config.json` and regenerating training patches that include OWW labels.
 
 **Classes (binary mode):** EMW/FSW/SSW are remapped to WET (0), UPL stays as UPL (1). See [Classification Mode](#classification-mode-multiclass-vs-binary).
 
 ---
 
-## Configuration: band_config.json
+## Configuration: dl_band_config.json
 
 The single file to edit when changing band normalization. Located alongside the scripts.
 
@@ -241,7 +252,7 @@ The single file to edit when changing band normalization. Located alongside the 
   "label_band": "MOD_CLASS",
   "classification_mode": "multiclass",
   "binary_mapping": {
-    "WET": ["EMW", "FSW", "OWW", "SSW"],
+    "WET": ["EMW", "FSW", "SSW"],
     "UPL": ["UPL"]
   },
   "default_method": "min_max",
@@ -251,7 +262,7 @@ The single file to edit when changing band normalization. Located alongside the 
     "NDYI":  {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
     "Geomorph_local": {"method": "one_hot", "num_classes": 10, "class_range": [1, 10]}
   },
-  "class_names": ["EMW", "FSW", "OWW", "SSW", "UPL"],
+  "class_names": ["EMW", "FSW", "SSW", "UPL"],
   "ignore_index": 255
 }
 ```
@@ -262,7 +273,7 @@ The single file to edit when changing band normalization. Located alongside the 
 |--------|---------|----------|
 | `min_max` | (x - min) / (max - min) → [0, 1] | Default for continuous bands (DEM, CHM, slope, SAR, etc.) |
 | `shift_scale` | (x + shift) / scale → [0, 1] | Spectral indices with known range (e.g., NDVI: [-1, 1]) |
-| `one_hot` | Encode to N binary channels | Categorical bands (Geomorph) |
+| `one_hot` | Encode to N binary channels | Categorical bands (e.g., Geomorph if present) |
 
 Any band **not listed** in `band_normalization` automatically uses `min_max`. You only need to add entries for `shift_scale` or `one_hot` bands.
 
@@ -270,7 +281,7 @@ Any band **not listed** in `band_normalization` automatically uses `min_max`. Yo
 
 ## Classification Mode: Multiclass vs Binary
 
-The pipeline supports two classification modes, controlled by `classification_mode` in `band_config.json`:
+The pipeline supports two classification modes, controlled by `classification_mode` in `dl_band_config.json`:
 
 | Mode | Classes | Output Bands | Use Case |
 |------|---------|--------------|----------|
@@ -279,16 +290,16 @@ The pipeline supports two classification modes, controlled by `classification_mo
 
 ### Switching Modes
 
-1. Edit `classification_mode` in `band_config.json` to `"binary"` or `"multiclass"`
-2. Re-run `01_compute_statistics.py` to regenerate `normalization_stats.json`
+1. Edit `classification_mode` in `dl_band_config.json` to `"binary"` or `"multiclass"`
+2. Re-run `dl_01_compute_statistics.py` to regenerate `normalization_stats.json`
 3. Train, evaluate, and predict as usual — all downstream scripts adapt automatically
 
 ### How It Works
 
-- The `binary_mapping` field in `band_config.json` defines how original classes group into binary classes. The key order determines integer encoding (WET=0, UPL=1).
-- `01_compute_statistics.py` builds a `label_remap` dict (e.g., `{0:0, 1:0, 2:0, 3:0, 4:1}`) and aggregates class counts under the binary labels. Both `label_remap` and `classification_mode` are stored in `normalization_stats.json`.
-- `02_dataset.py` reads `label_remap` from the stats and applies it on-the-fly via a vectorized numpy lookup table. The original training patches are never modified.
-- Downstream scripts (`04_train`, `05_evaluate`, `06_predict`) derive `num_classes` from `len(stats["class_names"])`, so they work with either 2 or 5 classes without any code changes.
+- The `binary_mapping` field in `dl_band_config.json` defines how original classes group into binary classes. The key order determines integer encoding (WET=0, UPL=1).
+- `dl_01_compute_statistics.py` builds a `label_remap` dict (e.g., `{0:0, 1:0, 2:0, 3:0, 4:1}`) and aggregates class counts under the binary labels. Both `label_remap` and `classification_mode` are stored in `normalization_stats.json`.
+- `dl_02_dataset.py` reads `label_remap` from the stats and applies it on-the-fly via a vectorized numpy lookup table. The original training patches are never modified.
+- Downstream scripts (`dl_04_train`, `dl_05_evaluate`, `dl_06_predict`) derive `num_classes` from `len(stats["class_names"])`, so they work with either 2 or 5 classes without any code changes.
 
 ### Custom Groupings
 
@@ -304,13 +315,13 @@ You can define any label grouping by editing `binary_mapping`. For example, to s
 
 ---
 
-## Shared Utilities: band_utils.py
+## Shared Utilities: dl_band_utils.py
 
 Imported by all pipeline scripts. Key functions:
 
 | Function | Purpose |
 |----------|---------|
-| `load_band_config(path)` | Load `band_config.json` |
+| `load_band_config(path)` | Load `dl_band_config.json` |
 | `discover_bands_from_raster(path)` | Read band names from GeoTIFF descriptions |
 | `get_predictor_band_names(names, label)` | Return band names excluding the label band |
 | `get_normalization_method(band, config)` | Look up a band's normalization (with default fallback) |
@@ -320,17 +331,17 @@ Imported by all pipeline scripts. Key functions:
 
 ---
 
-## Step 1: Compute Statistics (`01_compute_statistics.py`)
+## Step 1: Compute Statistics (`dl_01_compute_statistics.py`)
 
 Scans all training patches to compute per-band normalization statistics and class frequencies. Produces `normalization_stats.json`, which is the single source of truth for all downstream scripts.
 
 ### Usage
 
 ```bash
-python 01_compute_statistics.py \
+python dl_01_compute_statistics.py \
   --patches-dir ../../Data/Training_Data/R_Patches \
   --output ../../Data/Training_Data/normalization_stats.json \
-  --config band_config.json
+  --config dl_band_config.json
 ```
 
 ### Arguments
@@ -339,7 +350,7 @@ python 01_compute_statistics.py \
 |----------|---------|-------------|
 | `--patches-dir` | `Data/Training_Data/R_Patches` | Directory containing GeoTIFF training patches |
 | `--output` | `Data/Training_Data/normalization_stats.json` | Output path for the stats JSON |
-| `--config` | Auto-detected | Path to `band_config.json` |
+| `--config` | Auto-detected | Path to `dl_band_config.json` |
 
 ### What It Computes
 
@@ -355,23 +366,22 @@ python 01_compute_statistics.py \
 
 ```json
 {
-  "num_patches": 1234,
-  "in_channels": 29,
+  "num_patches": 245,
+  "in_channels": 18,
   "label_band": "MOD_CLASS",
   "predictor_names": ["DEM", "meanc_local", "..."],
   "normalization": {
-    "DEM": {"method": "min_max", "min": 50.0, "max": 610.0},
-    "NDVI": {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
-    "Geomorph_local": {"method": "one_hot", "num_classes": 10}
+    "DEM": {"method": "min_max", "min": 98.37, "max": 652.21},
+    "NDYI": {"method": "shift_scale", "shift": 1.0, "scale": 2.0}
   },
-  "class_counts": {"EMW": 500000, "FSW": 250000, "...": "..."},
-  "class_weights": {"EMW": 1.0, "FSW": 1.96, "...": "..."}
+  "class_counts": {"EMW": 1049074, "FSW": 2119191, "SSW": 904329, "UPL": 11852654},
+  "class_weights": {"EMW": 11.3, "FSW": 5.59, "SSW": 13.11, "UPL": 1.0}
 }
 ```
 
 ---
 
-## Step 2: Dataset & DataLoaders (`02_dataset.py`)
+## Step 2: Dataset & DataLoaders (`dl_02_dataset.py`)
 
 PyTorch `Dataset` class for lazy-loading GeoTIFF patches with on-the-fly normalization.
 
@@ -394,21 +404,21 @@ PyTorch `Dataset` class for lazy-loading GeoTIFF patches with on-the-fly normali
 ### Testing
 
 ```bash
-python 02_dataset.py
+python dl_02_dataset.py
 ```
 
 Loads a sample batch and prints tensor shapes and value ranges to verify normalization.
 
 ---
 
-## Step 3: Model Architecture (`03_unet_model.py`)
+## Step 3: Model Architecture (`dl_03_unet_model.py`)
 
 U-Net encoder-decoder architecture with skip connections, residual encoder blocks, and squeeze-and-excitation (SE) channel attention in the decoder. See [UNet_Architecture_Overview.md](UNet_Architecture_Overview.md) for a detailed breakdown.
 
 ### Architecture
 
 ```
-Input (29 ch) → Residual Encoder (progressive downsampling) → Bottleneck → SE Decoder (upsampling + skip + attention) → Output (5 ch)
+Input (18 ch) → Residual Encoder (progressive downsampling) → Bottleneck → SE Decoder (upsampling + skip + attention) → Output (4 ch)
 ```
 
 - **Encoder blocks**: Double Conv-BN-ReLU with residual (shortcut) connections. A 1x1 projection handles channel mismatches. Improves gradient flow through the encoder.
@@ -429,21 +439,21 @@ Input (29 ch) → Residual Encoder (progressive downsampling) → Bottleneck →
 ### Testing
 
 ```bash
-python 03_unet_model.py
+python dl_03_unet_model.py
 ```
 
 Runs a forward pass with dummy data to verify the model builds correctly.
 
 ---
 
-## Step 4: Train (Lightning) (`04_train_lightning.py`)
+## Step 4: Train (Lightning) (`dl_04_train_lightning.py`)
 
 Primary training script using PyTorch Lightning. Provides automatic checkpointing, early stopping, LR monitoring, and progress bars. The network architecture is swappable — see [Swappable Architectures](#swappable-architectures).
 
 ### Usage
 
 ```bash
-python 04_train_lightning.py \
+python dl_04_train_lightning.py \
   --patches-dir ../../Data/Training_Data/R_Patches \
   --stats-path ../../Data/Training_Data/normalization_stats.json \
   --output-dir ../../Models \
@@ -480,7 +490,7 @@ python 04_train_lightning.py \
 
 ### Training Details
 
-- **Loss**: Hybrid Focal + Dice (`HybridLoss` in `losses.py`). Focal Loss replaces plain CrossEntropy — it applies a `(1 - p_t)^gamma` modulation that down-weights easy/well-classified pixels (mostly the dominant UPL class) and focuses training on hard examples (minority wetland classes, boundary pixels). Class weights from inverse frequency are still applied. Dice is computed per-class on softmax probabilities then averaged (inherently class-balanced). Default combination: `0.5 * Focal + 1.0 * Dice`.
+- **Loss**: Hybrid Focal + Dice (`HybridLoss` in `dl_losses.py`). Focal Loss replaces plain CrossEntropy — it applies a `(1 - p_t)^gamma` modulation that down-weights easy/well-classified pixels (mostly the dominant UPL class) and focuses training on hard examples (minority wetland classes, boundary pixels). Class weights from inverse frequency are still applied. Dice is computed per-class on softmax probabilities then averaged (inherently class-balanced). Default combination: `0.5 * Focal + 1.0 * Dice`.
 - **Optimizer**: AdamW (weight decay 1e-4)
 - **Scheduler**: ReduceLROnPlateau (reduces LR when validation loss plateaus)
 - **Callbacks**: ModelCheckpoint (best val/loss), EarlyStopping, LearningRateMonitor
@@ -496,20 +506,20 @@ python 04_train_lightning.py \
 
 ### Key Components
 
-- **`WetlandDataModule`**: Wraps `create_dataloaders()` from `02_dataset.py` as a Lightning data module
+- **`WetlandDataModule`**: Wraps `create_dataloaders()` from `dl_02_dataset.py` as a Lightning data module
 - **`WetlandSegmentationModule`**: Lightning module accepting any `nn.Module` as the backbone network
 - **`train()`**: Entry point that wires up data, model, callbacks, and Trainer
 
 ---
 
-## Step 4 (Legacy): Train (`04_train.py`)
+## Step 4 (Legacy): Train (`dl_04_train.py`)
 
 Manual training loop kept as a reference and fallback. Same loss, optimizer, and training logic as the Lightning version but without automatic callbacks.
 
 ### Usage
 
 ```bash
-python 04_train.py --epochs 50 --batch-size 16
+python dl_04_train.py --epochs 50 --batch-size 16
 ```
 
 ### Output Files
@@ -520,18 +530,18 @@ python 04_train.py --epochs 50 --batch-size 16
 | `Models/final_model_{mode}.pth` | Final epoch checkpoint |
 | `Models/training_history_{mode}.json` | Per-epoch loss, accuracy, and IoU |
 
-> **Note:** Both legacy `.pth` and Lightning `.ckpt` checkpoints are supported by `05_evaluate.py` and `06_predict.py` via `model_utils.py`.
+> **Note:** Both legacy `.pth` and Lightning `.ckpt` checkpoints are supported by `dl_05_evaluate.py` and `dl_06_predict.py` via `dl_model_utils.py`.
 
 ---
 
-## Step 5: Evaluate (`05_evaluate.py`)
+## Step 5: Evaluate (`dl_05_evaluate.py`)
 
 Runs the trained model on the held-out test set and computes detailed metrics.
 
 ### Usage
 
 ```bash
-python 05_evaluate.py \
+python dl_05_evaluate.py \
   --model ../../Models/best_model.pth \
   --patches-dir ../../Data/Training_Data/R_Patches \
   --stats-path ../../Data/Training_Data/normalization_stats.json \
@@ -563,14 +573,14 @@ python 05_evaluate.py \
 
 ---
 
-## Step 6: Predict (`06_predict.py`)
+## Step 6: Predict (`dl_06_predict.py`)
 
 Applies a trained model to a new raster for wall-to-wall classification.
 
 ### Usage
 
 ```bash
-python 06_predict.py \
+python dl_06_predict.py \
   input_raster.tif \
   output_classification.tif \
   --model ../../Models/best_model.pth \
@@ -655,7 +665,7 @@ LABEL_SMOOTHING = 0.0  # 0.0 = off
 
 ## Swappable Architectures
 
-The Lightning training script (`04_train_lightning.py`) accepts any `nn.Module` as the backbone network. To swap architectures, change one line in the `train()` function:
+The Lightning training script (`dl_04_train_lightning.py`) accepts any `nn.Module` as the backbone network. To swap architectures, change one line in the `train()` function:
 
 ```python
 # Current (default):
@@ -678,14 +688,14 @@ Any `nn.Module` that satisfies this contract:
 
 | File | Architecture | Status |
 |------|-------------|--------|
-| `03_unet_model.py` | U-Net (residual + SE attention) | Production |
-| `03b_resunet34.py` | ResUNet34 (ResNet-34 encoder + U-Net decoder + SE attention) | Production |
+| `dl_03_unet_model.py` | U-Net (residual + SE attention) | Production |
+| `dl_03b_resunet34.py` | ResUNet34 (ResNet-34 encoder + U-Net decoder + SE attention) | Production |
 
 ---
 
 ## Loss Function: Hybrid Focal + Dice
 
-The training loss (`losses.py`) combines two complementary components to handle severe class imbalance (e.g., UPL at ~80% of pixels vs. wetland classes at 3–12%):
+The training loss (`dl_losses.py`) combines two complementary components to handle severe class imbalance (e.g., UPL at ~74% of pixels vs. wetland classes at 6–13%):
 
 ### Focal Loss (replaces plain CrossEntropy)
 
@@ -730,8 +740,8 @@ Default: `0.5 * Focal + 1.0 * Dice`. This shifts the balance toward Dice (class-
 ## Adding a New Band
 
 1. Include the new band in your GeoTIFF patches with a descriptive band name set in the metadata
-2. If the band needs `shift_scale` or `one_hot` normalization, add an entry to `band_config.json`. If it uses standard `min_max`, no config change is needed.
-3. Re-run `01_compute_statistics.py` — it discovers bands automatically
+2. If the band needs `shift_scale` or `one_hot` normalization, add an entry to `dl_band_config.json`. If it uses standard `min_max`, no config change is needed.
+3. Re-run `dl_01_compute_statistics.py` — it discovers bands automatically
 4. Re-train the model — `in_channels` updates automatically
 
 ---
@@ -743,7 +753,7 @@ The pipeline is **patch-size agnostic**. The U-Net is fully convolutional and al
 ### Changing patch size
 
 1. Create new training patches at the desired size (e.g., 256x256) — all patches must be the same dimensions
-2. Re-run `01_compute_statistics.py` on the new patches
+2. Re-run `dl_01_compute_statistics.py` on the new patches
 3. Retrain the model
 4. For prediction, set `--patch-size 256` (CLI) or `PATCH_SIZE = 256` (notebook) to match
 
@@ -762,10 +772,10 @@ The default patch size of 128 appears only in these locations:
 
 | Location | What | Action needed |
 |----------|------|---------------|
-| `06_predict.py` `--patch-size` | CLI default for prediction sliding window | Override with `--patch-size 256` |
+| `dl_06_predict.py` `--patch-size` | CLI default for prediction sliding window | Override with `--patch-size 256` |
 | `wetland_pipeline.ipynb` `PATCH_SIZE` | Notebook variable for prediction | Change to `256` |
 
-No changes are needed in `01_compute_statistics.py`, `02_dataset.py`, `03_unet_model.py`, `04_train.py`, or `05_evaluate.py` — they all handle arbitrary patch sizes automatically.
+No changes are needed in `dl_01_compute_statistics.py`, `dl_02_dataset.py`, `dl_03_unet_model.py`, `dl_04_train.py`, or `dl_05_evaluate.py` — they all handle arbitrary patch sizes automatically.
 
 ---
 
@@ -797,24 +807,24 @@ NYS_Wetlands_DL/
 ├── Models/
 │   ├── best_{mode}.ckpt               # Best Lightning checkpoint
 │   ├── lightning_logs/                 # Training logs (CSV/TensorBoard)
-│   └── (legacy .pth files)            # From 04_train.py if used
+│   └── (legacy .pth files)            # From dl_04_train.py if used
 └── Python_Code_Analysis/
     └── DL_Pipeline_v2/
         ├── README.md                   # This file
         ├── UNet_Architecture_Overview.md
-        ├── band_config.json            # Normalization rules
-        ├── band_utils.py               # Shared band utilities
-        ├── losses.py                   # FocalLoss + DiceLoss + HybridLoss
-        ├── model_utils.py              # Shared model loading (legacy + Lightning)
-        ├── 01_compute_statistics.py     # Step 1: Stats
-        ├── 02_dataset.py               # Step 2: Dataset + normalize_bands()
-        ├── 03_unet_model.py            # Step 3: U-Net architecture
-        ├── 03b_resunet34.py            # ResUNet34 architecture
-        ├── 04_train_lightning.py        # Step 4: Train (Lightning, primary)
-        ├── 04_train.py                 # Step 4: Train (legacy fallback)
-        ├── 05_evaluate.py              # Step 5: Evaluate
-        ├── 05b_evaluate_patches.py     # Step 5b: Per-patch evaluation
-        ├── 06_predict.py               # Step 6: Predict
-        ├── 07_shap_analysis.ipynb      # Feature importance
+        ├── dl_band_config.json            # Normalization rules
+        ├── dl_band_utils.py               # Shared band utilities
+        ├── dl_losses.py                   # FocalLoss + DiceLoss + HybridLoss
+        ├── dl_model_utils.py              # Shared model loading (legacy + Lightning)
+        ├── dl_01_compute_statistics.py     # Step 1: Stats
+        ├── dl_02_dataset.py               # Step 2: Dataset + normalize_bands()
+        ├── dl_03_unet_model.py            # Step 3: U-Net architecture
+        ├── dl_03b_resunet34.py            # ResUNet34 architecture
+        ├── dl_04_train_lightning.py        # Step 4: Train (Lightning, primary)
+        ├── dl_04_train.py                 # Step 4: Train (legacy fallback)
+        ├── dl_05_evaluate.py              # Step 5: Evaluate
+        ├── dl_05b_evaluate_patches.py     # Step 5b: Per-patch evaluation
+        ├── dl_06_predict.py               # Step 6: Predict
+        ├── dl_07_shap_analysis.ipynb   # Feature importance
         └── wetland_pipeline.ipynb      # Interactive notebook
 ```

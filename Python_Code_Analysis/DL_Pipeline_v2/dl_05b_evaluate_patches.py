@@ -1,5 +1,5 @@
 """
-05b_evaluate_patches.py
+dl_05b_evaluate_patches.py
 
 Per-patch evaluation of trained model on test set.
 Produces a CSV with per-patch metrics so you can identify which patches
@@ -17,30 +17,10 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 from typing import Dict, List, Optional
-import importlib.util
-import sys
 
-# ── Import sibling modules ──────────────────────────────────────────
-def _import_module(name, path):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_script_dir = Path(__file__).parent
-_dataset = _import_module("dataset", _script_dir / "02_dataset.py")
-_model = _import_module("unet_model", _script_dir / "03_unet_model.py")
-_evaluate = _import_module("evaluate", _script_dir / "05_evaluate.py")
-
-create_data_splits = _dataset.create_data_splits
-WetlandPatchDataset = _dataset.WetlandPatchDataset
-get_device = _model.get_device
-load_model = _evaluate.load_model
-compute_confusion_matrix = _evaluate.compute_confusion_matrix
-compute_class_metrics = _evaluate.compute_class_metrics
+from dl_02_dataset import create_data_splits, WetlandPatchDataset
+from dl_03_unet_model import get_device
+from dl_05_evaluate import load_model, compute_confusion_matrix, compute_class_metrics
 
 
 # ── Per-patch evaluation ─────────────────────────────────────────────

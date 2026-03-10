@@ -20,22 +20,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-import importlib.util
-import sys
-
-def _import_module(name, path):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_script_dir = Path(__file__).parent
-_train = _import_module("train_lightning", _script_dir / "04_train_lightning.py")
-
-train = _train.train
+from dl_04_train_lightning import train
 
 
 # ── Experiment configurations ────────────────────────────────────────

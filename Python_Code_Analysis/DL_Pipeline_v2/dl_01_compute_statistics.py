@@ -1,5 +1,5 @@
 """
-01_compute_statistics.py
+dl_01_compute_statistics.py
 
 Scan all training patches to compute:
 - Per-band min/max for normalization
@@ -7,7 +7,7 @@ Scan all training patches to compute:
 - Geomorph class verification
 
 Band names are discovered from rasterio descriptions at runtime.
-Normalization methods are read from band_config.json.
+Normalization methods are read from dl_band_config.json.
 
 Outputs: Data/Training_Data/normalization_stats.json
 """
@@ -19,7 +19,7 @@ from pathlib import Path
 from collections import defaultdict
 from tqdm import tqdm
 
-from band_utils import (
+from dl_band_utils import (
     load_band_config,
     discover_bands_from_raster,
     get_predictor_band_names,
@@ -35,7 +35,7 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
     Args:
         patches_dir: Directory containing GeoTIFF patches
         output_path: Path to save JSON statistics file
-        config_path: Path to band_config.json (default: alongside this script)
+        config_path: Path to dl_band_config.json (default: alongside this script)
     """
     config = load_band_config(config_path)
     label_band = config["label_band"]
@@ -140,7 +140,7 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
     if classification_mode == "binary":
         binary_mapping = config.get("binary_mapping", {})
         if not binary_mapping:
-            raise ValueError("classification_mode is 'binary' but no binary_mapping defined in band_config.json")
+            raise ValueError("classification_mode is 'binary' but no binary_mapping defined in dl_band_config.json")
 
         # Map original class names -> original integer indices
         orig_name_to_idx = {name: i for i, name in enumerate(original_class_names)}
@@ -305,7 +305,7 @@ if __name__ == "__main__":
         "--config",
         type=Path,
         default=None,
-        help="Path to band_config.json (default: alongside this script)"
+        help="Path to dl_band_config.json (default: alongside this script)"
     )
     args = parser.parse_args()
 

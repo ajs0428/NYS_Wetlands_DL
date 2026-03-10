@@ -1,5 +1,5 @@
 """
-06_predict.py
+dl_06_predict.py
 
 Apply trained model to new rasters for inference.
 Handles full rasters with sliding window and outputs GeoTIFFs.
@@ -15,29 +15,12 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 from typing import Optional
-import importlib.util
-import sys
 from tqdm import tqdm
 
-# Import from sibling modules
-def _import_module(name, path):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_script_dir = Path(__file__).parent
-_model = _import_module("unet_model", _script_dir / "03_unet_model.py")
-_dataset = _import_module("dataset", _script_dir / "02_dataset.py")
-
-from band_utils import validate_prediction_bands
-from model_utils import load_model
-
-normalize_bands = _dataset.normalize_bands
-get_device = _model.get_device
+from dl_02_dataset import normalize_bands
+from dl_03_unet_model import get_device
+from dl_band_utils import validate_prediction_bands
+from dl_model_utils import load_model
 
 
 def load_normalization_stats(stats_path: Path) -> dict:

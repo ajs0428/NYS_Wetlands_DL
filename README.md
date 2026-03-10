@@ -89,7 +89,7 @@ docker1 run --gpus all \
   -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
   -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
   biohpc_<labid>/wetland-dl \
-  python Python_Code_Analysis/DL_Pipeline_v2/05_evaluate.py
+  python Python_Code_Analysis/DL_Pipeline_v2/dl_05_evaluate.py
 
 # Mount code for live editing (no rebuild needed)
 docker1 run --gpus all -it \

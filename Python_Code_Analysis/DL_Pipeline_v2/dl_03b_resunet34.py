@@ -1,31 +1,18 @@
 """
-03b_resunet34.py
+dl_03b_resunet34.py
 
 ResUNet34 — ResNet-34 encoder with U-Net decoder + SE attention.
 No ImageNet pretraining: encoder is randomly initialized to support
 arbitrary in_channels (e.g. 35+ multispectral/LiDAR bands).
 
-Usage in 04_train_lightning.py:
+Usage in dl_04_train_lightning.py:
     net = ResUNet34(in_channels=in_channels, num_classes=num_classes)
 """
 
 import torch
 import torch.nn as nn
 
-import importlib.util, sys
-from pathlib import Path as _Path
-
-def _import_module(name, path):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_unet = _import_module("unet_model", _Path(__file__).parent / "03_unet_model.py")
-SqueezeExcitation = _unet.SqueezeExcitation
+from dl_03_unet_model import SqueezeExcitation
 
 
 class BasicBlock(nn.Module):
@@ -203,7 +190,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}\n")
 
     in_channels = 35
-    num_classes = 5
+    num_classes = 4
 
     print("=== ResUNet34 (base_filters=64) ===")
     model = ResUNet34(in_channels=in_channels, num_classes=num_classes, base_filters=64)

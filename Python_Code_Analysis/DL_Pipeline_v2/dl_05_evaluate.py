@@ -1,5 +1,5 @@
 """
-05_evaluate.py
+dl_05_evaluate.py
 
 Evaluate trained model on test set.
 Computes per-class metrics, confusion matrix, and overall performance.
@@ -11,27 +11,10 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 from typing import Dict, List, Optional
-import importlib.util
-import sys
 
-# Import from sibling modules
-def _import_module(name, path):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_script_dir = Path(__file__).parent
-_dataset = _import_module("dataset", _script_dir / "02_dataset.py")
-_model = _import_module("unet_model", _script_dir / "03_unet_model.py")
-
-from model_utils import load_model
-
-create_dataloaders = _dataset.create_dataloaders
-get_device = _model.get_device
+from dl_02_dataset import create_dataloaders
+from dl_03_unet_model import get_device
+from dl_model_utils import load_model
 
 
 def compute_confusion_matrix(

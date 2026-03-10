@@ -1,8 +1,8 @@
 """
-04_train_lightning.py
+dl_04_train_lightning.py
 
 PyTorch Lightning training for wetland segmentation.
-Replaces the manual training loop in 04_train.py with Lightning's Trainer.
+Replaces the manual training loop in dl_04_train.py with Lightning's Trainer.
 
 The network architecture is passed as a constructor argument (`net`),
 making it trivial to swap between UNet, ResUNet34, or any nn.Module
@@ -24,30 +24,11 @@ from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 import pandas as pd
 from pathlib import Path
 from typing import Optional
-import importlib.util
-import sys
 
-
-# ── Import sibling modules ──────────────────────────────────────────
-def _import_module(name, path):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_script_dir = Path(__file__).parent
-_dataset = _import_module("dataset", _script_dir / "02_dataset.py")
-_model = _import_module("unet_model", _script_dir / "03_unet_model.py")
-_resunet = _import_module("resunet34", _script_dir / "03b_resunet34.py")
-
-from losses import HybridLoss
-
-create_dataloaders = _dataset.create_dataloaders
-UNet = _model.UNet
-ResUNet34 = _resunet.ResUNet34
+from dl_02_dataset import create_dataloaders
+from dl_03_unet_model import UNet
+from dl_03b_resunet34 import ResUNet34
+from dl_losses import HybridLoss
 
 
 # ── Data Module ──────────────────────────────────────────────────────
@@ -436,7 +417,7 @@ def train(
                 values = df[csv_col].dropna().tolist()
                 history[hist_key] = values
 
-    # Save JSON (parity with legacy 04_train.py)
+    # Save JSON (parity with legacy dl_04_train.py)
     history_path = output_dir / f"training_history_{mode}_{architecture}.json"
     with open(history_path, "w") as f:
         json.dump(history, f, indent=2)

@@ -1,9 +1,9 @@
 """
-band_utils.py
+dl_band_utils.py
 
 Shared utilities for dynamic band handling across the pipeline.
 Reads band names from rasterio descriptions and normalization rules
-from band_config.json, eliminating hardcoded band constants.
+from dl_band_config.json, eliminating hardcoded band constants.
 """
 
 import json
@@ -14,10 +14,10 @@ from typing import Dict, List, Optional, Tuple
 
 def load_band_config(config_path: Optional[Path] = None) -> dict:
     """
-    Load band configuration from band_config.json.
+    Load band configuration from dl_band_config.json.
 
     Args:
-        config_path: Path to config file. Defaults to band_config.json
+        config_path: Path to config file. Defaults to dl_band_config.json
                      in the same directory as this module.
 
     Returns:
@@ -25,7 +25,7 @@ def load_band_config(config_path: Optional[Path] = None) -> dict:
         band_normalization, class_names, ignore_index.
     """
     if config_path is None:
-        config_path = Path(__file__).parent / "band_config.json"
+        config_path = Path(__file__).parent / "dl_band_config.json"
 
     with open(config_path) as f:
         return json.load(f)
@@ -128,7 +128,7 @@ def compute_in_channels_from_stats(stats_path: Path) -> int:
     if "in_channels" not in stats:
         raise KeyError(
             f"'in_channels' not found in {stats_path}. "
-            "Re-run 01_compute_statistics.py to generate an updated stats file."
+            "Re-run dl_01_compute_statistics.py to generate an updated stats file."
         )
 
     return stats["in_channels"]

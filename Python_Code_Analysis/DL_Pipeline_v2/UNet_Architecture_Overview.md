@@ -8,7 +8,7 @@
 | **Depth** | 4 (configurable; 5 for HPC) |
 | **Base Filters** | 32 (doubles each level: 32→64→128→256→512) |
 | **Input Channels** | 29 (20 predictor bands, with geomorphology one-hot expanded to 10) |
-| **Output Classes** | 5 (EMW, FSW, OWW, SSW, UPL) |
+| **Output Classes** | 4 (EMW, FSW, SSW, UPL) — configurable via `dl_band_config.json` |
 | **Total Parameters** | ~7.8M (local) / ~125.3M (HPC) |
 | **Patch Size** | 128×128 pixels |
 | **Activation** | ReLU (inplace) |
@@ -121,12 +121,12 @@ The deepest representation — no pooling, just the double convolution.
 ### Output Layer
 
 ```
-Conv2d(32 → 5, kernel_size=1)
+Conv2d(32 → num_classes, kernel_size=1)
 ```
 
-A 1×1 convolution maps the final 32 feature channels to 5 class logits. No softmax is applied — the CE component of `HybridLoss` expects raw logits; the Dice component applies softmax internally.
+A 1×1 convolution maps the final 32 feature channels to `num_classes` logits. No softmax is applied — the CE component of `HybridLoss` expects raw logits; the Dice component applies softmax internally.
 
-**Output shape:** `(batch_size, 5, 128, 128)` — per-pixel class logits.
+**Output shape:** `(batch_size, num_classes, 128, 128)` — per-pixel class logits.
 
 ---
 
@@ -155,7 +155,7 @@ Input (29, 128, 128)
           ├─ Decoder+SE L0 ← concat(skip₀) ────────────────────────────┘
           │  (32, 128, 128)
           │
-          └─ Conv2d 1×1 → Output (5, 128, 128)
+          └─ Conv2d 1×1 → Output (num_classes, 128, 128)
 ```
 
 ---
@@ -173,7 +173,7 @@ The 29 input channels come from 20 predictor bands, with the categorical geomorp
 | Geomorphology (one-hot, 10 classes) | 10 | categorical |
 | **Total** | **29** | |
 
-Band names and normalization methods are not hardcoded — they are discovered from rasterio band descriptions at runtime and configured via `band_config.json`.
+Band names and normalization methods are not hardcoded — they are discovered from rasterio band descriptions at runtime and configured via `dl_band_config.json`.
 
 ---
 
@@ -183,9 +183,10 @@ Band names and normalization methods are not hardcoded — they are discovered f
 |-------|------|-------------|
 | 0 | EMW | Emergent Wetland |
 | 1 | FSW | Forested Wetland |
-| 2 | OWW | Open Water Wetland |
-| 3 | SSW | Scrub-Shrub Wetland |
-| 4 | UPL | Upland (non-wetland) |
+| 2 | SSW | Scrub-Shrub Wetland |
+| 3 | UPL | Upland (non-wetland) |
+
+> OWW (Open Water Wetland) was removed from the current classification but can be re-added via `dl_band_config.json`.
 
 Unlabeled pixels are mapped to index **255** and excluded from both loss components — CE via `ignore_index=255`, Dice via explicit masking before computing per-class overlap.
 

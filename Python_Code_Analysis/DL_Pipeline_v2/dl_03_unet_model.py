@@ -1,5 +1,5 @@
 """
-03_unet_model.py
+dl_03_unet_model.py
 
 U-Net model for semantic segmentation of wetland classes.
 Configurable depth and filter counts for local vs HPC training.
@@ -114,7 +114,7 @@ class UNet(nn.Module):
 
     Args:
         in_channels: Number of input channels (29 for this project)
-        num_classes: Number of output classes (5 for this project)
+        num_classes: Number of output classes (4 for current project: EMW, FSW, SSW, UPL)
         base_filters: Number of filters in first layer (doubles each level)
         depth: Number of encoder/decoder levels
 
@@ -122,13 +122,13 @@ class UNet(nn.Module):
         Encoder: 29 -> 32 -> 64 -> 128 -> 256
         Bottleneck: 256 -> 512
         Decoder: 512 -> 256 -> 128 -> 64 -> 32
-        Output: 32 -> 5
+        Output: 32 -> num_classes
     """
 
     def __init__(
         self,
         in_channels: int,
-        num_classes: int = 5,
+        num_classes: int = 4,
         base_filters: int = 32,
         depth: int = 4,
         dropout: float = 0.0,
@@ -210,7 +210,7 @@ def get_device() -> torch.device:
 
 def create_model(
     in_channels: int,
-    num_classes: int = 5,
+    num_classes: int = 4,
     base_filters: int = 32,
     depth: int = 4,
     device: torch.device = None

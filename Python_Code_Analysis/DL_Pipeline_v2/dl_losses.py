@@ -1,8 +1,8 @@
 """
-losses.py
+dl_losses.py
 
 Loss functions for wetland segmentation training.
-Extracted from 04_train.py for reuse across training scripts.
+Extracted from dl_04_train.py for reuse across training scripts.
 """
 
 import torch

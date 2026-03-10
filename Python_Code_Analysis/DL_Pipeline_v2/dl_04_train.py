@@ -1,7 +1,7 @@
 """
-04_train.py
+dl_04_train.py
 
-Training loop for wetland classification U-Net model.
+Training loop for wetland classification U-Net model (legacy fallback).
 Supports class weighting, checkpointing, and multiple devices.
 """
 
@@ -16,28 +16,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
 
-# Use importlib to handle numeric prefixes in module names
-import importlib.util
-import sys
-
-def _import_module(name, path):
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-_script_dir = Path(__file__).parent
-_dataset = _import_module("dataset", _script_dir / "02_dataset.py")
-_model = _import_module("unet_model", _script_dir / "03_unet_model.py")
-
-from losses import HybridLoss
-
-create_dataloaders = _dataset.create_dataloaders
-create_model = _model.create_model
-get_device = _model.get_device
+from dl_02_dataset import create_dataloaders
+from dl_03_unet_model import create_model, get_device
+from dl_losses import HybridLoss
 
 
 def compute_metrics(
