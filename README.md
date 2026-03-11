@@ -1,6 +1,10 @@
 # NYS Wetlands Deep Learning
 
-A deep learning pipeline for wetland semantic segmentation in New York State. The project uses a U-Net architecture trained on multi-source remote sensing data (terrain, spectral indices, SAR, and NAIP imagery) to classify pixels into wetland categories. Training data is derived from the National Wetlands Inventory and organized by HUC12 watersheds for systematic processing across the state.
+A deep learning pipeline for wetland semantic segmentation in New York State. The project uses swappable encoder-decoder architectures (U-Net, dual-branch ResNet) trained on multi-source remote sensing data (terrain, spectral indices, SAR, and NAIP imagery) to classify pixels into wetland categories. Training data is derived from the National Wetlands Inventory and organized by HUC12 watersheds for systematic processing across the state.
+
+Available architectures:
+- **U-Net** (default): Single-encoder U-Net with residual blocks and SE attention
+- **Dual-Branch U-Net**: Separate ResNet-34 (optical/spectral) and ResNet-18 (terrain/LiDAR) encoders with cross-modal fusion, following [Jamali & Mahdianpari (2022)](https://doi.org/10.3390/rs14020359)
 
 The pipeline supports two classification modes, toggled via `band_config.json`:
 

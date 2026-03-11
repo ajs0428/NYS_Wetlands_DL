@@ -8,9 +8,11 @@ Handles both legacy (dl_04_train.py) and Lightning (dl_04_train_lightning.py) ch
 import torch
 import torch.nn as nn
 from pathlib import Path
+from typing import List, Optional
 
 from dl_03_unet_model import UNet
 from dl_03b_resunet34 import ResUNet34
+from dl_03c_dualbranch import DualBranchUNet
 
 # Registry: architecture name -> (class, constructor kwargs beyond in_channels/num_classes/base_filters)
 _ARCHITECTURES = {
@@ -73,6 +75,9 @@ def load_model(
     base_filters: int = 32,
     depth: int = 4,
     architecture: str = "unet",
+    optical_indices: Optional[List[int]] = None,
+    terrain_indices: Optional[List[int]] = None,
+    fusion: str = "gated",
 ) -> nn.Module:
     """
     Construct a model and load weights from checkpoint.
@@ -84,12 +89,30 @@ def load_model(
         num_classes: Number of output classes
         base_filters: Base filter count
         depth: Network depth (used by UNet only)
-        architecture: Model architecture ("unet" or "resunet34")
+        architecture: Model architecture ("unet", "resunet34", or "dualbranch")
+        optical_indices: Channel indices for optical branch (dualbranch only)
+        terrain_indices: Channel indices for terrain branch (dualbranch only)
+        fusion: Fusion strategy for dualbranch ('gated' or 'concat')
     """
+    if architecture == "dualbranch":
+        if optical_indices is None or terrain_indices is None:
+            raise ValueError(
+                "dualbranch architecture requires optical_indices and "
+                "terrain_indices. Compute them via get_branch_indices()."
+            )
+        net = DualBranchUNet(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            optical_indices=optical_indices,
+            terrain_indices=terrain_indices,
+            fusion=fusion,
+        )
+        return load_model_from_checkpoint(model_path, net, device)
+
     if architecture not in _ARCHITECTURES:
         raise ValueError(
             f"Unknown architecture '{architecture}'. "
-            f"Choose from: {list(_ARCHITECTURES.keys())}"
+            f"Choose from: {list(_ARCHITECTURES.keys()) + ['dualbranch']}"
         )
 
     entry = _ARCHITECTURES[architecture]

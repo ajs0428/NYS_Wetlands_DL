@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 from dl_02_dataset import create_dataloaders
 from dl_03_unet_model import get_device
+from dl_band_utils import load_band_config, get_branch_indices
 from dl_model_utils import load_model
 
 
@@ -197,6 +198,7 @@ def main(
     depth: int = 4,
     seed: int = 42,
     architecture: str = "unet",
+    fusion: str = "gated",
 ):
     """
     Main evaluation function.
@@ -210,6 +212,8 @@ def main(
         base_filters: Model base filters
         depth: Model depth
         seed: Random seed (must match training)
+        architecture: Model architecture
+        fusion: Dual-branch fusion strategy (only used with dualbranch)
     """
     device = get_device()
     print(f"Using device: {device}")
@@ -222,9 +226,16 @@ def main(
     class_names = stats["class_names"]
     ignore_index = stats.get("ignore_index", 255)
 
+    # Compute branch indices for dual-branch architecture
+    optical_idx = terrain_idx = None
+    if architecture == "dualbranch":
+        config = load_band_config()
+        optical_idx, terrain_idx = get_branch_indices(stats, config)
+
     # Load model
     model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
-                       architecture=architecture)
+                       architecture=architecture, optical_indices=optical_idx,
+                       terrain_indices=terrain_idx, fusion=fusion)
 
     # Create test loader
     print("\nLoading test data...")
@@ -260,10 +271,14 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--base-filters", type=int, default=32)
     parser.add_argument("--depth", type=int, default=4)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, required=True,
+                        help="Random seed (must match training seed for correct test split)")
     parser.add_argument("--architecture", type=str, default="unet",
-                        choices=["unet", "resunet34"],
+                        choices=["unet", "resunet34", "dualbranch"],
                         help="Model architecture (default: unet)")
+    parser.add_argument("--fusion", type=str, default="gated",
+                        choices=["gated", "concat"],
+                        help="Dual-branch fusion strategy (default: gated)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -283,4 +298,5 @@ if __name__ == "__main__":
         depth=args.depth,
         seed=args.seed,
         architecture=args.architecture,
+        fusion=args.fusion,
     )

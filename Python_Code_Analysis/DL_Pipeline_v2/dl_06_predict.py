@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from dl_02_dataset import normalize_bands
 from dl_03_unet_model import get_device
-from dl_band_utils import validate_prediction_bands
+from dl_band_utils import load_band_config, get_branch_indices, validate_prediction_bands
 from dl_model_utils import load_model
 
 
@@ -183,6 +183,7 @@ def main(
     depth: int = 4,
     save_probabilities: bool = False,
     architecture: str = "unet",
+    fusion: str = "gated",
 ):
     """
     Main prediction function.
@@ -197,6 +198,8 @@ def main(
         base_filters: Model base filters
         depth: Model depth
         save_probabilities: Save probability maps
+        architecture: Model architecture
+        fusion: Dual-branch fusion strategy (only used with dualbranch)
     """
     device = get_device()
     print(f"Using device: {device}")
@@ -206,10 +209,17 @@ def main(
     in_channels = stats["in_channels"]
     num_classes = len(stats["class_names"])
 
+    # Compute branch indices for dual-branch architecture
+    optical_idx = terrain_idx = None
+    if architecture == "dualbranch":
+        config = load_band_config()
+        optical_idx, terrain_idx = get_branch_indices(stats, config)
+
     # Load model
     print(f"\nLoading model from {model_path}")
     model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
-                       architecture=architecture)
+                       architecture=architecture, optical_indices=optical_idx,
+                       terrain_indices=terrain_idx, fusion=fusion)
 
     # Run prediction
     print(f"\nProcessing {input_path}")
@@ -239,8 +249,11 @@ if __name__ == "__main__":
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--probs", action="store_true", help="Save probability maps")
     parser.add_argument("--architecture", type=str, default="unet",
-                        choices=["unet", "resunet34"],
+                        choices=["unet", "resunet34", "dualbranch"],
                         help="Model architecture (default: unet)")
+    parser.add_argument("--fusion", type=str, default="gated",
+                        choices=["gated", "concat"],
+                        help="Dual-branch fusion strategy (default: gated)")
 
     args = parser.parse_args()
 
@@ -260,4 +273,5 @@ if __name__ == "__main__":
         depth=args.depth,
         save_probabilities=args.probs,
         architecture=args.architecture,
+        fusion=args.fusion,
     )

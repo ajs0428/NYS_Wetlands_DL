@@ -135,6 +135,74 @@ def compute_in_channels_from_stats(stats_path: Path) -> int:
 
 
 
+def get_branch_indices(stats: dict, config: dict) -> Tuple[List[int], List[int]]:
+    """
+    Compute channel indices for each branch from stats and config.
+
+    Uses ``predictor_names`` from normalization_stats.json and
+    ``branch_assignment`` from dl_band_config.json to determine which
+    input channels feed into the optical vs terrain encoder branches.
+
+    Args:
+        stats: Loaded normalization_stats.json dict (needs 'predictor_names').
+        config: Loaded dl_band_config.json dict (needs 'branch_assignment').
+
+    Returns:
+        (optical_indices, terrain_indices) — 0-based channel indices.
+
+    Raises:
+        ValueError: If a predictor band is not assigned to any branch.
+        KeyError: If branch_assignment is missing from the config.
+    """
+    predictor_names = stats["predictor_names"]
+    assignment = config["branch_assignment"]
+
+    optical_names = set(assignment["optical"])
+    terrain_names = set(assignment["terrain"])
+
+    optical_idx: List[int] = []
+    terrain_idx: List[int] = []
+
+    for i, name in enumerate(predictor_names):
+        if name in optical_names:
+            optical_idx.append(i)
+        elif name in terrain_names:
+            terrain_idx.append(i)
+        else:
+            raise ValueError(
+                f"Predictor band '{name}' is not assigned to any branch in "
+                f"branch_assignment. Add it to 'optical' or 'terrain' in "
+                f"dl_band_config.json."
+            )
+
+    # Warn about configured bands not present in the data (harmless but noisy)
+    found_optical = {predictor_names[i] for i in optical_idx}
+    found_terrain = {predictor_names[i] for i in terrain_idx}
+    missing_opt = optical_names - found_optical
+    missing_ter = terrain_names - found_terrain
+    if missing_opt:
+        print(f"  Warning: optical bands in config but not in data: {missing_opt}")
+    if missing_ter:
+        print(f"  Warning: terrain bands in config but not in data: {missing_ter}")
+
+    return optical_idx, terrain_idx
+
+
+def get_branch_channels(stats: dict, config: dict) -> Tuple[int, int]:
+    """
+    Return (optical_channels, terrain_channels) counts for the dual-branch model.
+
+    Args:
+        stats: Loaded normalization_stats.json dict.
+        config: Loaded dl_band_config.json dict.
+
+    Returns:
+        (optical_count, terrain_count) integer tuple.
+    """
+    optical_idx, terrain_idx = get_branch_indices(stats, config)
+    return len(optical_idx), len(terrain_idx)
+
+
 def validate_prediction_bands(
     raster_bands: List[str],
     expected_predictors: List[str],

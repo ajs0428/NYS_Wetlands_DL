@@ -171,7 +171,7 @@ GeoTIFF Patches (19 bands: 18 predictors + 1 label)
         │
         ▼
  ┌─────────────────────┐
- │ dl_03_unet_model     │ → U-Net architecture (swappable — see dl_03b_resunet34.py)
+ │ dl_03_unet_model     │ → U-Net architecture (swappable — see dl_03b, dl_03c)
  └─────────────────────┘
         │
         ▼
@@ -191,7 +191,7 @@ GeoTIFF Patches (19 bands: 18 predictors + 1 label)
  └─────────────────────┘
 
 Shared modules: dl_losses.py (FocalLoss, DiceLoss, HybridLoss), dl_model_utils.py (checkpoint loading),
-                dl_band_utils.py (band discovery/config)
+                dl_band_utils.py (band discovery/config/branch routing)
 ```
 
 ---
@@ -263,9 +263,15 @@ The single file to edit when changing band normalization. Located alongside the 
     "Geomorph_local": {"method": "one_hot", "num_classes": 10, "class_range": [1, 10]}
   },
   "class_names": ["EMW", "FSW", "SSW", "UPL"],
-  "ignore_index": 255
+  "ignore_index": 255,
+  "branch_assignment": {
+    "optical": ["EVI", "NDYI", "GDVI", "VV", "VH", "r", "g", "b", "nir", "n_ndvi", "n_ndwi"],
+    "terrain": ["DEM", "meanc_local", "planc_local", "profc_local", "dmv_local", "slope_local", "TPI_local", "CHM"]
+  }
 }
 ```
+
+The `branch_assignment` field is used only by the dual-branch architecture (`--architecture dualbranch`). It maps each predictor band to either the optical or terrain encoder branch. Every band in `predictor_names` must appear in exactly one branch.
 
 **Normalization methods:**
 
@@ -327,6 +333,8 @@ Imported by all pipeline scripts. Key functions:
 | `get_normalization_method(band, config)` | Look up a band's normalization (with default fallback) |
 | `compute_in_channels(names, config)` | Count total input channels after one-hot expansion |
 | `compute_in_channels_from_stats(path)` | Read `in_channels` from `normalization_stats.json` |
+| `get_branch_indices(stats, config)` | Compute (optical, terrain) channel index lists for dual-branch model |
+| `get_branch_channels(stats, config)` | Return (optical_count, terrain_count) channel counts |
 | `validate_prediction_bands(raster, expected, label)` | Match raster bands to expected predictors by name |
 
 ---
@@ -463,7 +471,7 @@ python dl_04_train_lightning.py \
   --base-filters 32 \
   --depth 4 \
   --workers 4 \
-  --seed 42 \
+  --seed 420 \
   --early-stopping 15
 ```
 
@@ -686,10 +694,54 @@ Any `nn.Module` that satisfies this contract:
 
 ### Available architectures
 
-| File | Architecture | Status |
-|------|-------------|--------|
-| `dl_03_unet_model.py` | U-Net (residual + SE attention) | Production |
-| `dl_03b_resunet34.py` | ResUNet34 (ResNet-34 encoder + U-Net decoder + SE attention) | Production |
+| File | Architecture | CLI Flag | Status |
+|------|-------------|----------|--------|
+| `dl_03_unet_model.py` | U-Net (residual + SE attention) | `--architecture unet` | Production |
+| `dl_03b_resunet34.py` | ResUNet34 (ResNet-34 encoder + U-Net decoder + SE attention) | `--architecture resunet34` | Production |
+| `dl_03c_dualbranch.py` | Dual-Branch U-Net (ResNet-34 optical + ResNet-18 terrain + cross-modal fusion) | `--architecture dualbranch` | Production |
+
+### Dual-Branch Architecture
+
+The dual-branch model (`dl_03c_dualbranch.py`) processes optical/spectral and terrain/LiDAR features through separate encoder branches with attention-based fusion, following [Jamali & Mahdianpari (2022)](https://doi.org/10.3390/rs14020359).
+
+```
+Optical Branch (spectral + SAR + NAIP)    Terrain Branch (DEM derivatives + CHM)
+    ResNet-34 encoder                         ResNet-18 encoder
+         |                                         |
+    [stage feats] ----> CrossModalFusion <---- [stage feats]  (x5 stages)
+                            |
+                    Shared U-Net Decoder
+                    (SE attention + skip connections)
+                            |
+                       Output logits
+```
+
+**Band routing** is configured declaratively in `dl_band_config.json` via the `branch_assignment` field. The model accepts the full stacked input tensor and splits channels internally — no changes needed in `dl_02_dataset.py` or downstream scripts.
+
+**Fusion strategies** (`--fusion`):
+- `gated` (default): Squeeze-excitation-style gated fusion — learns per-channel soft routing between branches
+- `concat`: Simple concatenation + 1x1 projection — lower parameter count, useful as ablation baseline
+
+**Usage:**
+
+```bash
+# Train with dual-branch architecture
+python dl_04_train_lightning.py --architecture dualbranch --fusion gated
+
+# Evaluate
+python dl_05_evaluate.py --model ../../Models/best_multiclass_dualbranch.ckpt \
+  --architecture dualbranch --fusion gated
+
+# Predict
+python dl_06_predict.py input.tif output.tif \
+  --model ../../Models/best_multiclass_dualbranch.ckpt \
+  --architecture dualbranch --fusion gated
+```
+
+**Notes:**
+- `--base-filters` and `--depth` are accepted but not used (ResNet channel widths are fixed at 64/128/256/512)
+- Requires `timm` library (included in `pyproject.toml`)
+- Patch size must be divisible by 32 (5 downsampling levels)
 
 ---
 
@@ -820,6 +872,7 @@ NYS_Wetlands_DL/
         ├── dl_02_dataset.py               # Step 2: Dataset + normalize_bands()
         ├── dl_03_unet_model.py            # Step 3: U-Net architecture
         ├── dl_03b_resunet34.py            # ResUNet34 architecture
+        ├── dl_03c_dualbranch.py           # Dual-branch architecture (ResNet-34/18 + fusion)
         ├── dl_04_train_lightning.py        # Step 4: Train (Lightning, primary)
         ├── dl_04_train.py                 # Step 4: Train (legacy fallback)
         ├── dl_05_evaluate.py              # Step 5: Evaluate

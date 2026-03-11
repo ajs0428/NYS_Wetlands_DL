@@ -128,7 +128,7 @@ class HybridLoss(nn.Module):
         num_classes: int,
         weight: torch.Tensor = None,
         ignore_index: int = 255,
-        ce_weight: float = 0.5,
+        ce_weight: float = 1.0,
         dice_weight: float = 1.0,
         focal_gamma: float = 2.0,
         label_smoothing: float = 0.0,

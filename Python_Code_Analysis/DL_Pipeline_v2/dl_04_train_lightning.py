@@ -28,6 +28,8 @@ from typing import Optional
 from dl_02_dataset import create_dataloaders
 from dl_03_unet_model import UNet
 from dl_03b_resunet34 import ResUNet34
+from dl_03c_dualbranch import DualBranchUNet
+from dl_band_utils import load_band_config, get_branch_indices
 from dl_losses import HybridLoss
 
 
@@ -241,6 +243,7 @@ def train(
     early_stopping_patience: int = 15,
     lr_patience: int = 5,
     architecture: str = "unet",
+    fusion: str = "gated",
     precision: str = "32-true",
     ce_weight: float = 1.0,
     dice_weight: float = 1.0,
@@ -311,7 +314,20 @@ def train(
     print(f"Class weights: {class_weights.tolist()}")
 
     # Network — select architecture
-    if architecture == "resunet34":
+    if architecture == "dualbranch":
+        config = load_band_config()
+        optical_idx, terrain_idx = get_branch_indices(stats, config)
+        print(f"Dual-branch: {len(optical_idx)} optical channels, "
+              f"{len(terrain_idx)} terrain channels, fusion={fusion}")
+        net = DualBranchUNet(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            optical_indices=optical_idx,
+            terrain_indices=terrain_idx,
+            fusion=fusion,
+            dropout=dropout,
+        )
+    elif architecture == "resunet34":
         net = ResUNet34(
             in_channels=in_channels,
             num_classes=num_classes,
@@ -379,7 +395,7 @@ def train(
     )
 
     trainer.fit(module, datamodule=dm)
-    trainer.test(module, datamodule=dm)
+    trainer.test(module, datamodule=dm, ckpt_path="best")
 
     # Report best checkpoint
     best_path = trainer.checkpoint_callback.best_model_path
@@ -454,8 +470,11 @@ if __name__ == "__main__":
     parser.add_argument("--lr-patience", type=int, default=5,
                         help="ReduceLROnPlateau patience (epochs, default: 5)")
     parser.add_argument("--architecture", type=str, default="unet",
-                        choices=["unet", "resunet34"],
+                        choices=["unet", "resunet34", "dualbranch"],
                         help="Model architecture (default: unet)")
+    parser.add_argument("--fusion", type=str, default="gated",
+                        choices=["gated", "concat"],
+                        help="Dual-branch fusion strategy (default: gated)")
     parser.add_argument("--precision", type=str, default="32-true",
                         choices=["32-true", "16-mixed", "bf16-mixed"],
                         help="Training precision (default: 32-true)")
@@ -494,6 +513,7 @@ if __name__ == "__main__":
         early_stopping_patience=args.early_stopping,
         lr_patience=args.lr_patience,
         architecture=args.architecture,
+        fusion=args.fusion,
         precision=args.precision,
         ce_weight=args.ce_weight,
         dice_weight=args.dice_weight,

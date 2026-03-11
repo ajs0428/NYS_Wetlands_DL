@@ -13,5 +13,11 @@
     "Geomorph_local": {"method": "one_hot", "num_classes": 10, "class_range": [1, 10]}
   },
   "class_names": ["EMW", "FSW", "SSW", "UPL"],
-  "ignore_index": 255
+  "ignore_index": 255,
+  "branch_assignment": {
+    "optical": ["EVI", "NDYI", "GDVI", "VV", "VH",
+                "r", "g", "b", "nir", "n_ndvi", "n_ndwi"],
+    "terrain": ["DEM", "meanc_local", "planc_local", "profc_local",
+                "dmv_local", "slope_local", "TPI_local", "CHM"]
+  }
 }
