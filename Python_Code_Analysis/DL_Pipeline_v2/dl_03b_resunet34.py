@@ -127,6 +127,7 @@ class ResUNet34(nn.Module):
     def __init__(self, in_channels: int, num_classes: int, base_filters: int = 64,
                  dropout: float = 0.0):
         super().__init__()
+        self.in_channels = in_channels
         bf = base_filters
 
         # Stem: two 3x3 convs (preserves spatial detail better than single 7x7)

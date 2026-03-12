@@ -142,6 +142,9 @@ class WetlandSegmentationModule(L.LightningModule):
 
         self.save_hyperparameters(ignore=["net", "class_weights"])
 
+        # Example input for TensorBoard graph visualization
+        self.example_input_array = torch.randn(1, net.in_channels if hasattr(net, 'in_channels') else 1, 256, 256)
+
     def forward(self, x):
         return self.net(x)
 
@@ -381,7 +384,8 @@ def train(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     run_name = f"{architecture}_bf{base_filters}_{timestamp}"
     csv_logger = CSVLogger(save_dir=output_dir, name="lightning_logs", version=run_name)
-    tb_logger = TensorBoardLogger(save_dir=output_dir, name="tb_logs", version=run_name)
+    tb_logger = TensorBoardLogger(save_dir=output_dir, name="tb_logs", version=run_name,
+                                   log_graph=True)
 
     trainer = L.Trainer(
         max_epochs=epochs,
@@ -390,10 +394,11 @@ def train(
         default_root_dir=output_dir,
         precision=precision,
         gradient_clip_val=gradient_clip_val or None,
-        log_every_n_steps=10,
+        log_every_n_steps=5,
         enable_progress_bar=True,
     )
 
+    
     trainer.fit(module, datamodule=dm)
     trainer.test(module, datamodule=dm, ckpt_path="best")
 
