@@ -2,7 +2,7 @@
 set -e  # Exit on error
 
 # === CONFIGURATION ===
-ARCHITECTURE="dualbranch"        # "unet", "resunet34", or "dualbranch"
+ARCHITECTURE="unet"        # "unet", "resunet34", or "dualbranch"
 FUSION="gated"             # "gated" or "concat" (only used with dualbranch)
 BASE_FILTERS=64
 DEPTH=4
