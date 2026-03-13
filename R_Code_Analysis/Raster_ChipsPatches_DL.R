@@ -10,14 +10,13 @@ library(readr)
 library(future)
 library(future.apply)
 
-
 set.seed(11)
 
 ########################################################################################
 
 args <- c(
     "Data/Training_Data/R_Patches_Vector_Reviewed/", #Path to GIS reviewed wetland vector patches
-    128
+    128 # patch size
 )
 
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
@@ -35,36 +34,46 @@ l_wet_cluster_nums <- sub(".*cluster_(\\d+).*", "\\1", l_wet)
 l_wet_extracted_clusters <- sub(".*cluster_(\\d+)_.*", "\\1", l_wet)
 l_wet_cluster <- l_wet[l_wet_extracted_clusters %in% as.character(l_wet_cluster_nums)]
 print(l_wet_cluster)
-
+clust_extract_fun <- function(l){
+    extracted_clusters <- sub(".*cluster_(\\d+)_.*", "\\1", l)
+    if(str_detect(deparse(substitute(l)), "dem")){
+        message("DEM")
+        l_clust <- l[extracted_clusters %in% as.character(l_wet_cluster_nums) & 
+                         !str_detect(l, "wbt")]
+    } else if(str_detect(deparse(substitute(l)), "terr")){
+        message("Terrain")
+        l_clust <- l[extracted_clusters %in% as.character(l_wet_cluster_nums) & 
+                   str_detect(l, "local") & 
+                   !str_detect(l, "10m|1000m")]
+    } else {
+        message(str_remove(deparse(substitute(l)), "l_"))
+        l_clust <- l[extracted_clusters %in% as.character(l_wet_cluster_nums)]
+    }
+    return(l_clust)
+}
 l_dem <- list.files("Data/TerrainProcessed/HUC_DEMs/", pattern = ".tif", full.names = TRUE) 
-l_dem_extracted_clusters <- sub(".*cluster_(\\d+)_.*", "\\1", l_dem)
-l_dem_cluster <- l_dem[l_dem_extracted_clusters %in% as.character(l_wet_cluster_nums) & !str_detect(l_dem, "wbt")]
+l_dem_cluster <- clust_extract_fun(l_dem)
 l_dem_cluster_nums <- str_extract(l_dem, "(?<=cluster_)\\d+(?=_)") |> unique() # All the DEM clusters
 
 l_chm <- list.files("Data/CHMs/HUC_CHMs/", pattern = ".tif", full.names = TRUE) 
-l_chm_extracted_clusters <- sub(".*cluster_(\\d+)_.*", "\\1", l_chm)
-l_chm_cluster <- l_chm[l_chm_extracted_clusters %in% as.character(l_wet_cluster_nums)]
+l_chm_cluster <- clust_extract_fun(l_chm)
 
 l_naip <- list.files("Data/NAIP/HUC_NAIP_Processed/", pattern = ".tif", full.names = TRUE) 
-l_naip_extracted_clusters <- sub(".*cluster_(\\d+)_.*", "\\1", l_naip)
-l_naip_cluster <- l_naip[l_naip_extracted_clusters %in% as.character(l_wet_cluster_nums)]
+l_naip_cluster <- clust_extract_fun(l_naip)
 
 l_terr <- list.files("Data/TerrainProcessed/HUC_TerrainMetrics/", 
-                             # pattern = paste0("cluster_", args[1], "_huc"), 
                              full.names = TRUE)
-l_terr_extracted_clusters <- sub(".*cluster_(\\d+)_.*", "\\1", l_terr)
-l_terr_cluster <- l_terr[l_terr_extracted_clusters %in% as.character(l_wet_cluster_nums) & 
-                             str_detect(l_terr, "local") & 
-                             !str_detect(l_terr, "10m|1000m")]
-
+l_terr_cluster <- clust_extract_fun(l_terr)
+l_hydro <- list.files("Data/TerrainProcessed/HUC_Hydro/", 
+                      pattern = ".tif",
+                      full.names = TRUE)
+l_hydro_cluster <- clust_extract_fun(l_hydro)
 l_sat <- list.files("Data/Satellite/HUC_Processed_NY_Sentinel_Indices/", 
-                            # pattern = paste0("cluster_", args[1]),
                             full.names = TRUE)
-l_sat_extracted_clusters <- sub(".*cluster_(\\d+)_.*", "\\1", l_sat)
-l_sat_cluster <- l_sat[l_sat_extracted_clusters %in% as.character(l_wet_cluster_nums)]
+l_sat_cluster <- clust_extract_fun(l_sat)
 
 
-length(l_naip_cluster) == length(l_dem_cluster) & length(l_dem_cluster) == length(l_sat_cluster)
+length(l_naip_cluster) == length(l_dem_cluster) & length(l_dem_cluster) == length(l_sat_cluster) & length(l_dem_cluster) == length(l_hydro_cluster)
 
 logpath <- "Data/Training_Data/R_Patches_Vector/Vector_Patch_Checklist.csv"
 ########################################################################################
@@ -75,6 +84,7 @@ patchsize = as.numeric(args[2])
 set.seed(420)
 
 rast_chip_patch_create <- function(wetland_file){
+    setGDALconfig("GDAL_PAM_ENABLED", "FALSE")
     ## Setup vars
     if (grepl("NWI", basename(wetland_file))) {
         sourceWetlands <- "NWI"
@@ -98,10 +108,11 @@ rast_chip_patch_create <- function(wetland_file){
         tidyterra::select(-NDVI, -MNDWI, -PSRI, -DPSVI, -RVI, -VH_VV_ratio)
     terr_rast <- l_terr_cluster[grepl(huc_num, l_terr_cluster)& grepl(paste0("cluster_", cluster_num), l_terr_cluster)] |> rast() |> 
         tidyterra::select(-Geomorph_local)
+    hydro_rast <- l_hydro_cluster[grepl(huc_num, l_hydro_cluster) & grepl(paste0("cluster_", cluster_num), l_hydro_cluster)] |> rast()
     naip_rast <- l_naip_cluster[grepl(huc_num, l_naip_cluster)& grepl(paste0("cluster_", cluster_num), l_naip_cluster)] |> rast()
     set.names(naip_rast, c("r", "g", "b", "nir", "n_ndvi", "n_ndwi"))
     
-    stack <- c(dem_rast, terr_rast, chm_rast, sat_rast, naip_rast)
+    stack <- c(dem_rast, terr_rast, hydro_rast, chm_rast, sat_rast, naip_rast)
     stack_fn <- paste0("Data/HUC_Raster_Stacks/HUC_DL_Stacks/", "cluster_", cluster_num, "_huc_", huc_num, "_stack.tif")
     if (!file.exists(stack_fn)) {
         writeRaster(stack, filename = stack_fn, overwrite = TRUE)

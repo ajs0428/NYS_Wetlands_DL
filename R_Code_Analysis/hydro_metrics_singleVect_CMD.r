@@ -6,8 +6,8 @@
 # It also creates the hydrologic metrics for Topographic Wetness Index
 ###################
 
-args = c("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit.gpkg",
-         120,
+args = c("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg",
+         123,
          "Data/TerrainProcessed/HUC_DEMs/",
          "Data/TerrainProcessed/HUC_Hydro/"
          )
@@ -24,16 +24,15 @@ cat("these are the arguments: \n",
 
 library(terra)
 library(sf)
-library(whitebox)
-library(MultiscaleDTM)
-library(foreach)
-library(doParallel)
+library(dplyr)
+library(tidyr)
 library(future)
 library(future.apply)
 library(stringr)
+library(flowdem)
 suppressPackageStartupMessages(library(tidyterra))
 
-terraOptions(tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp")
+terraOptions(tempdir = "/ibstorage/anthony/NYS_Wetlands_DL/Data/tmp")
 print(tempdir())
 
 ###############################################################################################
@@ -42,7 +41,6 @@ print(tempdir())
 # of interest.
 # cluster_target is all the HUCs in a cluster
 cluster_target <- sf::st_read(args[1], quiet = TRUE) |> 
-    sf::st_transform(st_crs("EPSG:6347")) |>
     dplyr::filter(cluster == args[2]) |> 
     terra::vect() 
 
@@ -52,71 +50,72 @@ list_of_huc_dems <- list.files(args[3],
                                full.names = TRUE, 
                                glob2rx(pattern = paste0("^cluster_", args[2], "_", "*\\*.tif$"))
                                )
-# All the hydro-conditioned DEMs
-wbt_list <- list_of_huc_dems[stringr::str_detect(list_of_huc_dems, pattern = "wbt")]
-wbt_hucs <- str_extract(wbt_list, "(?<=huc_)\\d+")
+list_of_huc_hydro_dems <- list.files("Data/TerrainProcessed/HUC_DEM_Hydro/", 
+                               full.names = TRUE, 
+                               glob2rx(pattern = paste0("^cluster_", args[2], "_", "*\\*.tif$"))
+)
+dem_hucs <- str_extract(list_of_huc_dems, "(?<=huc_)\\d+")
+wbt_dem_hucs <- str_extract(list_of_huc_hydro_dems, "(?<=huc_)\\d+")
+
 # All the non-hydro-conditioned DEMs
-non_wbt_list <- list_of_huc_dems[stringr::str_detect(list_of_huc_dems, pattern = "wbt", negate = T)]
-non_wbt_hucs <- str_extract(non_wbt_list, "(?<=huc_)\\d+")
+non_wbt_list <- list_of_huc_dems[!dem_hucs %in% wbt_dem_hucs]
 
 #HUCs that haven't been hydroconditioned
-missing_wbt_hucs <- setdiff(non_wbt_hucs, wbt_hucs)
-print(missing_wbt_hucs)
+writeLines(non_wbt_list) 
 
 hydro_condition_func <- function(dem){
-    print("Hydro-Conditioning")
-    wbt_breach_depressions_least_cost(
-        dem = dem,
-        output = paste0(stringr::str_remove(dem, ".tif"), "_wbt.tif"),
-        dist = 100,
-        fill = TRUE
-    )
+    fn <- paste0("Data/TerrainProcessed/HUC_DEM_Hydro/", tools::file_path_sans_ext(basename(dem)), "_wbt.tif")
+    message("Hydro-Conditioning for ", fn)
+    # wbt_breach_depressions_least_cost(
+    #     dem = dem,
+    #     output = paste0(stringr::str_remove(dem, ".tif"), "_wbt.tif"),
+    #     dist = 100,
+    #     fill = TRUE
+    # )
+    r <- rast(dem)
+    rb <- flowdem::breach(r)
+    writeRaster(rb, fn, overwrite = TRUE)
 }
 
-if(length(missing_wbt_hucs) != 0){
-    print(paste0("Requires Hydro-Conditioning: ", length(missing_wbt_hucs)))
+if(length(non_wbt_list) != 0){
+    print(paste0("Requires Hydro-Conditioning: ", length(non_wbt_list)))
     cond_list <- non_wbt_list[!(non_wbt_hucs %in% wbt_hucs)] # the DEMs that need hydrocondition not in the wbt list
-    print(cond_list)
+    message(cond_list, appendLF = TRUE)
     lapply(cond_list, hydro_condition_func)
 } else {
-    print(paste0("Already Hydro-Conditioned Number of Hydro-DEMs: ", length(wbt_list)))
+    print(paste0("Already Hydro-Conditioned Number of Hydro-DEMs: ", length(list_of_huc_hydro_dems)))
 }
 
 
 
 ###############################################################################################
 
-list_of_huc_hydro_dems <- list.files(args[3], 
-                                     full.names = TRUE, 
-                                     glob2rx(pattern = paste0("^cluster_", args[2], "_", "*\\*wbt.tif$"))
-                                     )
-list_of_huc_hydro_dems
 hydro_func <- function(dem){
                 
-    cluster_huc_name <- stringr::str_remove(basename(dem), ".tif")
-    #dems_target <- dems_list[[i]]
+    cluster_huc_name <- tools::file_path_sans_ext(basename(dem))
     
     fa_twi_name <- paste0(args[4], cluster_huc_name, "_TWI_Facc.tif")
     
     if(!file.exists(fa_twi_name)){
-        fs <- dem |>
-            terra::rast() |>
-            terra::project("EPSG:6347", res = 1) |> 
+        message("New TWI and Flow Acc for ", fa_twi_name)
+        dem_rast <- rast(dem)
+        fs <- dem_rast |>
+            # terra::project("EPSG:6347", res = 1) |>
             terra::terrain(v = c("flowdir", "slope"), unit = "radians")
         fa <- terra::flowAccumulation(fs["flowdir"])
-        
+
         twi <- log(fa/tan(fs["slope"]))
-        
+        twi[is.infinite(twi)] <- NA
         writeRaster(c(fa, twi), fa_twi_name,
                     overwrite = TRUE, names = c("flowacc", "twi"))
     } else {
-        print(paste0("TWI and Flow Accum. already made: ", cluster_huc_name))
+        message("TWI and Flow Accum. already made: ", fa_twi_name)
     }
     
 
 }
 
-# hydro_func("Data/TerrainProcessed/HUC_DEMs/cluster_12_huc_043001081604_wbt.tif")
+# hydro_func(list_of_huc_hydro_dems[1])
 
 # 
 if(future::availableCores() > 16){
@@ -131,7 +130,10 @@ plan(future.callr::callr, workers = corenum)
 # print(corenum)
 # print(options()$future.globals.maxSize)
 # 
-future_lapply(list_of_huc_hydro_dems, hydro_func, future.seed = TRUE)
+future_lapply(list_of_huc_hydro_dems, 
+              hydro_func, 
+              future.packages = c("terra", "sf", "dplyr", "tidyr", "stringr", "flowdem"),
+              future.globals = TRUE)
 
 terra::tmpFiles(remove = TRUE)
 
