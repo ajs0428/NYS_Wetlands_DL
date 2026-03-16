@@ -17,7 +17,7 @@ set.seed(11)
 
 args <- c(
     208,
-    "Data/Training_Data/TompkinsCounty_Reclass/", #Path to wetland polygons
+    "Data/Training_Data/HUC_Laba_Processed/", #Path to wetland polygons
     128 # Patch size radius
 )
 

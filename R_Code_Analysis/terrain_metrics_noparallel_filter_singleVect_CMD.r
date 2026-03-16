@@ -25,9 +25,7 @@ library(stringr)
 
 # Configure terra for efficiency
 terraOptions(
-    tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp",
-    memfrac = 0.6,      # Use up to 60% of RAM before writing to disk
-    threads = 2         # Internal threading for terra operations (per worker)
+    tempdir = "/ibstorage/anthony/NYS_Wetlands_DL/Data/tmp"
 )
 
 setGDALconfig("GDAL_PAM_ENABLED", "FALSE") # does not create aux.xml files
@@ -35,7 +33,7 @@ setGDALconfig("GDAL_PAM_ENABLED", "FALSE") # does not create aux.xml files
 
 process_scale <- function(dem_path, scale_factor, output_file, metric, scale_label) {
     
-    if (file.exists(output_file)) {
+    if (!file.exists(output_file)) {
         message(paste0(metric, " ", scale_label, " already exists, skipping"))
         return(invisible(NULL))
     }
@@ -120,8 +118,8 @@ terrain_function <- function(dem_path, metric) {
     tryCatch({
         # Process each scale - DEM loaded only once
         process_scale(dem_path, 0, output_files[["local"]],   metric, "local")
-        process_scale(dem_path, 100, output_files[["100m"]], metric, "100m")
-        process_scale(dem_path, 500, output_files[["500m"]], metric, "500m")
+        # process_scale(dem_path, 100, output_files[["100m"]], metric, "100m")
+        # process_scale(dem_path, 500, output_files[["500m"]], metric, "500m")
         
     }, error = function(e) {
         message(paste0("ERROR at: ", cluster_huc_name, " - ", e$message))

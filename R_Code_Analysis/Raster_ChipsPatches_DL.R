@@ -32,7 +32,7 @@ setGDALconfig("GDAL_PAM_ENABLED", "FALSE") # does not create aux.xml files but m
 l_wet <- list.files(args[1], pattern = ".gpkg$", full.names = TRUE) 
 l_wet_cluster_nums <- sub(".*cluster_(\\d+).*", "\\1", l_wet)
 l_wet_extracted_clusters <- sub(".*cluster_(\\d+)_.*", "\\1", l_wet)
-l_wet_cluster <- l_wet[l_wet_extracted_clusters %in% as.character(l_wet_cluster_nums)]
+l_wet_cluster <- l_wet[l_wet_extracted_clusters[1] %in% as.character(l_wet_cluster_nums)]
 print(l_wet_cluster)
 clust_extract_fun <- function(l){
     extracted_clusters <- sub(".*cluster_(\\d+)_.*", "\\1", l)
@@ -111,15 +111,21 @@ rast_chip_patch_create <- function(wetland_file){
     hydro_rast <- l_hydro_cluster[grepl(huc_num, l_hydro_cluster) & grepl(paste0("cluster_", cluster_num), l_hydro_cluster)] |> rast()
     naip_rast <- l_naip_cluster[grepl(huc_num, l_naip_cluster)& grepl(paste0("cluster_", cluster_num), l_naip_cluster)] |> rast()
     set.names(naip_rast, c("r", "g", "b", "nir", "n_ndvi", "n_ndwi"))
+    message(ext(dem_rast))
+    message(ext(chm_rast))
+    message(ext(sat_rast))
+    message(ext(terr_rast))
+    message(ext(hydro_rast))
+    message(ext(naip_rast))
     
     stack <- c(dem_rast, terr_rast, hydro_rast, chm_rast, sat_rast, naip_rast)
     stack_fn <- paste0("Data/HUC_Raster_Stacks/HUC_DL_Stacks/", "cluster_", cluster_num, "_huc_", huc_num, "_stack.tif")
     if (!file.exists(stack_fn)) {
         writeRaster(stack, filename = stack_fn, overwrite = TRUE)
     }
-    
-    ### Union all the polygons then rejoin and separate as groups 
-        ### so that each patch of touching polygons is a separate 
+
+    ### Union all the polygons then rejoin and separate as groups
+        ### so that each patch of touching polygons is a separate
             ### object that can be used to crop the rasters
     tw <- st_read(l_wet_cluster[grepl(huc_num, l_wet_cluster) & grepl(paste0("cluster_", cluster_num), l_wet_cluster)], quiet = TRUE)
     tw_valid <- tw[st_is_valid(tw), ]
@@ -129,18 +135,18 @@ rast_chip_patch_create <- function(wetland_file){
         st_as_sf() |>
         mutate(group_id = row_number())
     st_geometry(tw_union) <- "geom"
-    tw_union_area <- tw_union |> 
-        mutate(area = as.numeric(st_area(geom))) |> 
+    tw_union_area <- tw_union |>
+        mutate(area = as.numeric(st_area(geom))) |>
         filter(area >= ((patchsize*2)**2)-0.5) #remove patches that are smaller than the 256*256 dimensions
     tw_grouped_list <- tw_valid |> st_join(tw_union_area, left = FALSE) |>
         filter(st_is_valid(geom)) |>
         group_split(group_id)
-    
+
     #### Each patch should be a separate file that is patchsize*2 x patchsize*2
     for(i in seq_along(tw_grouped_list)){
         skip_to_next <- FALSE
-        tw_vect <- vect(tw_grouped_list[[i]]) 
-        
+        tw_vect <- vect(tw_grouped_list[[i]])
+
         tryCatch({
 
             dem_crop <- crop(dem_rast, tw_vect, touches = TRUE, mask = TRUE)
@@ -187,6 +193,14 @@ rast_chip_patch_create <- function(wetland_file){
 
 }
 
+### Non-parallel
+# system.time({lapply(l_wet_cluster[[6]], rast_chip_patch_create)})
+# 
+# l_dem_cluster[[1]] |> rast() |> plot()
+# l_hydro_cluster[[1]] |> rast() |> plot()
+# l_chm_cluster[[1]] |> rast() |> plot()
+# l_naip_cluster[[1]] |> rast() |> plot()
+# l_sat_cluster[[1]] |> rast() |> plot()
 
 
 ### Parallel
@@ -206,10 +220,7 @@ future_lapply(l_wet_cluster, rast_chip_patch_create,
               future.packages = c("terra", "sf", "dplyr", "tidyr", "stringr", "purrr"),
               future.globals = TRUE)
 
-### Non-parallel
-# system.time({lapply(l_wet_cluster, rast_chip_patch_create)})
-
-
+### Checks 
 # l_patches <- list.files("Data/Training_Data/R_Patches_Vector")
 # 
 # check_df <- data.frame(patch_file_name = l_patches,

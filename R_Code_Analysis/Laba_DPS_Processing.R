@@ -35,11 +35,9 @@ l_chm_huc_nums <- str_extract(l_chm, "(?<=huc_)\\d+(?=_)") |> unique() # each HU
 l_naip <- list.files("Data/NAIP/HUC_NAIP_Processed/", pattern = ".tif", full.names = TRUE) 
 
 ########################################################################################
-# all the HUCs in the entire CHM dataset
-ny_hucs <- sf::st_read("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg", quiet = TRUE,
-                       query = paste0("SELECT * FROM NY_Cluster_Zones_250_NAomit_6347 WHERE cluster IN (", 
-                                      paste(l_chm_huc_nums, collapse = ","), ")")) 
-LabaWetlands <- st_read(args[1], quiet = TRUE)
+
+LabaWetlands <- st_read(args[1], quiet = TRUE) |> 
+    dplyr::select(geom)
 
 # LabaWetlandsValid <- LabaWetlands |> filter(st_is_valid(LabaWetlands) ) |> 
 #     st_transform("EPSG:6347") %>%
@@ -54,7 +52,7 @@ laba_wetland_chm_extract_classify <- function(huc_num){
     tryCatch({
         if(sum(length(l_naip[str_detect(l_naip , huc_num)]), 
                length(l_chm[str_detect(l_chm , huc_num)])) > 1 ){
-            print("Files Exist")
+            print("CHM and NAIP Files Exist")
             r_chm <- rast(l_chm[str_detect(l_chm , huc_num)])
             r_naip <- rast(l_naip[str_detect(l_naip , huc_num)])
             stack <- c(r_chm, r_naip)
@@ -66,17 +64,18 @@ laba_wetland_chm_extract_classify <- function(huc_num){
             if(!file.exists(filename)){
                 message(paste0("Creating New Laba Reclass File: ", filename))
                 laba_huc <- st_intersection(LabaWetlands, huc)  |> vect()
-                wet_chm <- terra::extract(stack, laba_huc, "mean", bind = TRUE) |>
+                wet_chm <- terra::extract(stack, laba_huc, fun = "median", bind = TRUE) |>
                     tidyterra::mutate(
                         MOD_CLASS = dplyr::case_when(
-                            CHM <= 1.0 & ndwi > 0.2 ~ "OWW",
-                            CHM > 1.0 & CHM <= 3.5 & ndwi > 0.2 ~ "EMW",
-                            CHM >= 1.0 & CHM <= 5.0 & ndwi < 0.2~ "SSW",
+                            CHM <= 0.5 & ndwi > 0.2 ~ "OWW",
+                            CHM > 0.5 & CHM <= 3.5 & ndwi > 0.2 ~ "EMW",
+                            CHM >= 0.5 & CHM <= 5.0 & ndwi < 0.2~ "SSW",
                             CHM > 5.0 ~ "FSW",
                             CHM <= 3.5 ~ "EMW",
                             CHM > 3.5 & CHM <= 5.0 ~ "SSW",
                             .default = "REVIEW"
-                        ))
+                        )) |> 
+                    dplyr::select(MOD_CLASS)
 
                 print(wet_chm)
                 writeVector(wet_chm, filename = filename, overwrite = TRUE)

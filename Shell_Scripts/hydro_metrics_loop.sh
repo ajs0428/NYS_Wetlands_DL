@@ -1,23 +1,23 @@
 #!/bin/bash -l
-#SBATCH --nodelist=cbsuxu09,cbsuxu10
+#SBATCH --nodelist=cbsuxu09
 #SBATCH --mail-user=ajs544@cornell.edu
 #SBATCH --mail-type=ALL
-#SBATCH --mem-per-cpu=64G
-#SBATCH --cpus-per-task=3
+#SBATCH --mem-per-cpu=128G
+#SBATCH --cpus-per-task=1
 #SBATCH --job-name=hydro
-#SBATCH --ntasks=2
+#SBATCH --ntasks=1
 #SBATCH --output=Shell_Scripts/SLURM/slurm-hydro-%j.out
 
 
 cd /ibstorage/anthony/NYS_Wetlands_DL/
 
-export TMPDIR=/ibstorage/anthony/tmp
+export TMPDIR=/ibstorage/anthony/NYS_Wetlands_DL/Data/tmp/
 
 module load R/4.4.3
 
 
 # Define the list of numbers
-include=(11 12 22 51 53 56 60 64 67 84 86 90 92 102 105 116 120 123 136 138 152 176 183 189 192 193 198 208 218 225 250)
+include=(22 51 53 56 60 64 67 84 86 90 92 102 105 116 120 123 136 138 152 176 183 189 192 193 198 208 218 225 250 11 12)
 # include=(11 12 67 208 123)
 # Loop through each number in the list
 for number in "${include[@]}"; do

@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-args = c(64,
+args = c(208,
          "Data/TerrainProcessed/HUC_DEMs/",
          "curv",
          "Data/TerrainProcessed/HUC_TerrainMetrics/"
@@ -25,16 +25,14 @@ library(stringr)
 
 # Configure terra for efficiency
 terraOptions(
-    tempdir = "/ibstorage/anthony/NYS_Wetlands_GHG/Data/tmp",
-    memfrac = 0.6,      # Use up to 60% of RAM before writing to disk
-    threads = 2         # Internal threading for terra operations (per worker)
+    tempdir = "/ibstorage/anthony/NYS_Wetlands_DL/Data/tmp"
 )
 
 setGDALconfig("GDAL_PAM_ENABLED", "FALSE") # does not create aux.xml files
 ###############################################################################################
 
 process_scale <- function(dem_path, scale_factor, output_file, metric, scale_label) {
-    
+    setGDALconfig("GDAL_PAM_ENABLED", "FALSE")
     if (file.exists(output_file)) {
         message(paste0(metric, " ", scale_label, " already exists, skipping"))
         return(invisible(NULL))
@@ -104,7 +102,7 @@ process_scale <- function(dem_path, scale_factor, output_file, metric, scale_lab
 ###############################################################################################
 
 terrain_function <- function(dem_path, metric) {
-    
+    setGDALconfig("GDAL_PAM_ENABLED", "FALSE")
     cluster_huc_name <- str_remove(basename(dem_path), "\\.tif$")
     message(paste0("\n=== Processing: ", cluster_huc_name, " ==="))
     
@@ -120,8 +118,8 @@ terrain_function <- function(dem_path, metric) {
     tryCatch({
         # Process each scale - DEM loaded only once
         process_scale(dem_path, 0, output_files[["local"]],   metric, "local")
-        process_scale(dem_path, 100, output_files[["100m"]], metric, "100m")
-        process_scale(dem_path, 500, output_files[["500m"]], metric, "500m")
+        # process_scale(dem_path, 100, output_files[["100m"]], metric, "100m")
+        # process_scale(dem_path, 500, output_files[["500m"]], metric, "500m")
         
     }, error = function(e) {
         message(paste0("ERROR at: ", cluster_huc_name, " - ", e$message))
@@ -147,11 +145,11 @@ message(paste0("Found ", length(list_of_huc_dems), " DEMs to process"))
 ###############################################################################################
 
 if(future::availableCores() > 16){
-    corenum <-  4
+    corenum <-  2
 } else {
     corenum <-  (future::availableCores())
 }
-options(future.globals.maxSize= 48.0 * 1e9)
+options(future.globals.maxSize=64.0 * 1e9)
 # plan(multisession, workers = corenum)
 plan(future.callr::callr)
 
@@ -159,13 +157,14 @@ future_lapply(
     list_of_huc_dems,
     terrain_function,
     metric = args[3],
-    future.seed = TRUE,
+    future.seed = TRUE, 
+    future.globals = TRUE,
     future.scheduling = 1.0  # Dynamic load balancing
 )
 
-# lapply(list_of_huc_dems[1],
-#        terrain_function,
-#        metric = args[3])
+#### Testing
+
+# lapply(list_of_huc_dems, terrain_function, metric = args[3])
 # 
 # r <- rast("Data/TerrainProcessed/HUC_DEMs/cluster_120_huc_020200060609.tif")
 # 
