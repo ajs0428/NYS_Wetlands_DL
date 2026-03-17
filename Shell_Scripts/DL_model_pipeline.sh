@@ -4,9 +4,11 @@ set -e  # Exit on error
 # === CONFIGURATION ===
 ARCHITECTURE="unet"        # "unet", "resunet34", or "dualbranch"
 FUSION="gated"             # "gated" or "concat" (only used with dualbranch)
+USE_ASPP=true             # true to enable ASPP at U-Net bottleneck (unet only)
+ASPP_RATES="6 12 18"      # dilation rates for ASPP; use "3 6 12" for depth=5
 BASE_FILTERS=64
 DEPTH=4
-BATCH_SIZE=6
+BATCH_SIZE=8
 EPOCHS=50
 SEED=420
 WORKERS=6
@@ -22,10 +24,14 @@ ARCH_FLAGS="--architecture $ARCHITECTURE"
 if [ "$ARCHITECTURE" = "dualbranch" ]; then
     ARCH_FLAGS="$ARCH_FLAGS --fusion $FUSION"
 fi
+if [ "$USE_ASPP" = true ]; then
+    ARCH_FLAGS="$ARCH_FLAGS --use-aspp --aspp-rates $ASPP_RATES"
+fi
 
 echo "=== NYS Wetlands DL Pipeline ==="
 echo "Architecture: $ARCHITECTURE"
 [ "$ARCHITECTURE" = "dualbranch" ] && echo "Fusion: $FUSION"
+[ "$USE_ASPP" = true ] && echo "ASPP: enabled (rates: $ASPP_RATES)"
 echo "================================"
 
 # Step 1: Normalization stats and band configuration

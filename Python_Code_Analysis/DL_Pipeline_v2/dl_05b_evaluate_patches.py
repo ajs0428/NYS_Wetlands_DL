@@ -113,6 +113,8 @@ def main(
     seed: int = 42,
     sort_by: str = "overall_accuracy",
     architecture: str = "unet",
+    use_aspp: bool = False,
+    aspp_rates: tuple = (6, 12, 18),
 ):
     """
     Evaluate every test patch individually and save results to CSV.
@@ -126,6 +128,9 @@ def main(
         depth: Model depth
         seed: Random seed (must match training)
         sort_by: Column to sort results by (ascending = worst first)
+        architecture: Model architecture
+        use_aspp: Whether model uses ASPP at bottleneck
+        aspp_rates: Dilation rates for ASPP branches
     """
     device = get_device()
     print(f"Using device: {device}")
@@ -140,7 +145,7 @@ def main(
 
     # Load model
     model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
-                       architecture=architecture)
+                       architecture=architecture, use_aspp=use_aspp, aspp_rates=aspp_rates)
 
     # Create test split (no DataLoader — we need per-patch access)
     print("\nCreating test split...")
@@ -208,8 +213,12 @@ if __name__ == "__main__":
         help="Column to sort by ascending (worst first). Options: overall_accuracy, mean_iou, macro_f1"
     )
     parser.add_argument("--architecture", type=str, default="unet",
-                        choices=["unet", "resunet34"],
+                        choices=["unet", "resunet34", "dualbranch"],
                         help="Model architecture (default: unet)")
+    parser.add_argument("--use-aspp", action="store_true",
+                        help="Model uses ASPP at U-Net bottleneck")
+    parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
+                        help="Dilation rates for ASPP branches (default: 6 12 18)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -238,4 +247,6 @@ if __name__ == "__main__":
         seed=args.seed,
         sort_by=args.sort_by,
         architecture=args.architecture,
+        use_aspp=args.use_aspp,
+        aspp_rates=tuple(args.aspp_rates),
     )

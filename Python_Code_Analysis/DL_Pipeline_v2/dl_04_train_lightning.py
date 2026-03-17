@@ -254,6 +254,8 @@ def train(
     label_smoothing: float = 0.0,
     gradient_clip_val: float = 1.0,
     dropout: float = 0.2,
+    use_aspp: bool = False,
+    aspp_rates: tuple = (6, 12, 18),
 ):
     """
     Full training pipeline using PyTorch Lightning.
@@ -280,6 +282,8 @@ def train(
         label_smoothing: Label smoothing factor
         gradient_clip_val: Max gradient norm for clipping (0 = disabled)
         dropout: Spatial dropout rate after bottleneck (0 = disabled)
+        use_aspp: Whether to add ASPP module at U-Net bottleneck
+        aspp_rates: Dilation rates for ASPP branches
     """
     if seed is None:
         seed = int(torch.randint(0, 2**31, (1,)).item())
@@ -298,7 +302,7 @@ def train(
     print(f"{'='*60}")
     print("Wetland Classification Training (Lightning)")
     print(f"{'='*60}")
-    print(f"Architecture: {architecture}")
+    print(f"Architecture: {architecture}" + (f" + ASPP(rates={aspp_rates})" if use_aspp else ""))
     print(f"Classification mode: {mode}")
     print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
@@ -344,6 +348,8 @@ def train(
             base_filters=base_filters,
             depth=depth,
             dropout=dropout,
+            use_aspp=use_aspp,
+            aspp_rates=aspp_rates,
         )
 
     # Lightning module
@@ -495,6 +501,10 @@ if __name__ == "__main__":
                         help="Max gradient norm for clipping (0=disabled, default: 1.0)")
     parser.add_argument("--dropout", type=float, default=0.2,
                         help="Spatial dropout after bottleneck (0=disabled, default: 0.2)")
+    parser.add_argument("--use-aspp", action="store_true",
+                        help="Add ASPP module at U-Net bottleneck for expanded receptive field")
+    parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
+                        help="Dilation rates for ASPP branches (default: 6 12 18)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -526,4 +536,6 @@ if __name__ == "__main__":
         label_smoothing=args.label_smoothing,
         gradient_clip_val=args.gradient_clip_val,
         dropout=args.dropout,
+        use_aspp=args.use_aspp,
+        aspp_rates=tuple(args.aspp_rates),
     )

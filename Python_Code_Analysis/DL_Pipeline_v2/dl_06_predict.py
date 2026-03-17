@@ -184,6 +184,8 @@ def main(
     save_probabilities: bool = False,
     architecture: str = "unet",
     fusion: str = "gated",
+    use_aspp: bool = False,
+    aspp_rates: tuple = (6, 12, 18),
 ):
     """
     Main prediction function.
@@ -200,6 +202,8 @@ def main(
         save_probabilities: Save probability maps
         architecture: Model architecture
         fusion: Dual-branch fusion strategy (only used with dualbranch)
+        use_aspp: Whether model uses ASPP at bottleneck
+        aspp_rates: Dilation rates for ASPP branches
     """
     device = get_device()
     print(f"Using device: {device}")
@@ -219,7 +223,8 @@ def main(
     print(f"\nLoading model from {model_path}")
     model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
                        architecture=architecture, optical_indices=optical_idx,
-                       terrain_indices=terrain_idx, fusion=fusion)
+                       terrain_indices=terrain_idx, fusion=fusion,
+                       use_aspp=use_aspp, aspp_rates=aspp_rates)
 
     # Run prediction
     print(f"\nProcessing {input_path}")
@@ -254,6 +259,10 @@ if __name__ == "__main__":
     parser.add_argument("--fusion", type=str, default="gated",
                         choices=["gated", "concat"],
                         help="Dual-branch fusion strategy (default: gated)")
+    parser.add_argument("--use-aspp", action="store_true",
+                        help="Model uses ASPP at U-Net bottleneck")
+    parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
+                        help="Dilation rates for ASPP branches (default: 6 12 18)")
 
     args = parser.parse_args()
 
@@ -274,4 +283,6 @@ if __name__ == "__main__":
         save_probabilities=args.probs,
         architecture=args.architecture,
         fusion=args.fusion,
+        use_aspp=args.use_aspp,
+        aspp_rates=tuple(args.aspp_rates),
     )

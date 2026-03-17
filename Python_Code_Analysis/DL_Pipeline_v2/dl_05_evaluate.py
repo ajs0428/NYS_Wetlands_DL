@@ -199,6 +199,8 @@ def main(
     seed: int = 42,
     architecture: str = "unet",
     fusion: str = "gated",
+    use_aspp: bool = False,
+    aspp_rates: tuple = (6, 12, 18),
 ):
     """
     Main evaluation function.
@@ -214,6 +216,8 @@ def main(
         seed: Random seed (must match training)
         architecture: Model architecture
         fusion: Dual-branch fusion strategy (only used with dualbranch)
+        use_aspp: Whether model uses ASPP at bottleneck
+        aspp_rates: Dilation rates for ASPP branches
     """
     device = get_device()
     print(f"Using device: {device}")
@@ -235,7 +239,8 @@ def main(
     # Load model
     model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
                        architecture=architecture, optical_indices=optical_idx,
-                       terrain_indices=terrain_idx, fusion=fusion)
+                       terrain_indices=terrain_idx, fusion=fusion,
+                       use_aspp=use_aspp, aspp_rates=aspp_rates)
 
     # Create test loader
     print("\nLoading test data...")
@@ -279,6 +284,10 @@ if __name__ == "__main__":
     parser.add_argument("--fusion", type=str, default="gated",
                         choices=["gated", "concat"],
                         help="Dual-branch fusion strategy (default: gated)")
+    parser.add_argument("--use-aspp", action="store_true",
+                        help="Model uses ASPP at U-Net bottleneck")
+    parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
+                        help="Dilation rates for ASPP branches (default: 6 12 18)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -299,4 +308,6 @@ if __name__ == "__main__":
         seed=args.seed,
         architecture=args.architecture,
         fusion=args.fusion,
+        use_aspp=args.use_aspp,
+        aspp_rates=tuple(args.aspp_rates),
     )

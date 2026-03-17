@@ -16,7 +16,7 @@ from dl_03c_dualbranch import DualBranchUNet
 
 # Registry: architecture name -> (class, constructor kwargs beyond in_channels/num_classes/base_filters)
 _ARCHITECTURES = {
-    "unet": {"cls": UNet, "extra_kwargs": ["depth"]},
+    "unet": {"cls": UNet, "extra_kwargs": ["depth", "use_aspp", "aspp_rates"]},
     "resunet34": {"cls": ResUNet34, "extra_kwargs": []},
 }
 
@@ -78,6 +78,8 @@ def load_model(
     optical_indices: Optional[List[int]] = None,
     terrain_indices: Optional[List[int]] = None,
     fusion: str = "gated",
+    use_aspp: bool = False,
+    aspp_rates: tuple = (6, 12, 18),
 ) -> nn.Module:
     """
     Construct a model and load weights from checkpoint.
@@ -93,6 +95,8 @@ def load_model(
         optical_indices: Channel indices for optical branch (dualbranch only)
         terrain_indices: Channel indices for terrain branch (dualbranch only)
         fusion: Fusion strategy for dualbranch ('gated' or 'concat')
+        use_aspp: Whether to add ASPP module at U-Net bottleneck
+        aspp_rates: Dilation rates for ASPP branches
     """
     if architecture == "dualbranch":
         if optical_indices is None or terrain_indices is None:
@@ -120,6 +124,9 @@ def load_model(
                   base_filters=base_filters)
     if "depth" in entry["extra_kwargs"]:
         kwargs["depth"] = depth
+    if "use_aspp" in entry["extra_kwargs"]:
+        kwargs["use_aspp"] = use_aspp
+        kwargs["aspp_rates"] = aspp_rates
 
     net = entry["cls"](**kwargs)
     return load_model_from_checkpoint(model_path, net, device)

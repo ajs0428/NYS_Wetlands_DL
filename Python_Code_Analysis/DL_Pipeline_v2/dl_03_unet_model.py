@@ -108,6 +108,84 @@ class DecoderBlock(nn.Module):
         return self.se(x)
 
 
+class ASPPConv(nn.Module):
+    """Single branch of ASPP: dilated convolution + BN + ReLU."""
+
+    def __init__(self, in_channels: int, out_channels: int, dilation: int):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3,
+                      padding=dilation, dilation=dilation, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.conv(x)
+
+
+class ASPPPooling(nn.Module):
+    """Global average pooling branch of ASPP."""
+
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.pool = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        size = x.shape[2:]
+        out = self.pool(x)
+        return nn.functional.interpolate(out, size=size, mode="bilinear", align_corners=False)
+
+
+class ASPP(nn.Module):
+    """
+    Atrous Spatial Pyramid Pooling module (DeepLab v3+ style).
+
+    Applies parallel dilated convolutions at multiple rates plus a global
+    average pooling branch, then projects back to the input channel count.
+
+    Args:
+        in_channels: Number of input (and output) channels.
+        rates: Dilation rates for the three dilated conv branches.
+        dropout: Dropout probability after projection.
+    """
+
+    def __init__(self, in_channels: int, rates: tuple = (6, 12, 18), dropout: float = 0.1):
+        super().__init__()
+        branch_channels = in_channels // 4
+
+        self.branches = nn.ModuleList([
+            # 1x1 convolution (rate=1)
+            nn.Sequential(
+                nn.Conv2d(in_channels, branch_channels, kernel_size=1, bias=False),
+                nn.BatchNorm2d(branch_channels),
+                nn.ReLU(inplace=True),
+            ),
+        ])
+        # Dilated convolution branches
+        for rate in rates:
+            self.branches.append(ASPPConv(in_channels, branch_channels, rate))
+        # Global average pooling branch
+        self.branches.append(ASPPPooling(in_channels, branch_channels))
+
+        # Project concatenated branches back to in_channels
+        total = branch_channels * len(self.branches)
+        self.project = nn.Sequential(
+            nn.Conv2d(total, in_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(in_channels),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p=dropout),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.project(torch.cat([b(x) for b in self.branches], dim=1))
+
+
 class UNet(nn.Module):
     """
     U-Net architecture for semantic segmentation.
@@ -132,6 +210,8 @@ class UNet(nn.Module):
         base_filters: int = 32,
         depth: int = 4,
         dropout: float = 0.0,
+        use_aspp: bool = False,
+        aspp_rates: tuple = (6, 12, 18),
     ):
         super().__init__()
 
@@ -139,6 +219,7 @@ class UNet(nn.Module):
         self.num_classes = num_classes
         self.base_filters = base_filters
         self.depth = depth
+        self.use_aspp = use_aspp
 
         # Calculate filter sizes for each level
         filters = [base_filters * (2 ** i) for i in range(depth + 1)]
@@ -153,6 +234,10 @@ class UNet(nn.Module):
         # Bottleneck
         self.bottleneck = ConvBlock(filters[depth - 1], filters[depth])
         self.bottleneck_dropout = nn.Dropout2d(p=dropout) if dropout > 0 else nn.Identity()
+
+        # Optional ASPP after bottleneck
+        if use_aspp:
+            self.aspp = ASPP(filters[depth], rates=aspp_rates, dropout=dropout)
 
         # Build decoder
         self.decoders = nn.ModuleList()
@@ -181,6 +266,8 @@ class UNet(nn.Module):
         # Bottleneck
         x = self.bottleneck(x)
         x = self.bottleneck_dropout(x)
+        if self.use_aspp:
+            x = self.aspp(x)
 
         # Decoder path - use skip connections in reverse order
         for decoder, skip in zip(self.decoders, reversed(skips)):
@@ -213,7 +300,9 @@ def create_model(
     num_classes: int = 4,
     base_filters: int = 32,
     depth: int = 4,
-    device: torch.device = None
+    device: torch.device = None,
+    use_aspp: bool = False,
+    aspp_rates: tuple = (6, 12, 18),
 ) -> UNet:
     """
     Create and initialize a U-Net model.
@@ -224,6 +313,8 @@ def create_model(
         base_filters: Base filter count (32 for local, 64 for HPC)
         depth: Network depth (4 for local, 5 for HPC)
         device: Device to place model on (auto-detect if None)
+        use_aspp: Whether to add ASPP module at the bottleneck
+        aspp_rates: Dilation rates for ASPP branches
 
     Returns:
         Initialized UNet model on specified device
@@ -235,7 +326,9 @@ def create_model(
         in_channels=in_channels,
         num_classes=num_classes,
         base_filters=base_filters,
-        depth=depth
+        depth=depth,
+        use_aspp=use_aspp,
+        aspp_rates=aspp_rates,
     )
 
     model = model.to(device)
@@ -245,6 +338,7 @@ def create_model(
     print(f"  Output classes: {num_classes}")
     print(f"  Base filters: {base_filters}")
     print(f"  Depth: {depth}")
+    print(f"  ASPP: {use_aspp}" + (f" (rates={aspp_rates})" if use_aspp else ""))
     print(f"  Parameters: {model.count_parameters():,}")
     print(f"  Device: {device}")
 
@@ -275,3 +369,18 @@ if __name__ == "__main__":
         y = model_hpc(x)
     print(f"  Input shape:  {x.shape}")
     print(f"  Output shape: {y.shape}")
+
+    print("\n=== U-Net + ASPP (base_filters=32, depth=4) ===")
+    model_aspp = create_model(
+        in_channels=in_channels, base_filters=32, depth=4,
+        device=device, use_aspp=True, aspp_rates=(6, 12, 18),
+    )
+
+    with torch.no_grad():
+        y = model_aspp(x)
+    print(f"  Input shape:  {x.shape}")
+    print(f"  Output shape: {y.shape}")
+    aspp_params = model_aspp.count_parameters()
+    base_params = model_local.count_parameters()
+    print(f"  ASPP overhead: {aspp_params - base_params:,} params "
+          f"(+{(aspp_params - base_params) / base_params * 100:.1f}%)")

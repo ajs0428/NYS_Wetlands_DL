@@ -432,6 +432,7 @@ Input (18 ch) → Residual Encoder (progressive downsampling) → Bottleneck →
 - **Encoder blocks**: Double Conv-BN-ReLU with residual (shortcut) connections. A 1x1 projection handles channel mismatches. Improves gradient flow through the encoder.
 - **Decoder blocks**: Upsample + skip concatenation + Conv-BN-ReLU + Squeeze-and-Excitation. SE learns to reweight channels after fusing encoder and decoder features.
 - **Bottleneck**: Standard double Conv-BN-ReLU (no residual, no SE).
+- **Optional ASPP**: Atrous Spatial Pyramid Pooling module after the bottleneck (`--use-aspp`). Uses parallel dilated convolutions at multiple rates (default 6/12/18) plus global average pooling to expand the receptive field to ~250m+ at 1m resolution. Off by default for backward compatibility. Use `--aspp-rates 3 6 12` for depth=5 (smaller bottleneck spatial dims).
 
 ### Configuration
 
@@ -490,7 +491,10 @@ python dl_04_train_lightning.py \
 | `--workers` | 4 | DataLoader worker processes (use 0 on macOS if issues arise) |
 | `--seed` | 42 | Random seed for reproducibility |
 | `--early-stopping` | 15 | Early stopping patience (epochs without improvement) |
-| `--architecture` | `unet` | Model architecture (`unet` or `resunet34`) |
+| `--architecture` | `unet` | Model architecture (`unet`, `resunet34`, or `dualbranch`) |
+| `--fusion` | `gated` | Dual-branch fusion strategy (`gated` or `concat`) |
+| `--use-aspp` | False | Add ASPP module at U-Net bottleneck (UNet only) |
+| `--aspp-rates` | `6 12 18` | Dilation rates for ASPP branches (space-separated) |
 | `--ce-weight` | 0.5 | Weight for Focal Loss component |
 | `--dice-weight` | 1.0 | Weight for Dice Loss component |
 | `--focal-gamma` | 2.0 | Focal Loss gamma (0 = plain CE, 2 = standard focal) |
@@ -572,6 +576,10 @@ python dl_05_evaluate.py \
 | `--base-filters` | 32 | Must match the trained model |
 | `--depth` | 4 | Must match the trained model |
 | `--seed` | 42 | Must match training seed (same test split) |
+| `--architecture` | `unet` | Must match the trained model |
+| `--fusion` | `gated` | Must match the trained model (dualbranch only) |
+| `--use-aspp` | False | Must match the trained model (UNet only) |
+| `--aspp-rates` | `6 12 18` | Must match the trained model |
 
 ### Metrics Reported
 
@@ -613,6 +621,10 @@ python dl_06_predict.py \
 | `--base-filters` | 32 | Must match the trained model |
 | `--depth` | 4 | Must match the trained model |
 | `--probs` | False | Also save per-class probability maps |
+| `--architecture` | `unet` | Must match the trained model |
+| `--fusion` | `gated` | Must match the trained model (dualbranch only) |
+| `--use-aspp` | False | Must match the trained model (UNet only) |
+| `--aspp-rates` | `6 12 18` | Must match the trained model |
 
 ### Output Files
 
@@ -649,7 +661,12 @@ BASE_FILTERS = 32      # 32 for local (M1), 64 for HPC
 DEPTH = 4              # 4 for local, 5 for HPC
 NUM_WORKERS = 4        # Set to 0 if issues on macOS
 SEED = 42
-ARCHITECTURE = "unet"  # "unet" or "resunet34"
+ARCHITECTURE = "unet"  # "unet", "resunet34", or "dualbranch"
+FUSION = "gated"       # "gated" or "concat" (dualbranch only)
+
+# ASPP at U-Net bottleneck (expands receptive field to ~250m+)
+USE_ASPP = False            # Set True to enable (UNet only)
+ASPP_RATES = (6, 12, 18)   # Dilation rates; use (3, 6, 12) for depth=5
 
 # Loss parameters
 CE_WEIGHT = 0.5        # Weight for Focal Loss component

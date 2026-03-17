@@ -184,6 +184,8 @@ def train(
     num_workers: int = 4,
     seed: int = 42,
     device: Optional[torch.device] = None,
+    use_aspp: bool = False,
+    aspp_rates: tuple = (6, 12, 18),
 ) -> Dict:
     """
     Full training pipeline.
@@ -200,6 +202,8 @@ def train(
         num_workers: DataLoader workers
         seed: Random seed
         device: Training device (auto-detect if None)
+        use_aspp: Whether to add ASPP module at U-Net bottleneck
+        aspp_rates: Dilation rates for ASPP branches
 
     Returns:
         Training history dictionary
@@ -252,7 +256,9 @@ def train(
         num_classes=num_classes,
         base_filters=base_filters,
         depth=depth,
-        device=device
+        device=device,
+        use_aspp=use_aspp,
+        aspp_rates=aspp_rates,
     )
 
     # Hybrid CE + Dice loss (CE carries class weights; Dice is inherently balanced)
@@ -406,6 +412,10 @@ if __name__ == "__main__":
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--use-aspp", action="store_true",
+                        help="Add ASPP module at U-Net bottleneck")
+    parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
+                        help="Dilation rates for ASPP branches (default: 6 12 18)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -425,4 +435,6 @@ if __name__ == "__main__":
         depth=args.depth,
         num_workers=args.workers,
         seed=args.seed,
+        use_aspp=args.use_aspp,
+        aspp_rates=tuple(args.aspp_rates),
     )
