@@ -39,4 +39,5 @@ Models/*
 .*Rproj.user
 .Rproj.user
 !.gitkeep
+!Data/Training_Data/
 !Data/
