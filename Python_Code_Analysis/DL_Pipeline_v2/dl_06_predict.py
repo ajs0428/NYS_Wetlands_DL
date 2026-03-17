@@ -131,7 +131,8 @@ def predict_raster(
     profile.update(
         count=1,
         dtype='uint8',
-        nodata=255
+        nodata=255,
+        BIGTIFF='YES'
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

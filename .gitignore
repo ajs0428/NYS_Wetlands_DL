@@ -35,7 +35,7 @@ Models/*
 !.dockerignore
 !Dockerfile
 !pyproject.toml
-!CLAUDE.md
+CLAUDE.md
 !*.Rproj
 !*.RHistory
 !README.md

@@ -43,11 +43,11 @@ echo "Architecture: $ARCHITECTURE"
 [ "$KFOLD" -ge 2 ] 2>/dev/null && echo "K-Fold CV: $KFOLD folds"
 echo "================================"
 
-# # Step 1: Normalization stats and band configuration
-# python $SCRIPT_DIR/dl_01_compute_statistics.py \
-#         --patches-dir $PATCHES_DIR \
-#         --output $STATS_PATH \
-#         --config $BAND_CONFIG
+# Step 1: Normalization stats and band configuration
+python $SCRIPT_DIR/dl_01_compute_statistics.py \
+        --patches-dir $PATCHES_DIR \
+        --output $STATS_PATH \
+        --config $BAND_CONFIG
 
 # Build k-fold flag
 KFOLD_FLAG=""
@@ -55,20 +55,20 @@ if [ "$KFOLD" -ge 2 ] 2>/dev/null; then
     KFOLD_FLAG="--kfold $KFOLD"
 fi
 
-# # Step 2: Train the model
-# python $SCRIPT_DIR/dl_04_train_lightning.py \
-#         --epochs $EPOCHS \
-#         --batch-size $BATCH_SIZE \
-#         --base-filters $BASE_FILTERS \
-#         --depth $DEPTH \
-#         --workers $WORKERS \
-#         --seed $SEED \
-#         --early-stopping 15 \
-#         --lr-patience 10 \
-#         --dice-weight 1.5 \
-#         --focal-gamma 2.0 \
-#         $ARCH_FLAGS \
-#         $KFOLD_FLAG
+# Step 2: Train the model
+python $SCRIPT_DIR/dl_04_train_lightning.py \
+        --epochs $EPOCHS \
+        --batch-size $BATCH_SIZE \
+        --base-filters $BASE_FILTERS \
+        --depth $DEPTH \
+        --workers $WORKERS \
+        --seed $SEED \
+        --early-stopping 15 \
+        --lr-patience 10 \
+        --dice-weight 1.5 \
+        --focal-gamma 2.0 \
+        $ARCH_FLAGS \
+        $KFOLD_FLAG
 
 # Skip evaluate/predict steps when running k-fold CV
 # (k-fold validates internally across all folds)
@@ -101,8 +101,10 @@ python $SCRIPT_DIR/dl_06_predict.py \
         Data/HUC_DL_Stacks/cluster_11_huc_042900030103_stack.tif \
         Data/HUC_DL_Predictions/DLpred_cluster_11_huc_042900030103.tif \
         --model "$BEST_CKPT" \
+        --stats $STATS_PATH \
         --patch-size 256 \
         --overlap 128 \
         --base-filters $BASE_FILTERS \
+        --depth $DEPTH \
         --probs \
         $ARCH_FLAGS
