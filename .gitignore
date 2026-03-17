@@ -42,3 +42,6 @@ Models/*
 !prediction_041402011002_viz.png
 .*Rproj.user
 .Rproj.user
+!.gitkeep
+!Data/Training_Data/
+!Data/
