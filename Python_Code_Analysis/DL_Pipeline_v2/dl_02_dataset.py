@@ -399,6 +399,90 @@ def create_dataloaders(
     return train_loader, val_loader, test_loader, class_weights
 
 
+def create_kfold_splits(
+    patches_dir: Path,
+    n_folds: int = 5,
+    seed: int = 42,
+) -> List[Tuple[List[Path], List[Path]]]:
+    """
+    Create k-fold cross-validation splits.
+
+    Args:
+        patches_dir: Directory containing GeoTIFF patches
+        n_folds: Number of folds
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of (train_files, val_files) tuples, one per fold.
+    """
+    from sklearn.model_selection import KFold
+
+    patch_files = sorted(patches_dir.glob("*.tif"))
+    if not patch_files:
+        raise ValueError(f"No .tif files found in {patches_dir}")
+
+    patch_array = np.array(patch_files)
+    kf = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
+
+    folds = []
+    for fold_idx, (train_idx, val_idx) in enumerate(kf.split(patch_array)):
+        train_files = patch_array[train_idx].tolist()
+        val_files = patch_array[val_idx].tolist()
+        print(f"  Fold {fold_idx + 1}/{n_folds}: "
+              f"Train={len(train_files)}, Val={len(val_files)}")
+        folds.append((train_files, val_files))
+
+    return folds
+
+
+def create_fold_dataloaders(
+    train_files: List[Path],
+    val_files: List[Path],
+    stats_path: Path,
+    batch_size: int = 16,
+    num_workers: int = 4,
+) -> Tuple[DataLoader, DataLoader, torch.Tensor]:
+    """
+    Create train/val DataLoaders from explicit file lists (for k-fold CV).
+
+    Args:
+        train_files: List of training patch paths
+        val_files: List of validation patch paths
+        stats_path: Path to normalization_stats.json
+        batch_size: Batch size for DataLoaders
+        num_workers: Number of worker processes
+
+    Returns:
+        train_loader, val_loader, class_weights
+    """
+    train_dataset = WetlandPatchDataset(train_files, stats_path, augment=True)
+    val_dataset = WetlandPatchDataset(val_files, stats_path, augment=False)
+
+    persist = num_workers > 0
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=persist,
+        drop_last=True,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=persist,
+    )
+
+    class_weights = train_dataset.get_class_weights()
+    return train_loader, val_loader, class_weights
+
+
 if __name__ == "__main__":
     # Test the dataset
     project_root = Path(__file__).parent.parent.parent

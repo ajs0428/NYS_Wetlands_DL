@@ -10,6 +10,7 @@ with signature (B, C, H, W) -> (B, num_classes, H, W).
 """
 
 import json
+import numpy as np
 import torch
 import torch.nn as nn
 import lightning as L
@@ -25,7 +26,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Optional
 
-from dl_02_dataset import create_dataloaders
+from dl_02_dataset import create_dataloaders, create_kfold_splits, create_fold_dataloaders
 from dl_03_unet_model import UNet
 from dl_03b_resunet34 import ResUNet34
 from dl_03c_dualbranch import DualBranchUNet
@@ -80,6 +81,44 @@ class WetlandDataModule(L.LightningDataModule):
 
     def test_dataloader(self):
         return self._test_loader
+
+
+class WetlandFoldDataModule(L.LightningDataModule):
+    """DataModule for a single fold of k-fold cross-validation."""
+
+    def __init__(
+        self,
+        train_files,
+        val_files,
+        stats_path: Path,
+        batch_size: int = 16,
+        num_workers: int = 4,
+    ):
+        super().__init__()
+        self.train_files = train_files
+        self.val_files = val_files
+        self.stats_path = stats_path
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self._train_loader = None
+        self._val_loader = None
+        self.class_weights = None
+
+    def setup(self, stage=None):
+        if self._train_loader is not None:
+            return
+        self._train_loader, self._val_loader, self.class_weights = (
+            create_fold_dataloaders(
+                self.train_files, self.val_files, self.stats_path,
+                self.batch_size, self.num_workers,
+            )
+        )
+
+    def train_dataloader(self):
+        return self._train_loader
+
+    def val_dataloader(self):
+        return self._val_loader
 
 
 # ── Lightning Module ─────────────────────────────────────────────────
@@ -321,36 +360,16 @@ def train(
     print(f"Class weights: {class_weights.tolist()}")
 
     # Network — select architecture
+    net = _build_network(
+        architecture, in_channels, num_classes,
+        base_filters, depth, dropout,
+        use_aspp, aspp_rates, fusion, stats,
+    )
     if architecture == "dualbranch":
         config = load_band_config()
         optical_idx, terrain_idx = get_branch_indices(stats, config)
         print(f"Dual-branch: {len(optical_idx)} optical channels, "
               f"{len(terrain_idx)} terrain channels, fusion={fusion}")
-        net = DualBranchUNet(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            optical_indices=optical_idx,
-            terrain_indices=terrain_idx,
-            fusion=fusion,
-            dropout=dropout,
-        )
-    elif architecture == "resunet34":
-        net = ResUNet34(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            base_filters=base_filters,
-            dropout=dropout,
-        )
-    else:
-        net = UNet(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            base_filters=base_filters,
-            depth=depth,
-            dropout=dropout,
-            use_aspp=use_aspp,
-            aspp_rates=aspp_rates,
-        )
 
     # Lightning module
     module = WetlandSegmentationModule(
@@ -453,6 +472,280 @@ def train(
     return history
 
 
+# ── Network factory ─────────────────────────────────────────────────
+
+def _build_network(
+    architecture: str,
+    in_channels: int,
+    num_classes: int,
+    base_filters: int,
+    depth: int,
+    dropout: float,
+    use_aspp: bool,
+    aspp_rates: tuple,
+    fusion: str,
+    stats: dict,
+):
+    """Create a fresh network instance for the given architecture."""
+    if architecture == "dualbranch":
+        config = load_band_config()
+        optical_idx, terrain_idx = get_branch_indices(stats, config)
+        return DualBranchUNet(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            optical_indices=optical_idx,
+            terrain_indices=terrain_idx,
+            fusion=fusion,
+            dropout=dropout,
+        )
+    elif architecture == "resunet34":
+        return ResUNet34(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            base_filters=base_filters,
+            dropout=dropout,
+        )
+    else:
+        return UNet(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            base_filters=base_filters,
+            depth=depth,
+            dropout=dropout,
+            use_aspp=use_aspp,
+            aspp_rates=aspp_rates,
+        )
+
+
+# ── K-Fold Cross-Validation ────────────────────────────────────────
+
+def train_kfold(
+    patches_dir: Path,
+    stats_path: Path,
+    output_dir: Path,
+    n_folds: int = 5,
+    epochs: int = 50,
+    batch_size: int = 16,
+    learning_rate: float = 1e-4,
+    weight_decay: float = 1e-4,
+    base_filters: int = 32,
+    depth: int = 4,
+    num_workers: int = 4,
+    seed: Optional[int] = None,
+    early_stopping_patience: int = 15,
+    lr_patience: int = 5,
+    architecture: str = "unet",
+    fusion: str = "gated",
+    precision: str = "32-true",
+    ce_weight: float = 1.0,
+    dice_weight: float = 1.0,
+    focal_gamma: float = 2.0,
+    label_smoothing: float = 0.0,
+    gradient_clip_val: float = 1.0,
+    dropout: float = 0.2,
+    use_aspp: bool = False,
+    aspp_rates: tuple = (6, 12, 18),
+):
+    """
+    K-fold cross-validation training.
+
+    Trains one model per fold, collects validation metrics from each,
+    and reports mean ± std across folds.
+
+    Args:
+        n_folds: Number of cross-validation folds (default: 5)
+        (remaining args identical to train())
+    """
+    if seed is None:
+        seed = int(torch.randint(0, 2**31, (1,)).item())
+        print(f"No seed specified — using random seed: {seed}")
+
+    # Read configuration from stats
+    with open(stats_path) as f:
+        stats = json.load(f)
+    in_channels = stats["in_channels"]
+    num_classes = len(stats["class_names"])
+    class_names = stats["class_names"]
+    ignore_index = stats.get("ignore_index", 255)
+    mode = stats.get("classification_mode", "multiclass")
+
+    print(f"\n{'='*60}")
+    print(f"K-FOLD CROSS-VALIDATION ({n_folds} folds)")
+    print(f"{'='*60}")
+    print(f"Architecture: {architecture}" + (f" + ASPP(rates={aspp_rates})" if use_aspp else ""))
+    print(f"Classification mode: {mode}")
+    print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
+    print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
+    print(f"Precision: {precision}, Seed: {seed}")
+    print(f"{'='*60}\n")
+
+    # Create fold splits
+    folds = create_kfold_splits(patches_dir, n_folds=n_folds, seed=seed)
+
+    # Output directory for this CV run
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    kfold_dir = output_dir / f"kfold_{n_folds}fold_{architecture}_{timestamp}"
+    kfold_dir.mkdir(parents=True, exist_ok=True)
+
+    fold_results = []
+
+    for fold_idx, (train_files, val_files) in enumerate(folds):
+        fold_num = fold_idx + 1
+        print(f"\n{'='*60}")
+        print(f"FOLD {fold_num}/{n_folds}  "
+              f"(train={len(train_files)}, val={len(val_files)})")
+        print(f"{'='*60}")
+
+        # Seed each fold deterministically
+        L.seed_everything(seed + fold_idx, workers=True)
+
+        # Data module for this fold
+        dm = WetlandFoldDataModule(
+            train_files, val_files, stats_path,
+            batch_size=batch_size,
+            num_workers=num_workers,
+        )
+        dm.setup()
+
+        # Fresh network
+        net = _build_network(
+            architecture, in_channels, num_classes,
+            base_filters, depth, dropout,
+            use_aspp, aspp_rates, fusion, stats,
+        )
+
+        # Lightning module
+        module = WetlandSegmentationModule(
+            net=net,
+            num_classes=num_classes,
+            class_weights=dm.class_weights,
+            class_names=class_names,
+            ignore_index=ignore_index,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            lr_patience=lr_patience,
+            ce_weight=ce_weight,
+            dice_weight=dice_weight,
+            focal_gamma=focal_gamma,
+            label_smoothing=label_smoothing,
+        )
+
+        fold_name = f"fold{fold_num}"
+        callbacks = [
+            ModelCheckpoint(
+                dirpath=kfold_dir,
+                filename=f"best_{mode}_{architecture}_{fold_name}",
+                monitor="val/loss",
+                save_top_k=1,
+                mode="min",
+            ),
+            EarlyStopping(
+                monitor="val/loss",
+                patience=early_stopping_patience,
+                mode="min",
+            ),
+            LearningRateMonitor(logging_interval="epoch"),
+        ]
+
+        run_name = f"{architecture}_bf{base_filters}_{fold_name}_{timestamp}"
+        csv_logger = CSVLogger(
+            save_dir=kfold_dir, name="lightning_logs", version=run_name,
+        )
+        tb_logger = TensorBoardLogger(
+            save_dir=kfold_dir, name="tb_logs", version=run_name,
+            log_graph=(fold_idx == 0),
+        )
+
+        trainer = L.Trainer(
+            max_epochs=epochs,
+            callbacks=callbacks,
+            logger=[csv_logger, tb_logger],
+            default_root_dir=kfold_dir,
+            precision=precision,
+            gradient_clip_val=gradient_clip_val or None,
+            log_every_n_steps=5,
+            enable_progress_bar=True,
+        )
+
+        trainer.fit(module, datamodule=dm)
+
+        # Validate with best checkpoint to get final fold metrics
+        val_results = trainer.validate(module, datamodule=dm, ckpt_path="best")
+
+        # Collect per-fold results
+        fold_metrics = val_results[0] if val_results else {}
+        fold_metrics["fold"] = fold_num
+        best_path = trainer.checkpoint_callback.best_model_path
+        best_score = trainer.checkpoint_callback.best_model_score
+        fold_metrics["best_checkpoint"] = best_path
+        fold_metrics["best_val_loss"] = (
+            best_score.item() if best_score is not None else None
+        )
+        fold_results.append(fold_metrics)
+
+        val_loss = fold_metrics.get("val/loss", float("nan"))
+        val_iou = fold_metrics.get("val/iou", float("nan"))
+        print(f"\nFold {fold_num} complete — "
+              f"val/loss: {val_loss:.4f}, val/iou: {val_iou:.4f}")
+
+    # ── Aggregate results across folds ──────────────────────────────
+    metric_keys = [
+        k for k in fold_results[0]
+        if isinstance(fold_results[0].get(k), (int, float))
+        and k != "fold"
+    ]
+
+    summary = {}
+    for key in metric_keys:
+        values = [
+            r[key] for r in fold_results
+            if key in r and r[key] is not None
+        ]
+        if values:
+            summary[key] = {
+                "mean": round(float(np.mean(values)), 4),
+                "std": round(float(np.std(values)), 4),
+                "per_fold": [round(v, 4) for v in values],
+            }
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print(f"K-FOLD CROSS-VALIDATION SUMMARY ({n_folds} folds)")
+    print(f"{'='*60}")
+    for key in sorted(summary.keys()):
+        s = summary[key]
+        print(f"  {key:20s}: {s['mean']:.4f} ± {s['std']:.4f}  {s['per_fold']}")
+    print(f"{'='*60}\n")
+
+    # Save results JSON
+    results = {
+        "n_folds": n_folds,
+        "architecture": architecture,
+        "base_filters": base_filters,
+        "depth": depth,
+        "seed": seed,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "weight_decay": weight_decay,
+        "ce_weight": ce_weight,
+        "dice_weight": dice_weight,
+        "focal_gamma": focal_gamma,
+        "label_smoothing": label_smoothing,
+        "dropout": dropout,
+        "use_aspp": use_aspp,
+        "per_fold": fold_results,
+        "summary": summary,
+    }
+
+    results_path = kfold_dir / f"kfold_results_{mode}_{architecture}.json"
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"Results saved to {results_path}")
+
+    return results
+
+
 # ── CLI ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -505,6 +798,9 @@ if __name__ == "__main__":
                         help="Add ASPP module at U-Net bottleneck for expanded receptive field")
     parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
                         help="Dilation rates for ASPP branches (default: 6 12 18)")
+    parser.add_argument("--kfold", type=int, default=0,
+                        help="Number of cross-validation folds (0=disabled, default: 0). "
+                             "When set (e.g. --kfold 5), runs k-fold CV instead of a single train/val/test split.")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -513,7 +809,8 @@ if __name__ == "__main__":
     stats_path = project_root / args.stats_path if not args.stats_path.is_absolute() else args.stats_path
     output_dir = project_root / args.output_dir if not args.output_dir.is_absolute() else args.output_dir
 
-    train(
+    # Shared keyword arguments
+    shared_kwargs = dict(
         patches_dir=patches_dir,
         stats_path=stats_path,
         output_dir=output_dir,
@@ -539,3 +836,8 @@ if __name__ == "__main__":
         use_aspp=args.use_aspp,
         aspp_rates=tuple(args.aspp_rates),
     )
+
+    if args.kfold >= 2:
+        train_kfold(n_folds=args.kfold, **shared_kwargs)
+    else:
+        train(**shared_kwargs)
