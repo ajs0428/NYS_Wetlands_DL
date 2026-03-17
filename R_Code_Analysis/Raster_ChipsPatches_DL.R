@@ -16,14 +16,16 @@ set.seed(11)
 
 args <- c(
     "Data/Training_Data/R_Patches_Vector_Reviewed/", #Path to GIS reviewed wetland vector patches
-    128 # patch size
+    128, # patch size
+    11 # cluster subset options include number or NULL for any
 )
 
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
-cat("these are the arguments: \n", 
-    "2) path the reviewed training data :", args[1], "\n",
-    "3) patch size :", args[2], "\n"
+message("these are the arguments: \n", 
+    "1) path the reviewed training data :", args[1], "\n",
+    "2) patch size :", args[2], "\n",
+    "3) cluster number :", args[3], "\n"
 )
 
 
@@ -98,6 +100,14 @@ rast_chip_patch_create <- function(wetland_file){
     patchsize = as.numeric(args[2])
     huc_num <- str_extract(wetland_file, "(?<=huc_)\\d+")
     cluster_num <- str_extract(wetland_file, "(?<=cluster_)\\d+")
+    
+    if(cluster_num != args[3] & !is.null(args[3])){
+        message("skip this cluster and huc, selecting cluster: ", args[3])
+        return(invisible(NULL))
+    } else if(cluster_num != args[3] & is.null(args[3])) {
+        message("Processing for all clusters in folder")
+    }
+    
     # huc_poly <- sf::st_read("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg", quiet = TRUE,
     #                               query = paste0("SELECT * FROM NY_Cluster_Zones_250_NAomit_6347 WHERE huc12 = '", huc_num, "'"))
 
@@ -194,7 +204,7 @@ rast_chip_patch_create <- function(wetland_file){
 }
 
 ### Non-parallel
-# system.time({lapply(l_wet_cluster[[6]], rast_chip_patch_create)})
+# system.time({lapply(l_wet_cluster, rast_chip_patch_create)})
 # 
 # l_dem_cluster[[1]] |> rast() |> plot()
 # l_hydro_cluster[[1]] |> rast() |> plot()

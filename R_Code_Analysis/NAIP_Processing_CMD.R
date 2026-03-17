@@ -2,7 +2,7 @@
 
 args = c(
     "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg",
-    11,
+    208,
     "Data/NAIP/HUC_NAIP_Processed/"
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
@@ -13,7 +13,6 @@ args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to 
      "- Path to NAIP Processed:", args[3], "\n"
 ))
 
-setGDALconfig("GDAL_PAM_ENABLED", "FALSE")
 ###############################################################################################
 
 library(terra)
@@ -60,7 +59,7 @@ process_huc <- function(huc_num) {
     dem_filename <- paste0("Data/TerrainProcessed/HUC_DEMs", "/cluster_", args[2], "_huc_", huc_num, ".tif")
     huc <- cluster_target[cluster_target$huc12 == huc_num, ]
     # uncomment the if statement with file.exists to ignore files already created
-    if(file.exists(target_file)){
+    if(!file.exists(target_file)){
         message("no NAIP processed yet for: ", target_file)
         naip_tiles_huc <- st_filter(naip_int_cluster, huc)
         huc_vect <- vect(huc)
