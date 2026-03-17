@@ -32,6 +32,10 @@ Models/*
 
 !.gitignore
 !.gitattributes
+!.dockerignore
+!Dockerfile
+!pyproject.toml
+!CLAUDE.md
 !*.Rproj
 !*.RHistory
 !README.md
