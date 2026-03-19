@@ -20,8 +20,9 @@ RUN pip install --no-cache-dir \
       print(' '.join(d for d in deps if not d.startswith(('torch',))))" \
     ) jupyterlab ipykernel
 
-# Copy pipeline code
+# Copy pipeline code and shell scripts
 COPY Python_Code_Analysis/ Python_Code_Analysis/
+COPY Shell_Scripts/ Shell_Scripts/
 
 # Expose ports for Jupyter and TensorBoard (BioHPC allows 8009-8039)
 EXPOSE 8015 8016
@@ -29,4 +30,4 @@ EXPOSE 8015 8016
 # Data/ and Models/ are mounted at runtime, not baked in
 # e.g.: docker1 run --gpus all -v /workdir/<labid>/Data:/app/Data ...
 
-CMD ["python", "Python_Code_Analysis/DL_Pipeline_v2/dl_04_train_lightning.py"]
+CMD ["bash", "Shell_Scripts/DL_model_pipeline.sh"]
