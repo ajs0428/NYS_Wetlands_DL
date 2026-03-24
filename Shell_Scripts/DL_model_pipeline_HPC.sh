@@ -5,12 +5,12 @@ set -e  # Exit on error
 ARCHITECTURE="unet"        # "unet", "resunet34", or "dualbranch"
 FUSION="gated"             # "gated" or "concat" (only used with dualbranch)
 USE_ASPP=true             # true to enable ASPP at U-Net bottleneck (unet only)
-ASPP_RATES="3 6 12"      # dilation rates for ASPP; use "3 6 12" for depth=5
-KFOLD=2                    # 0=disabled, 2+=run k-fold CV instead of single split
-BASE_FILTERS=128
-DEPTH=5
+ASPP_RATES="6 12 18"      # dilation rates for ASPP; use "3 6 12" for depth=5
+KFOLD=0                    # 0=disabled, 2+=run k-fold CV instead of single split
+BASE_FILTERS=64
+DEPTH=4
 BATCH_SIZE=16
-EPOCHS=100
+EPOCHS=50
 SEED=420
 WORKERS=6
 

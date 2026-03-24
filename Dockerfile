@@ -30,4 +30,4 @@ EXPOSE 8015 8016
 # Data/ and Models/ are mounted at runtime, not baked in
 # e.g.: docker1 run --gpus all -v /workdir/<labid>/Data:/app/Data ...
 
-CMD ["bash", "Shell_Scripts/DL_model_pipeline.sh"]
+CMD ["bash", "Shell_Scripts/DL_model_pipeline_HPC.sh"]
