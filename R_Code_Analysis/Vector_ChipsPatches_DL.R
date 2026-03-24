@@ -16,8 +16,8 @@ set.seed(11)
 ########################################################################################
 
 args <- c(
-    208,
-    "Data/Training_Data/HUC_Laba_Processed/", #Path to wetland polygons
+    225,# Cluster
+    "Data/Training_Data/NHP_HUC_Wetlands_For_Field_Validation/", #Path to wetland polygons
     128 # Patch size radius
 )
 
@@ -33,7 +33,7 @@ cat("these are the arguments: \n",
 setGDALconfig("GDAL_PAM_ENABLED", "FALSE") # does not create aux.xml files but maybe needed
 ########################################################################################
 l_wet <- list.files(args[2], pattern = ".gpkg$", full.names = TRUE) ## |> keep(\(x) str_detect(x, "ADK_WCT"))
-l_wet_cluster <- l_wet[str_detect(l_wet, paste0("cluster_", args[1]))]
+l_wet_cluster <- l_wet[str_detect(l_wet, paste0("cluster_", args[1], "_"))]
 
 print(l_wet_cluster)
 
@@ -64,7 +64,7 @@ vect_chip_patch_create <- function(wetland_file){
     huc_num <- str_extract(wetland_file, "(?<=huc_)\\d+")
     huc_poly <- sf::st_read("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg", quiet = TRUE,
                                   query = paste0("SELECT * FROM NY_Cluster_Zones_250_NAomit_6347 WHERE huc12 = '", huc_num, "'"))
-    
+    huc_poly_ls <- st_cast(huc_poly, "MULTILINESTRING")
     target_wetlands <- st_read(wetland_file, quiet = TRUE) |> # target wetlands
         filter(MOD_CLASS != "OWW")
     
@@ -112,70 +112,93 @@ vect_chip_patch_create <- function(wetland_file){
     
     tw_bl_c_cmbbuff <- st_buffer(tw_bl_c_cmb, dist = patchsize, endCapStyle = "SQUARE")
     st_geometry(tw_bl_c_cmbbuff) <- "geom"
-    tw_bl_c_cmbbuff_o <- tw_bl_c_cmbbuff[rowSums(st_overlaps(tw_bl_c_cmbbuff, sparse = F)) == 0, ]
+    #tw = target wetlands, bl = boundary line, c = centroid, cmbbuff = combined buffer, o = overlap
+    tw_bl_c_cmbbuff_o <- tw_bl_c_cmbbuff[rowSums(st_overlaps(tw_bl_c_cmbbuff, sparse = F)) == 0, ] |> 
+        dplyr::mutate("MOD_CLASS" = "UPL")
+    tw_bl_c_cmbbuff_o <- tw_bl_c_cmbbuff_o[st_intersects(tw_bl_c_cmbbuff_o, huc_poly_ls, sparse = F) == 0, ]
+    tw_intersection <- st_intersection(target_wetlands_uplands, tw_bl_c_cmbbuff_o) |> 
+        dplyr::select(MOD_CLASS, geom)
+    tu_intersection <- st_difference(tw_bl_c_cmbbuff_o, st_union(target_wetlands_uplands)) |> 
+        dplyr::select(MOD_CLASS, geom)
+    cmb_tutw <- bind_rows(tw_intersection, tu_intersection) |>
+                mutate(ReviewerName = "TBD",
+                       Confidence = -999,
+                       BoundariesAltered = NA,
+                       Comments = "NoComment") |>
+                    st_cast(to = "MULTIPOLYGON") |>
+                dplyr::select(ReviewerName, Confidence, BoundariesAltered, Comments, MOD_CLASS)
     
-    #### Vector polygon patches
-
-    for(i in seq_len(nrow(tw_bl_c_cmbbuff_o))){
-        fn_vector <- paste0("Data/Training_Data/R_Patches_Vector/individual_patches/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_patch_", i, "_", patchsize*2, "m.gpkg" )
-        if(!file.exists(fn_vector)){
-            wet_patch <-  st_intersection(target_wetlands_uplands, tw_bl_c_cmbbuff_o[i,])
-            upl_patch <- st_difference(tw_bl_c_cmbbuff_o[i,] |>
-                                       mutate(MOD_CLASS = "UPL"),
-                                   st_union(target_wetlands_uplands))
-            st_geometry(upl_patch) <- "geom"
-            wetupl_patch <- bind_rows(wet_patch, upl_patch) |>
-            mutate(ReviewerName = "TBD",
-                   Confidence = -999,
-                   BoundariesAltered = NA,
-                   Comments = "NoComment") |>
-            dplyr::select(ReviewerName, Confidence, BoundariesAltered, Comments, MOD_CLASS)
-
-            st_write(wetupl_patch, dsn = fn_vector, append = FALSE)
-
-            # if(!file.exists(logpath)){
-            #     logfile <- read_csv(logpath, show_col_types = FALSE)
-            #     fn_to_add <- logfile |> filter(patch_file_name == basename(fn_vector))
-            #     if(nrow(fn_to_add) == 0){
-            #         fn_to_add_row <- data.frame(patch_file_name = basename(fn_vector),
-            #                                 reviewer = "NAME",
-            #                                 boundaries_altered = "TBD",
-            #                                 confidence = "TBD")
-            #         # update_logfile <- bind_rows(fn_to_add_row, logfile)
-            #         write_csv(fn_to_add_row, logpath, append = TRUE)
-            #         } else {
-            #             message("Filename in log file")
-            #         }
-            #     }
-
-        } else {
-        message("Already file ", fn_vector)
-            }
-       }
-
     fn_full_patch <- paste0("Data/Training_Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" )
     if(!file.exists(fn_full_patch)){
-        full_patch_file <- list.files("Data/Training_Data/R_Patches_Vector/individual_patches/",
-                                      full.names = TRUE,
-                                      pattern = paste0("_cluster_", args[1], "_huc_", huc_num, "_", "patch.*\\.gpkg$")) |>
-            purrr::map(st_read, quiet = TRUE) |>
-            bind_rows()
-        st_write(full_patch_file,
-                 dsn =  paste0("Data/Training_Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" ),
-                 append = FALSE)
-    } else {
-        # full_patch_file <- list.files("Data/Training_Data/R_Patches_Vector/",
-        #                               full.names = TRUE,
-        #                               pattern = paste0("_cluster_", args[1], "_huc_", huc_num, "_", "patch.*\\.gpkg$")) |>
-        #     purrr::map(st_read, quiet = TRUE) |>
-        #     bind_rows()
-        # st_write(full_patch_file,
-        #          dsn =  paste0("Data/Training_Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" ),
-        #          append = FALSE)
-        message("Already file")
-    }
-
-    return(NULL)
+        st_write(cmb_tutw, dsn = fn_full_patch, append = FALSE)
+        } else {
+            message("Already file ", fn_full_patch)
+            }
+    return(cmb_tutw)
+    # #### Vector polygon patches
+    # 
+    # for(i in seq_len(nrow(tw_bl_c_cmbbuff_o))){
+    #     fn_vector <- paste0("Data/Training_Data/R_Patches_Vector/individual_patches/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_patch_", i, "_", patchsize*2, "m.gpkg" )
+    #     if(!file.exists(fn_vector)){
+    #         wet_patch <-  st_intersection(target_wetlands_uplands, tw_bl_c_cmbbuff_o[i,])
+    #         st_geometry(wet_patch) <- "geom"
+    #         upl_patch <- st_difference(tw_bl_c_cmbbuff_o[i,] |>
+    #                                    mutate(MOD_CLASS = "UPL"),
+    #                                st_union(target_wetlands_uplands))
+    #         st_geometry(upl_patch) <- "geom"
+    #         wetupl_patch <- bind_rows(wet_patch, upl_patch) |>
+    #         mutate(ReviewerName = "TBD",
+    #                Confidence = -999,
+    #                BoundariesAltered = NA,
+    #                Comments = "NoComment") |>
+    #             st_cast(to = "POLYGON") |>
+    #         dplyr::select(ReviewerName, Confidence, BoundariesAltered, Comments, MOD_CLASS)
+    # 
+    #         st_write(wetupl_patch, dsn = fn_vector, append = FALSE)
+    # 
+    #         # if(!file.exists(logpath)){
+    #         #     logfile <- read_csv(logpath, show_col_types = FALSE)
+    #         #     fn_to_add <- logfile |> filter(patch_file_name == basename(fn_vector))
+    #         #     if(nrow(fn_to_add) == 0){
+    #         #         fn_to_add_row <- data.frame(patch_file_name = basename(fn_vector),
+    #         #                                 reviewer = "NAME",
+    #         #                                 boundaries_altered = "TBD",
+    #         #                                 confidence = "TBD")
+    #         #         # update_logfile <- bind_rows(fn_to_add_row, logfile)
+    #         #         write_csv(fn_to_add_row, logpath, append = TRUE)
+    #         #         } else {
+    #         #             message("Filename in log file")
+    #         #         }
+    #         #     }
+    # 
+    #     } else {
+    #     message("Already file ", fn_vector)
+    #         }
+    #    }
+    # 
+    # fn_full_patch <- paste0("Data/Training_Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" )
+    # if(!file.exists(fn_full_patch)){
+    #     full_patch_file <- list.files("Data/Training_Data/R_Patches_Vector/individual_patches/",
+    #                                   full.names = TRUE,
+    #                                   pattern = paste0("_cluster_", args[1], "_huc_", huc_num, "_", "patch.*\\.gpkg$")) |>
+    #         purrr::map(st_read, quiet = TRUE) |>
+    #         bind_rows()
+    #     st_write(full_patch_file,
+    #              dsn =  paste0("Data/Training_Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" ),
+    #              append = FALSE)
+    # } else {
+    #     # full_patch_file <- list.files("Data/Training_Data/R_Patches_Vector/",
+    #     #                               full.names = TRUE,
+    #     #                               pattern = paste0("_cluster_", args[1], "_huc_", huc_num, "_", "patch.*\\.gpkg$")) |>
+    #     #     purrr::map(st_read, quiet = TRUE) |>
+    #     #     bind_rows()
+    #     # st_write(full_patch_file,
+    #     #          dsn =  paste0("Data/Training_Data/R_Patches_Vector/", sourceWetlands,"_cluster_", args[1], "_huc_", huc_num, "_", patchsize*2, "m.gpkg" ),
+    #     #          append = FALSE)
+    #     message("Already file")
+    # }
+    #
+    # return(NULL)
 
 }
 
@@ -198,7 +221,7 @@ future_lapply(l_wet_cluster, vect_chip_patch_create,
               future.globals = TRUE)
 
 ### Non-parallel
-# system.time({lapply(l_wet_cluster[[1]], vect_chip_patch_create)})
+# system.time({t <- lapply(l_wet_cluster, vect_chip_patch_create)})
 
 
 #### Checks

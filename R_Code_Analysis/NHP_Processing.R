@@ -41,7 +41,7 @@ clusters <- st_read("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg", quiet 
     # and Cowardin wetland type, as best as possible. In most cases, polygons 
     # from the element occurrence (EO) layer took precedence and polygons removed from 
     # this layer if they overlapped. Most cultural types (lawn, roads, developed land) were removed.
-nhp_wetlands1 <- st_read("FieldData/NYNHP_NatComm_data/NYNHP_NatComm_data_gpkg_20251120.gpkg", 
+nhp_wetlands1 <- st_read("Data/NYS_NHP_Wetland_DelineatonData/NYNHP_NatComm_data/NYNHP_NatComm_data_gpkg_20251120.gpkg", 
                          layer = "attributed_systems_subsyst_cowardin", quiet = TRUE) |> 
     select(cowardin) |> 
     filter(!str_detect(cowardin, "Marine|Estuarine|Subterranean|Tidal")) |> # remove marine/estuarine
@@ -63,7 +63,7 @@ nhp_wetlands1 <- st_read("FieldData/NYNHP_NatComm_data/NYNHP_NatComm_data_gpkg_2
     # representation of the target community. In most cases, data were 
     # kept in this layer and removed from the other layers. 
 
-nhp_wetlands2 <- st_read("FieldData/NYNHP_NatComm_data/NYNHP_NatComm_data_gpkg_20251120.gpkg", 
+nhp_wetlands2 <- st_read("Data/NYS_NHP_Wetland_DelineatonData/NYNHP_NatComm_data/NYNHP_NatComm_data_gpkg_20251120.gpkg", 
                          layer = "eos_wetl_attributed_systems_subsyst_cowardin", quiet = TRUE) |> 
     select(cowardin) |> 
     filter(!str_detect(cowardin, "Marine|Estuarine|Subterranean|Tidal")) |> # remove marine/estuarine
@@ -83,7 +83,7 @@ nhp_wetlands2 <- st_read("FieldData/NYNHP_NatComm_data/NYNHP_NatComm_data_gpkg_2
     # Note that large matrix forests may have inclusions of wetlands
     # that fall below the minimum mapping unit of 1 acre. 
 
-nhp_wetlands3 <- st_read("FieldData/NYNHP_NatComm_data/NYNHP_NatComm_data_gpkg_20251120.gpkg", 
+nhp_wetlands3 <- st_read("Data/NYS_NHP_Wetland_DelineatonData/NYNHP_NatComm_data/NYNHP_NatComm_data_gpkg_20251120.gpkg", 
                          layer = "parks_attributed_systems_subsyst_cowardin_sp", quiet = TRUE) |> 
     select(cowardin) |> 
     filter(!str_detect(cowardin, "Marine|Estuarine|Subterranean|Tidal")) |> # remove marine/estuarine
@@ -97,6 +97,10 @@ nhp_wetlands3 <- st_read("FieldData/NYNHP_NatComm_data/NYNHP_NatComm_data_gpkg_2
 
 nhp_combine <- bind_rows(nhp_wetlands1, nhp_wetlands2, nhp_wetlands3) |> 
     st_transform(crs = st_crs("EPSG:6347"))
+########################################################################################
+clusters <- st_read("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg")
+nhp_huc_int <- st_intersects(clusters, nhp_combine, sparse = FALSE)
+nhp_intersecting_hucs <- clusters[rowSums(nhp_huc_int) > 50, ]
 
 ########################################################################################
 nwi_chm_rcl_list <- list.files("Data/Training_Data/Targeted_Wetlands_For_Field_Validation_v2/", 
@@ -147,6 +151,7 @@ nhp_singlehuc_fun <- function(huc_num){
             rename("WETLAND_TY" = "cowardin") |>
             select(WETLAND_TY, MOD_CLASS, huc12, cluster)
         nhp$MOD_CLASS <- factor(nhp$MOD_CLASS, levels = c("EMW", "FSW", "OWW", "SSW", "UPL"))
+        nhp <- st_cast(nhp, "POLYGON")
         if(nrow(nhp) > 0){
             st_write(nhp, dsn = fn,
                      append = FALSE)   
@@ -168,7 +173,7 @@ nhp_singlehuc_fun <- function(huc_num){
 # 
 # lapply(nwi_chm_rcl_huc_list[1], nhp_nwi_cmb_fun)
 
-lapply(nwi_chm_rcl_huc_list, nhp_singlehuc_fun)
+lapply(nhp_intersecting_hucs$huc12, nhp_singlehuc_fun)
 
 #### Parallel 
 if(future::availableCores() > 16){
@@ -181,6 +186,6 @@ options(future.globals.maxSize= 32.0 * 1e9)
 # plan(multisession, workers = corenum)
 plan(future.callr::callr)
 
-future_lapply(nwi_chm_rcl_huc_list, nhp_nwi_cmb_fun, future.seed = TRUE, 
+future_lapply(nhp_intersecting_hucs$huc12, nhp_singlehuc_fun, future.seed = TRUE, 
               future.packages = c("terra", "sf", "dplyr", "tidyr", "stringr"),
               future.globals = TRUE)

@@ -17,7 +17,7 @@ set.seed(11)
 args <- c(
     "Data/Training_Data/R_Patches_Vector_Reviewed/", #Path to GIS reviewed wetland vector patches
     128, # patch size
-    11 # cluster subset options include number or NULL for any
+    208 # cluster subset options include number or NULL for any
 )
 
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
@@ -173,7 +173,7 @@ rast_chip_patch_create <- function(wetland_file){
             fn_labels <- paste0("Data/Training_Data/R_Patches_Labels/", "labels_only_", sourceWetlands, "_cluster_", cluster_num, "_huc_", huc_num, "_patch_", i, "_", patchsize*2, "m.tif" )
 
             # Regular Patches with all predictors
-            if(!file.exists(fn)){
+            #if(!file.exists(fn)){
                 tryCatch({
                     cropped_stack <- crop(stack, tw_vect, mask = TRUE)
                     cropped_stack_labeled <- c(cropped_stack, tw_rast_sub)
@@ -182,9 +182,9 @@ rast_chip_patch_create <- function(wetland_file){
                                                  skip_to_next <<- TRUE}
                 )
                 if(skip_to_next) { next }
-            } else {
-                message("Already file ", fn)
-            }
+            # } else {
+            #     message("Already file ", fn)
+            # }
 
             #Labels only patches NO predictors
             if(!file.exists(fn_labels)){

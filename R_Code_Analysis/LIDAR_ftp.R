@@ -2,6 +2,7 @@ library(RCurl)
 library(curl)
 
 url_link <- "ftp://ftp.gis.ny.gov/elevation/LIDAR/"
+url_link <- "ftp://ftp.gis.ny.gov/ortho/nysdop10/"
 
 con <- curl(url_link, open = "r")
 lidar_l <- readLines(con)
