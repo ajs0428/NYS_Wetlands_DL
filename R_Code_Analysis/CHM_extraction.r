@@ -7,9 +7,9 @@ args = c(
 )
 args = commandArgs(trailingOnly = TRUE) # arguments are passed from terminal to here
 
-(cat("these are the arguments: \n", 
-     "- Path to a file unprocessed NAIP files:", args[1], "\n",
-     "- Path to processed NAIP files:", args[2], "\n"
+(message("these are the arguments: \n", 
+     "- Path to a file unprocessed CHM files:", args[1], "\n",
+     "- Path to processed CHM files:", args[2], "\n"
 ))
 
 ###############################################################################################
