@@ -881,11 +881,13 @@ docker1 load -i /workdir/user/nys-wetlands-dl.tar.gz
 
 ```bash
 docker1 run --shm-size=8g --gpus all \
+  --user $(id -u):$(id -g) \
   -v /workdir/user/NYS_Wetlands_DL/Data:/app/Data \
   -v /workdir/user/NYS_Wetlands_DL/Models:/app/Models \
   nys-wetlands-dl
 ```
 
+- **`--user $(id -u):$(id -g)`**: Required — runs the container as your HPC user so output files (checkpoints, logs) are owned by you, not root. Without this, files written to mounted volumes will have root ownership and you won't be able to copy or modify them.
 - **`--shm-size=8g`**: Required — PyTorch DataLoader workers use shared memory for IPC. Docker's default (64MB) causes `bus error` crashes. Increase to `16g` if needed for large batch sizes.
 - **`--gpus all`**: Exposes all available NVIDIA GPUs. Lightning auto-detects multi-GPU and uses DDP.
 - **Volume mounts**: `Data/` and `Models/` are mounted at runtime (not baked into the image) so training data and checkpoints persist on the host.
@@ -910,6 +912,7 @@ To iterate on the shell script without rebuilding the image, mount it at runtime
 
 ```bash
 docker1 run --shm-size=8g --gpus all \
+  --user $(id -u):$(id -g) \
   -v /workdir/user/NYS_Wetlands_DL/Data:/app/Data \
   -v /workdir/user/NYS_Wetlands_DL/Models:/app/Models \
   -v /workdir/user/DL_model_pipeline_HPC.sh:/app/Shell_Scripts/DL_model_pipeline_HPC.sh \
@@ -939,6 +942,7 @@ docker1 run --shm-size=8g --gpus all \
 | Band mismatch during prediction | Input raster band descriptions must match the names in `normalization_stats.json` |
 | Bus error in Docker | Add `--shm-size=8g` (or `--ipc=host`) to your `docker run` command — default 64MB shared memory is too small for DataLoader workers |
 | Docker build `platform` warning on Mac | Use `docker build --platform linux/amd64` when building for HPC from Apple Silicon |
+| Output files owned by root / permission denied | Add `--user $(id -u):$(id -g)` to your `docker run` command so files are written as your HPC user |
 | `--base-filters` / `--depth` mismatch | Evaluation and prediction must use the same values as training |
 
 ---
