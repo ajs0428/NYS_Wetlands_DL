@@ -27,7 +27,7 @@ for entry in "${entries[@]}"; do
     cluster="${entry%%|*}"
     project_url="${entry##*|}"
     echo "Running lidar metrics for cluster $cluster from $project_url"
-    Rscript R_Code_Analysis/Lidar_ftp.R \
+    Rscript R_Code_Analysis/LIDAR_ftp.R \
         "$GPKG" \
         "$cluster" \
         "$project_url" \
