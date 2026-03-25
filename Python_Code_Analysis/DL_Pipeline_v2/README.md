@@ -24,6 +24,7 @@ Deep learning pipeline for wetland semantic segmentation in New York State using
 - [Loss Function: Hybrid Focal + Dice](#loss-function-hybrid-focal--dice)
 - [Adding a New Band](#adding-a-new-band)
 - [Patch Size](#patch-size)
+- [Docker / HPC Deployment](#docker--hpc-deployment)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -848,6 +849,85 @@ No changes are needed in `dl_01_compute_statistics.py`, `dl_02_dataset.py`, `dl_
 
 ---
 
+## Docker / HPC Deployment
+
+The pipeline can be run in a Docker container for reproducible GPU training on HPC clusters. The `Dockerfile` at the project root builds an image with all dependencies pre-installed.
+
+### Building the Image
+
+Build on your local machine targeting linux/amd64 (required for HPC GPU nodes, even when building from Apple Silicon):
+
+```bash
+cd NYS_Wetlands_DL/
+docker build --platform linux/amd64 -t nys-wetlands-dl .
+```
+
+### Transferring to HPC
+
+Save the image as a tarball and transfer it:
+
+```bash
+docker save nys-wetlands-dl | gzip > nys-wetlands-dl.tar.gz
+scp nys-wetlands-dl.tar.gz user@hpc_host:/workdir/user/
+```
+
+On the HPC, load the image:
+
+```bash
+docker1 load -i /workdir/user/nys-wetlands-dl.tar.gz
+```
+
+### Running on HPC
+
+```bash
+docker1 run --shm-size=8g --gpus all \
+  -v /workdir/user/NYS_Wetlands_DL/Data:/app/Data \
+  -v /workdir/user/NYS_Wetlands_DL/Models:/app/Models \
+  nys-wetlands-dl
+```
+
+- **`--shm-size=8g`**: Required — PyTorch DataLoader workers use shared memory for IPC. Docker's default (64MB) causes `bus error` crashes. Increase to `16g` if needed for large batch sizes.
+- **`--gpus all`**: Exposes all available NVIDIA GPUs. Lightning auto-detects multi-GPU and uses DDP.
+- **Volume mounts**: `Data/` and `Models/` are mounted at runtime (not baked into the image) so training data and checkpoints persist on the host.
+
+The container runs `Shell_Scripts/DL_model_pipeline_HPC.sh` by default (set in the Dockerfile `CMD`).
+
+### Shell Script Configurations
+
+Two pipeline scripts are provided:
+
+| Parameter | Local (`DL_model_pipeline.sh`) | HPC (`DL_model_pipeline_HPC.sh`) |
+|-----------|-------------------------------|----------------------------------|
+| BASE_FILTERS | 64 | 128 |
+| DEPTH | 4 | 5 |
+| EPOCHS | 50 | 100 |
+| ASPP_RATES | 6 12 18 | 3 6 12 (for depth=5) |
+| KFOLD | 0 (disabled) | 2 (enabled) |
+
+### Updating the Shell Script Without Rebuilding
+
+To iterate on the shell script without rebuilding the image, mount it at runtime:
+
+```bash
+docker1 run --shm-size=8g --gpus all \
+  -v /workdir/user/NYS_Wetlands_DL/Data:/app/Data \
+  -v /workdir/user/NYS_Wetlands_DL/Models:/app/Models \
+  -v /workdir/user/DL_model_pipeline_HPC.sh:/app/Shell_Scripts/DL_model_pipeline_HPC.sh \
+  nys-wetlands-dl
+```
+
+### Monitoring Training
+
+- **CSV logs**: Written to `Models/lightning_logs/<run_name>/metrics.csv` — tail from the HPC host.
+- **TensorBoard**: Logs written to `Models/tb_logs/`. View via SSH tunnel:
+  ```bash
+  ssh -L 6006:localhost:6006 user@hpc_host
+  tensorboard --logdir /workdir/user/NYS_Wetlands_DL/Models/tb_logs --port 6006
+  ```
+  Then open `http://localhost:6006` locally.
+
+---
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -857,6 +937,8 @@ No changes are needed in `dl_01_compute_statistics.py`, `dl_02_dataset.py`, `dl_
 | Out of memory during training | Reduce `--batch-size` or `--base-filters` |
 | NaN values in loss | Verify `ignore_index=255` is set; check for corrupted patches. HybridLoss handles all-ignored batches gracefully. |
 | Band mismatch during prediction | Input raster band descriptions must match the names in `normalization_stats.json` |
+| Bus error in Docker | Add `--shm-size=8g` (or `--ipc=host`) to your `docker run` command — default 64MB shared memory is too small for DataLoader workers |
+| Docker build `platform` warning on Mac | Use `docker build --platform linux/amd64` when building for HPC from Apple Silicon |
 | `--base-filters` / `--depth` mismatch | Evaluation and prediction must use the same values as training |
 
 ---
