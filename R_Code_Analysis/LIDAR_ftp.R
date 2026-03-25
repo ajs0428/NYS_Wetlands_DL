@@ -4,6 +4,8 @@ library(sf)
 library(dplyr)
 library(lidR)
 library(terra)
+library(future)
+library(future.apply)
 
 nys_lidar_ftp <- "ftp://ftp.gis.ny.gov/elevation/LIDAR/"
 
@@ -138,34 +140,75 @@ compute_lidar_metrics <- function(las_path, out_dir, res = 1) {
     out_path
 }
 
+### Process a single tile: download → compute metrics → clean up
+process_tile <- function(tile_name, tile_url, out_dir) {
+    out_path <- file.path(out_dir, paste0(tools::file_path_sans_ext(tile_name), "_metrics.tif"))
+
+    # Skip if already processed
+    if (file.exists(out_path)) {
+        message("[", Sys.getpid(), "] Skipping (exists): ", tile_name)
+        return(out_path)
+    }
+
+    # Each worker gets its own download directory
+    dl_dir <- file.path(tempdir(), "lidar_dl")
+    dir.create(dl_dir, showWarnings = FALSE, recursive = TRUE)
+
+    message("[", Sys.getpid(), "] Downloading: ", tile_name)
+    las_path <- tryCatch(
+        download_ftp_file(tile_url, dl_dir),
+        error = function(e) {
+            warning("Failed to download ", tile_name, ": ", e$message)
+            return(NULL)
+        }
+    )
+    if (is.null(las_path)) return(NULL)
+
+    message("[", Sys.getpid(), "] Computing metrics: ", tile_name)
+    result <- tryCatch(
+        compute_lidar_metrics(las_path, out_dir),
+        error = function(e) {
+            warning("Failed to process ", tile_name, ": ", e$message)
+            return(NULL)
+        }
+    )
+
+    # Clean up raw LAS to save disk space
+    unlink(las_path)
+    result
+}
+
 ###############################################################################
 # Command-line execution
-# Args: gpkg_path, cluster_number, project_url, output_dir
+# Args: gpkg_path, cluster_number, project_url, output_dir [workers]
 #
 # Example:
 #   Rscript R_Code_Analysis/Lidar_ftp.R \
 #     "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg" \
 #     208 \
 #     "ftp://ftp.gis.ny.gov/elevation/LIDAR/NYSGPO_CentralFingerLakes_2020/" \
-#     "Data/Lidar/Metrics"
+#     "Data/Lidar/Metrics" \
+#     4
 ###############################################################################
 
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 4) {
-    stop("Usage: Rscript Lidar_ftp.R <gpkg_path> <cluster> <project_url> <output_dir>")
+    stop("Usage: Rscript Lidar_ftp.R <gpkg_path> <cluster> <project_url> <output_dir> [workers]")
 }
 
 gpkg_path   <- args[1]
 cluster_num <- args[2]
 project_url <- args[3]
 out_dir     <- args[4]
+n_workers   <- as.integer(ifelse(length(args) >= 5, args[5], 1))
 
 message("=== Lidar Metrics Pipeline ===")
 message("  GPKG:        ", gpkg_path)
 message("  Cluster:     ", cluster_num)
 message("  FTP Project: ", project_url)
 message("  Output:      ", out_dir)
+message("  Workers:     ", n_workers)
 
 # Filter to all HUC12s in this cluster
 cluster_hucs <- st_read(gpkg_path, quiet = TRUE) |>
@@ -189,40 +232,25 @@ message("Unique tiles to process: ", nrow(unique_tiles))
 # Build FTP download URLs
 tile_urls <- paste0("ftp://ftp.gis.ny.gov/", unique_tiles$FTP_PATH, unique_tiles$tile_name)
 
-# Create output and temp download directories
+# Create output directory
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-dl_dir <- file.path(tempdir(), "lidar_dl")
-dir.create(dl_dir, showWarnings = FALSE)
 
-# Process each tile: download → compute metrics → clean up raw file
-for (idx in seq_len(nrow(unique_tiles))) {
-    tile <- unique_tiles$tile_name[idx]
-    out_path <- file.path(out_dir, paste0(tools::file_path_sans_ext(tile), "_metrics.tif"))
-
-    # Skip if already processed
-    if (file.exists(out_path)) {
-        message("[", idx, "/", nrow(unique_tiles), "] Skipping (exists): ", tile)
-        next
-    }
-
-    message("[", idx, "/", nrow(unique_tiles), "] Downloading: ", tile)
-    las_path <- tryCatch(
-        download_ftp_file(tile_urls[idx], dl_dir),
-        error = function(e) {
-            warning("  Failed to download ", tile, ": ", e$message)
-            return(NULL)
-        }
-    )
-    if (is.null(las_path)) next
-
-    message("  Computing metrics...")
-    tryCatch(
-        compute_lidar_metrics(las_path, out_dir),
-        error = function(e) warning("  Failed to process ", tile, ": ", e$message)
-    )
-
-    # Clean up raw LAS to save disk space
-    unlink(las_path)
+# Set up parallel workers (sequential if workers = 1)
+if (n_workers > 1) {
+    plan(multisession, workers = n_workers)
+    message("Using ", n_workers, " parallel workers")
+} else {
+    plan(sequential)
 }
 
-message("\n=== Done. Metrics written to: ", out_dir, " ===")
+# Process all tiles
+results <- future_lapply(seq_len(nrow(unique_tiles)), function(idx) {
+    process_tile(unique_tiles$tile_name[idx], tile_urls[idx], out_dir)
+}, future.seed = NULL)
+
+# Reset to sequential
+plan(sequential)
+
+n_success <- sum(!sapply(results, is.null))
+message("\n=== Done. ", n_success, "/", nrow(unique_tiles),
+        " tiles processed. Metrics written to: ", out_dir, " ===")
