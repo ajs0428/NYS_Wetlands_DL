@@ -190,6 +190,11 @@ process_tile <- function(tile_name, tile_url, out_dir) {
 #     "Data/Lidar/Metrics" \
 #     4
 ###############################################################################
+args <- c("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg",
+              208,
+              "ftp://ftp.gis.ny.gov/elevation/LIDAR/FEMA_2019/",
+              "Data/Lidar/Metrics",
+              1)
 
 args <- commandArgs(trailingOnly = TRUE)
 
@@ -201,7 +206,11 @@ gpkg_path   <- args[1]
 cluster_num <- args[2]
 project_url <- args[3]
 out_dir     <- args[4]
-n_workers   <- as.integer(ifelse(length(args) >= 5, args[5], 1))
+if(future::availableCores() > 16){
+    n_workers <-  2
+} else {
+    n_workers <-  (future::availableCores())
+}
 
 message("=== Lidar Metrics Pipeline ===")
 message("  GPKG:        ", gpkg_path)
@@ -237,7 +246,7 @@ dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 # Set up parallel workers (sequential if workers = 1)
 if (n_workers > 1) {
-    plan(multisession, workers = n_workers)
+    plan(future.callr::callr)
     message("Using ", n_workers, " parallel workers")
 } else {
     plan(sequential)
