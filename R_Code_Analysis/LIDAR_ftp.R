@@ -112,7 +112,11 @@ compute_lidar_metrics <- function(las_path, out_dir, res = 1) {
     }
     # Mask back to original footprint so edges don't expand
     metrics <- mask(metrics, valid_mask, maskvalues = 0)
-
+    metrics[[1]] <- ifel(is.na(metrics[[1]]), 0, metrics[[1]]) # makes NA which is usually water 0 intensity
+    metrics[[2]] <- ifel(is.na(metrics[[2]]), 1, metrics[[2]]) # makes NA which is usually water 100% below 0.5m
+    metrics[[3]] <- ifel(is.na(metrics[[3]]), 0, metrics[[3]]) # makes NA which is usually water 0% between 0.5 and 3m
+    metrics[[4]] <- ifel(is.na(metrics[[4]]), 0, metrics[[4]]) # makes NA which is usually water 0% above 2m
+    set.names(metrics, c("mean_intensity", "pct_below_0.5m", "pct_0.5_to_2m", "pct_2m_to_p95"))
     # Write multi-band GeoTIFF
     tile_name <- tools::file_path_sans_ext(basename(las_path))
     out_path <- file.path(out_dir, paste0(tile_name, "_metrics.tif"))
@@ -187,7 +191,7 @@ cluster_num <- args[2]
 index_path  <- args[3]
 out_dir     <- args[4]
 if (future::availableCores() > 16) {
-    n_workers <- 2
+    n_workers <- 1
 } else {
     n_workers <- future::availableCores()
 }
