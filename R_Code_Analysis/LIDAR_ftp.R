@@ -95,8 +95,23 @@ compute_lidar_metrics <- function(las_path, out_dir, res = 1) {
 
     metrics <- pixel_metrics(las, ~veg_metrics(z = Z, i = Intensity), res = res)
 
-    # Ensure CRS is EPSG:6347
-    crs(metrics) <- "EPSG:6347"
+    # Reproject to EPSG:6347 if needed
+    target_crs <- "EPSG:6347"
+    if (!same.crs(crs(metrics), target_crs)) {
+        message("  Reprojecting from ", crs(metrics, describe = TRUE)$code, " to EPSG:6347")
+        metrics <- project(metrics, target_crs, method = "bilinear", res = res)
+    }
+
+    # Fill interior NA holes with 3x3 mean focal filter (edges unchanged)
+    # Create a mask of valid pixels before filling so we don't expand the raster footprint
+    valid_mask <- !is.na(metrics[[1]])
+    valid_mask <- focal(valid_mask, w = matrix(1, 3, 3), fun = "max")
+    for (i in seq_len(nlyr(metrics))) {
+        metrics[[i]] <- focal(metrics[[i]], w = matrix(1, 3, 3),
+                              fun = "mean", na.rm = TRUE, na.policy = "only")
+    }
+    # Mask back to original footprint so edges don't expand
+    metrics <- mask(metrics, valid_mask, maskvalues = 0)
 
     # Write multi-band GeoTIFF
     tile_name <- tools::file_path_sans_ext(basename(las_path))
