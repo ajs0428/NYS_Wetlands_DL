@@ -33,69 +33,36 @@ download_ftp_file <- function(ftp_url, dest_dir = tempdir()) {
     dest_path
 }
 
-### Find tiles overlapping a HUC12 boundary
-get_overlapping_tiles <- function(project_url, huc12_sf) {
+### Find tiles overlapping a set of HUC12 boundaries
+# index_path: path to a local tile index GPKG (from download_lidar_indexes.R)
+# huc12_sf: sf object with one or more HUC12 polygons
+get_overlapping_tiles <- function(index_path, huc12_sf) {
 
-    # List project contents and find tile index (zipped or loose shapefile)
-    contents <- list_ftp_dir(project_url)
+    tile_index <- st_read(index_path, quiet = TRUE)
 
-    # Try zipped index first (most common on NYS FTP)
-    zip_files <- contents |>
-        filter(str_detect(tolower(name), "index|tile"),
-               str_detect(name, "\\.zip$"))
+    # Transform HUC12s to match tile index CRS
+    huc12_transformed <- st_transform(huc12_sf, st_crs(tile_index))
 
-    # Fall back to loose shapefiles
-    shp_files <- contents |>
-        filter(str_detect(name, "\\.shp$"),
-               str_detect(tolower(name), "index|tile"))
+    # Find tiles intersecting ANY of the HUC12 polygons
+    intersects_mat <- st_intersects(tile_index, huc12_transformed, sparse = FALSE)
+    hits <- apply(intersects_mat, 1, any)
+    overlapping <- tile_index[hits, ]
 
-    temp_dir <- file.path(tempdir(), "tile_index")
-    dir.create(temp_dir, showWarnings = FALSE, recursive = TRUE)
-
-    if (nrow(zip_files) > 0) {
-        # Download and extract zip
-        zip_path <- download_ftp_file(zip_files$full_path[1], temp_dir)
-        unzip(zip_path, exdir = temp_dir)
-        shp_path <- list.files(temp_dir, pattern = "\\.shp$", full.names = TRUE)[1]
-    } else if (nrow(shp_files) > 0) {
-        # Download loose shapefile components
-        shp_base <- str_remove(shp_files$name[1], "\\.shp$")
-        for (ext in c(".shp", ".shx", ".dbf", ".prj", ".cpg")) {
-            tryCatch(
-                download_ftp_file(paste0(project_url, shp_base, ext), temp_dir),
-                error = function(e) NULL
-            )
-        }
-        shp_path <- file.path(temp_dir, paste0(shp_base, ".shp"))
-    } else {
-        warning("No tile index found in: ", project_url)
+    if (nrow(overlapping) == 0) {
+        warning("No overlapping tiles found in: ", index_path)
         return(NULL)
     }
 
-    # Read tile index
-    tile_index <- st_read(shp_path, quiet = TRUE)
-
-    # Transform HUC12 to match tile index CRS
-    huc12_transformed <- st_transform(huc12_sf, st_crs(tile_index))
-
-    # Find intersecting tiles
-    overlapping <- tile_index[st_intersects(tile_index, huc12_transformed, sparse = FALSE)[,1], ]
-
-    # Use FILENAME column (standard on NYS FTP), fall back to heuristic
-    if ("FILENAME" %in% names(overlapping)) {
-        name_col <- "FILENAME"
-    } else {
-        name_col <- names(overlapping)[str_detect(tolower(names(overlapping)), "name|tile|file")][1]
-    }
-
-    if (is.na(name_col)) {
-        warning("Could not identify tile name column. Columns: ",
-                paste(names(overlapping), collapse = ", "))
-        return(overlapping)
-    }
-
+    # Build tile_name and ftp_url from DIRECT_DL
+    # DIRECT_DL contains full HTTPS path including subdirectories
+    # Convert to FTP: https://gisdata.ny.gov/ → ftp://ftp.gis.ny.gov/
     overlapping |>
-        mutate(tile_name = as.character(.data[[name_col]]))
+        mutate(
+            tile_name = as.character(FILENAME),
+            ftp_url = str_replace(DIRECT_DL,
+                                  "https://gisdata.ny.gov/",
+                                  "ftp://ftp.gis.ny.gov/")
+        )
 }
 
 # Per-pixel vegetation metrics function (top-level for lidR formula scoping)
@@ -180,42 +147,40 @@ process_tile <- function(tile_name, tile_url, out_dir) {
 
 ###############################################################################
 # Command-line execution
-# Args: gpkg_path, cluster_number, project_url, output_dir [workers]
+# Args: gpkg_path, cluster_number, index_path, output_dir
 #
 # Example:
 #   Rscript R_Code_Analysis/Lidar_ftp.R \
 #     "Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg" \
 #     208 \
-#     "ftp://ftp.gis.ny.gov/elevation/LIDAR/NYSGPO_CentralFingerLakes_2020/" \
-#     "Data/Lidar/Metrics" \
-#     4
+#     "Data/Lidar/Indexes/NYS_Central_Finger_Lakes_2020.gpkg" \
+#     "Data/Lidar/Metrics"
 ###############################################################################
 args <- c("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg",
               208,
-              "ftp://ftp.gis.ny.gov/elevation/LIDAR/FEMA_2019/",
-              "Data/Lidar/Metrics",
-              1)
+              "Data/Lidar/Indexes/FEMA_2019.gpkg",
+              "Data/Lidar/Metrics")
 
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) < 4) {
-    stop("Usage: Rscript Lidar_ftp.R <gpkg_path> <cluster> <project_url> <output_dir> [workers]")
+    stop("Usage: Rscript Lidar_ftp.R <gpkg_path> <cluster> <index_path> <output_dir>")
 }
 
 gpkg_path   <- args[1]
 cluster_num <- args[2]
-project_url <- args[3]
+index_path  <- args[3]
 out_dir     <- args[4]
-if(future::availableCores() > 16){
-    n_workers <-  2
+if (future::availableCores() > 16) {
+    n_workers <- 2
 } else {
-    n_workers <-  (future::availableCores())
+    n_workers <- future::availableCores()
 }
 
 message("=== Lidar Metrics Pipeline ===")
 message("  GPKG:        ", gpkg_path)
 message("  Cluster:     ", cluster_num)
-message("  FTP Project: ", project_url)
+message("  Tile Index:  ", index_path)
 message("  Output:      ", out_dir)
 message("  Workers:     ", n_workers)
 
@@ -224,9 +189,9 @@ cluster_hucs <- st_read(gpkg_path, quiet = TRUE) |>
     filter(cluster == cluster_num)
 message("  HUC12s in cluster: ", nrow(cluster_hucs))
 
-# Download tile index once for the whole project
-message("\nFetching tile index...")
-tile_index_info <- get_overlapping_tiles(project_url, cluster_hucs)
+# Find overlapping tiles from local index
+message("\nFinding overlapping tiles...")
+tile_index_info <- get_overlapping_tiles(index_path, cluster_hucs)
 
 if (is.null(tile_index_info) || nrow(tile_index_info) == 0) {
     stop("No overlapping tiles found for cluster ", cluster_num)
@@ -237,9 +202,6 @@ unique_tiles <- tile_index_info |>
     as.data.frame() |>
     distinct(tile_name, .keep_all = TRUE)
 message("Unique tiles to process: ", nrow(unique_tiles))
-
-# Build FTP download URLs
-tile_urls <- paste0("ftp://ftp.gis.ny.gov/", unique_tiles$FTP_PATH, unique_tiles$tile_name)
 
 # Create output directory
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
@@ -252,9 +214,9 @@ if (n_workers > 1) {
     plan(sequential)
 }
 
-# Process all tiles
+# Process all tiles (ftp_url already built by get_overlapping_tiles)
 results <- future_lapply(seq_len(nrow(unique_tiles)), function(idx) {
-    process_tile(unique_tiles$tile_name[idx], tile_urls[idx], out_dir)
+    process_tile(unique_tiles$tile_name[idx], unique_tiles$ftp_url[idx], out_dir)
 }, future.seed = NULL)
 
 # Reset to sequential

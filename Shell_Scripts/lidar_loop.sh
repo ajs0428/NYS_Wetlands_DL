@@ -16,24 +16,23 @@ module load R/4.4.3
 
 GPKG="Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg"
 OUTDIR="Data/Lidar/Metrics"
-WORKERS=4  # parallel workers per cluster (~1.5GB RAM each)
+INDEX_DIR="Data/Lidar/Indexes"
 
-# Cluster-to-FTP-project mapping (add entries as needed)
-# Format: "cluster_number|ftp_project_url"
+# Cluster-to-index mapping (add entries as needed)
+# Format: "cluster_number|index_gpkg_filename"
 entries=(
-    "208|ftp://ftp.gis.ny.gov/elevation/LIDAR/NYSGPO_CentralFingerLakes_2020/"
+    "208|NYS_Central_Finger_Lakes_2020.gpkg"
 )
 
 for entry in "${entries[@]}"; do
     cluster="${entry%%|*}"
-    project_url="${entry##*|}"
-    echo "Running lidar metrics for cluster $cluster from $project_url"
-    Rscript R_Code_Analysis/LIDAR_ftp.R \
+    index_file="${entry##*|}"
+    echo "Running lidar metrics for cluster $cluster using $index_file"
+    Rscript R_Code_Analysis/Lidar_ftp.R \
         "$GPKG" \
         "$cluster" \
-        "$project_url" \
-        "$OUTDIR" \
-        "$WORKERS" >> "Shell_Scripts/logs/lidar_$(date +%Y%m%d).log" 2>&1
+        "$INDEX_DIR/$index_file" \
+        "$OUTDIR" >> "Shell_Scripts/logs/lidar_$(date +%Y%m%d).log" 2>&1
 done
 
 echo "All lidar metric extractions completed."
