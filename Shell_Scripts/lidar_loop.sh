@@ -21,7 +21,8 @@ INDEX_DIR="Data/Lidar/Indexes"
 # Cluster-to-index mapping (add entries as needed)
 # Format: "cluster_number|index_gpkg_filename"
 entries=(
-    "208|NYS_Central_Finger_Lakes_2020.gpkg"
+    "208|NYS_Central_Finger_Lakes_2020.gpkg" \
+    "208|NYS_CayugaOswego2018.gpkg"
 )
 
 for entry in "${entries[@]}"; do
