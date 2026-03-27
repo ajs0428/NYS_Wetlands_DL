@@ -112,6 +112,15 @@ compute_lidar_metrics <- function(las_path, out_dir, res = 1) {
     }
     # Mask back to original footprint so edges don't expand
     metrics <- mask(metrics, valid_mask, maskvalues = 0)
+    # Min-max normalize intensity to 0-1 (raw values vary across sensors/projects)
+    int_vals <- values(metrics[[1]], na.rm = TRUE)
+    int_min <- min(int_vals)
+    int_max <- max(int_vals)
+    if (int_max > int_min) {
+        metrics[[1]] <- (metrics[[1]] - int_min) / (int_max - int_min)
+    } else {
+        metrics[[1]] <- metrics[[1]] * 0  # constant value → set to 0
+    }
     metrics[[1]] <- ifel(is.na(metrics[[1]]), 0, metrics[[1]]) # makes NA which is usually water 0 intensity
     metrics[[2]] <- ifel(is.na(metrics[[2]]), 1, metrics[[2]]) # makes NA which is usually water 100% below 0.5m
     metrics[[3]] <- ifel(is.na(metrics[[3]]), 0, metrics[[3]]) # makes NA which is usually water 0% between 0.5 and 2m
