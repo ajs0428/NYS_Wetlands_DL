@@ -114,7 +114,7 @@ compute_lidar_metrics <- function(las_path, out_dir, res = 1) {
     metrics <- mask(metrics, valid_mask, maskvalues = 0)
     metrics[[1]] <- ifel(is.na(metrics[[1]]), 0, metrics[[1]]) # makes NA which is usually water 0 intensity
     metrics[[2]] <- ifel(is.na(metrics[[2]]), 1, metrics[[2]]) # makes NA which is usually water 100% below 0.5m
-    metrics[[3]] <- ifel(is.na(metrics[[3]]), 0, metrics[[3]]) # makes NA which is usually water 0% between 0.5 and 3m
+    metrics[[3]] <- ifel(is.na(metrics[[3]]), 0, metrics[[3]]) # makes NA which is usually water 0% between 0.5 and 2m
     metrics[[4]] <- ifel(is.na(metrics[[4]]), 0, metrics[[4]]) # makes NA which is usually water 0% above 2m
     set.names(metrics, c("mean_intensity", "pct_below_0.5m", "pct_0.5_to_2m", "pct_2m_to_p95"))
     # Write multi-band GeoTIFF
