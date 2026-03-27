@@ -225,11 +225,13 @@ if (is.null(tile_index_info) || nrow(tile_index_info) == 0) {
     stop("No overlapping tiles found for cluster ", cluster_num)
 }
 
-# Deduplicate tiles (multiple HUC12s may overlap the same tile)
+# Deduplicate tiles and filter out partial/small tiles
+min_tile_area <- 2249000  # full tiles are 2250000 m^2
 unique_tiles <- tile_index_info |>
     as.data.frame() |>
-    distinct(tile_name, .keep_all = TRUE)
-message("Unique tiles to process: ", nrow(unique_tiles))
+    distinct(tile_name, .keep_all = TRUE) |>
+    filter(SHAPE.AREA >= min_tile_area)
+message("Unique full-size tiles to process: ", nrow(unique_tiles))
 
 # Create output directory
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
