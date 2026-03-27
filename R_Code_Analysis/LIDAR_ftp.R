@@ -226,7 +226,7 @@ if (is.null(tile_index_info) || nrow(tile_index_info) == 0) {
 }
 
 # Deduplicate tiles and filter out partial/small tiles
-min_tile_area <- 2249000  # full tiles are 2250000 m^2
+min_tile_area <- 2200000  # full tiles are 2250000 m^2
 unique_tiles <- tile_index_info |>
     as.data.frame() |>
     distinct(tile_name, .keep_all = TRUE) |>

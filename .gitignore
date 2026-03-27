@@ -3,6 +3,9 @@
 
 # Except these directories
 !Python_Code_Analysis/
+!Data/
+!Data/Training_Data/
+!Data/Training_Data/R_Patches/
 !Documentation/
 !R_Code_Analysis/
 !Shell_Scripts/
