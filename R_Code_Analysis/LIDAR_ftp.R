@@ -105,7 +105,7 @@ compute_lidar_metrics <- function(las_path, out_dir, res = 1) {
     # Fill interior NA holes with 3x3 mean focal filter (edges unchanged)
     # Create a mask of valid pixels before filling so we don't expand the raster footprint
     valid_mask <- !is.na(metrics[[1]])
-    valid_mask <- focal(valid_mask, w = matrix(1, 3, 3), fun = "max")
+    valid_mask <- focal(valid_mask, w = matrix(1, 3, 3), fun = "mean")
     for (i in seq_len(nlyr(metrics))) {
         metrics[[i]] <- focal(metrics[[i]], w = matrix(1, 3, 3),
                               fun = "mean", na.rm = TRUE, na.policy = "only")

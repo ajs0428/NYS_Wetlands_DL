@@ -66,18 +66,26 @@ lidar_huc <- function(huc_num){
     message("length of total lidar filenames in index: ", length(lidar_fn))
     lidar_metrics_in_huc <- current_lidar_metrics[current_lidar_metrics_fn %in% lidar_fn]
     message("length of lidar filenames in huc: ", length(lidar_metrics_in_huc))
+    lidar_metrics_in_huc |>
+        purrr::map(\(r) {
+            target <- c("pct_below_0.5m", "pct_0.5_to_2m", "pct_2m_to_p95")
+            available <- intersect(target, names(r))
+            if (length(available) == 0) return(NULL)
+            global(r[[available]], "max", na.rm = TRUE)
+        })
     lidar_metrics_huc <- sprc(lidar_metrics_in_huc) |>
-        terra::mosaic(fun = "min") |>
+        terra::mosaic(fun = "mean") |>
         terra::crop(y = huc, mask = TRUE)
     return(lidar_metrics_huc)
 
 }
+
 t <- lidar_huc(huc_numbers[1])
 plot(t)
 
 int <- st_intersects(lidar_index_all_sf, cluster_hucs[1,], sparse = F) |> rowSums() 
 l_int <- lidar_index_all_sf[int > 0, ] 
-l_int_col <- (l_int[l_int$COLLECTION == "NYSGPO - New York Central Finer Lakes 2020", ])
+l_int_col <- (l_int[l_int$COLLECTION == "Cortland County 2005", ])
 l_int_fn <- tools::file_path_sans_ext(l_int_col$FILENAME)
 l_cm <- current_lidar_metrics[current_lidar_metrics_fn %in% l_int_fn]
 plot(l_int_col)
@@ -88,18 +96,19 @@ find_rasters_above_1_detail <- function(dir) {
 
     target_layers <- c("pct_2m_to_p95")
     
-    files <- list.files(dir, full.names = TRUE)[1:100]
+    files <- list.files(dir, full.names = TRUE)
     
     results <- files |>
         purrr::map(\(f) {
             r <- rast(f)
-            r_sub <- r[[names(r) %in% target_layers]]
-            maxvals <- global(r_sub, "max", na.rm = TRUE)
-            flagged <- rownames(maxvals[maxvals$max > 1, , drop = FALSE])
-            flagged
-        }) |>
-        purrr::set_names(basename(files)) |>
-        purrr::keep(\(x) length(x) > 0)
+            names(r) == names(t)
+            # r_sub <- r[[names(r) %in% target_layers]]
+            # maxvals <- global(r_sub, "max", na.rm = TRUE)
+            # flagged <- rownames(maxvals[maxvals$max > 1, , drop = FALSE])
+            # flagged
+         }) #|>
+        # purrr::set_names(basename(files)) |>
+        # purrr::keep(\(x) length(x) > 0)
     
     (results)
 }
