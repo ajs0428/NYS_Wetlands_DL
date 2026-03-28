@@ -22,7 +22,8 @@ library(lidR)
 library(terra)
 
 terraOptions(tempdir = "/ibstorage/anthony/NYS_Wetlands_DL/Data/tmp",
-             memmax = 4)
+             memmax = 8,
+             memfrac = 0.5)
 
 
 message("=== Lidar Metrics Pipeline ===")
