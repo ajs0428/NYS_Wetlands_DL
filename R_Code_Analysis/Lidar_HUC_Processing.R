@@ -92,7 +92,7 @@ lidar_huc <- function(huc_num){
     
 }
 
-lapply(huc_numbers[3], lidar_huc)
+lapply(huc_numbers, lidar_huc)
 
 ### testing
 # int <- st_intersects(lidar_index_all_sf_noe, cluster_hucs[1,], sparse = F) |> rowSums() 
