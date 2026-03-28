@@ -86,7 +86,7 @@ lidar_huc <- function(huc_num){
         huc_ext <- ext(huc_vect)
         cropped <- lapply(lidar_metrics_in_huc, \(f) {
             r <- rast(f)
-            if (!is.related(huc_ext, ext(r), "intersects")) return(NULL)
+            if (!is.related(ext(r), huc_ext, "intersects")) return(NULL)
             crop(r, huc_ext)
         }) |> purrr::compact()
 
