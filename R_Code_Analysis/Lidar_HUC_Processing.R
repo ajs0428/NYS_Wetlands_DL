@@ -81,9 +81,27 @@ lidar_huc <- function(huc_num){
             warning("No matching metrics tiles for HUC ", huc_num, " — skipping")
             return(NULL)
         }
-        lidar_metrics_huc <- sprc(lapply(lidar_metrics_in_huc, rast)) |>
-            terra::mosaic(fun = "mean") |>
-            terra::crop(y = vect(huc), mask = TRUE)
+        # Crop each tile to HUC extent first to reduce memory
+        huc_vect <- vect(huc)
+        huc_ext <- ext(huc_vect)
+        cropped <- lapply(lidar_metrics_in_huc, \(f) {
+            r <- rast(f)
+            if (!is.related(huc_ext, ext(r), "intersects")) return(NULL)
+            crop(r, huc_ext)
+        }) |> purrr::compact()
+
+        if (length(cropped) == 0) {
+            warning("No overlapping rasters for HUC ", huc_num, " — skipping")
+            return(NULL)
+        }
+
+        if (length(cropped) == 1) {
+            lidar_metrics_huc <- mask(cropped[[1]], huc_vect)
+        } else {
+            lidar_metrics_huc <- sprc(cropped) |>
+                terra::mosaic(fun = "mean") |>
+                terra::mask(huc_vect)
+        }
         writeRaster(lidar_metrics_huc, lidar_huc_fn)
         #rm(lidar_metrics_huc)
         # return(lidar_metrics_huc)
