@@ -1,5 +1,5 @@
 args <- c("Data/NY_HUCS/NY_Cluster_Zones_250_NAomit_6347.gpkg",
-          123,
+          208,
           "Data/Lidar/HUC_Lidar_Metrics/")
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -61,7 +61,7 @@ lidar_index_all_sf_collect <- st_read("Data/Lidar/NYS_Lidar_All_Indexes.gpkg", q
                                          .default = COLLECTION)) |> 
     dplyr::select(-COLLECTION_NAME) |> 
     st_buffer(0) |> 
-    dplyr::filter(as.numeric(st_area(geom)) > 240000)
+    dplyr::filter(as.numeric(st_area(geom)) > 2240000)
 lidar_index_all_sf_noe <- lidar_index_all_sf_collect[!st_is_empty(lidar_index_all_sf_collect), ]
 
 lidar_huc <- function(huc_num){
@@ -75,51 +75,39 @@ lidar_huc <- function(huc_num){
         lidar_fn <- tools::file_path_sans_ext(index_in_huc$FILENAME)
         message("length of total lidar filenames in index: ", length(lidar_fn))
         lidar_metrics_in_huc <- current_lidar_metrics[current_lidar_metrics_fn %in% lidar_fn]
-        message("length of lidar filenames in huc ", huc_num, ": ", length(lidar_metrics_in_huc))
-        
+        message("length of lidar filenames in huc ",huc_num, ": ", length(lidar_metrics_in_huc))
         if (length(lidar_metrics_in_huc) == 0) {
             warning("No matching metrics tiles for HUC ", huc_num, " — skipping")
             return(NULL)
         }
-        
-        # Use VRT for lazy mosaic — only reads pixels within the HUC crop window
-        lidar_metrics_huc <- tryCatch({
-            vrt(lidar_metrics_in_huc) |>
-                terra::crop(y = vect(huc), mask = TRUE)
-        }, error = function(e) {
-            warning("Failed on HUC ", huc_num, ": ", conditionMessage(e))
-            return(NULL)
-        })
-        
-        if (is.null(lidar_metrics_huc)) return(NULL)
-        
+        lidar_metrics_huc <- sprc(lapply(lidar_metrics_in_huc, rast)) |>
+            terra::mosaic(fun = "mean") |>
+            terra::crop(y = vect(huc), mask = TRUE)
         writeRaster(lidar_metrics_huc, lidar_huc_fn)
+        #rm(lidar_metrics_huc)
+        # return(lidar_metrics_huc)
     } else {
         message("Already file: ", lidar_huc_fn)
     }
+    
 }
 
-lapply(huc_numbers[3], lidar_huc)
+lapply(huc_numbers, lidar_huc)
 
-# ## testing
-# int <- st_intersects(lidar_index_all_sf_noe, cluster_hucs, sparse = F) |> rowSums()
-# l_int <- lidar_index_all_sf_noe[int > 0, ]
+### testing
+# int <- st_intersects(lidar_index_all_sf_noe, cluster_hucs[1,], sparse = F) |> rowSums() 
+# l_int <- lidar_index_all_sf_noe[int > 0, ] 
 # unique(l_int$COLLECTION)
-# l_int_col <- (l_int[l_int$COLLECTION == "USGS - Lake Ontario / Hudson River Region 2022", ])
-# l_int_col2 <- (l_int[l_int$COLLECTION == "USGS - 2024", ])
+# l_int_col <- (l_int[l_int$COLLECTION == "NYSGPO - New York Central Finer Lakes 2020", ])
+# l_int_col2 <- (l_int[l_int$COLLECTION == "FEMA 2019", ])
 # l_int_fn <- tools::file_path_sans_ext(l_int_col$FILENAME)
 # l_cm <- current_lidar_metrics[current_lidar_metrics_fn %in% l_int_fn]
-# plet(c(vect(cluster_hucs), vect(l_int_col), vect(l_int_col2)))
+# plet(c(vect(l_int_col), vect(l_int_col2)))
 # plet(c(vect(l_int_col), vect(cluster_hucs[1,])))
 # plot(rast(l_cm[1]))
 # plot(vrt(l_cm))
 
 # ## Troubleshooting
-
-# lapply(current_lidar_metrics[1:100], \(f) {
-#     r <- rast(f)
-#     global(r, c("min", "max"), na.rm = TRUE)
-# })
 # find_rasters_above_1_detail <- function(dir) {
 # 
 #     target_layers <- c("pct_2m_to_p95")
