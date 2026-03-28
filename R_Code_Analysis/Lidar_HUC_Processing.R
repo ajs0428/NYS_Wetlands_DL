@@ -21,6 +21,9 @@ library(dplyr)
 library(lidR)
 library(terra)
 
+terraOptions(tempdir = "/ibstorage/anthony/NYS_Wetlands_DL/Data/tmp",
+             memmax = 4)
+
 
 message("=== Lidar Metrics Pipeline ===")
 message("  GPKG:        ", gpkg_path)
@@ -79,28 +82,9 @@ lidar_huc <- function(huc_num){
             return(NULL)
         }
         
-        # Read rasters with validation, drop any corrupt tiles
-        rast_list <- lapply(lidar_metrics_in_huc, \(f) {
-            r <- tryCatch(rast(f), error = function(e) NULL)
-            if (is.null(r)) {
-                warning("Could not read: ", f)
-                return(NULL)
-            }
-            r
-        }) |> 
-            purrr::compact()
-        
-        if (length(rast_list) == 0) {
-            warning("No valid rasters for HUC ", huc_num, " — skipping")
-            return(NULL)
-        }
-        
-        message("Valid rasters for HUC ", huc_num, ": ", length(rast_list), 
-                " of ", length(lidar_metrics_in_huc))
-        
+        # Use VRT for lazy mosaic — only reads pixels within the HUC crop window
         lidar_metrics_huc <- tryCatch({
-            sprc(rast_list) |>
-                terra::mosaic(fun = "max") |>
+            vrt(lidar_metrics_in_huc) |>
                 terra::crop(y = vect(huc), mask = TRUE)
         }, error = function(e) {
             warning("Failed on HUC ", huc_num, ": ", conditionMessage(e))
