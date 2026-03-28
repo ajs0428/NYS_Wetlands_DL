@@ -2,7 +2,7 @@
 #SBATCH --nodelist=cbsuxu09,cbsuxu10
 #SBATCH --mail-user=ajs544@cornell.edu
 #SBATCH --mail-type=ALL
-#SBATCH --mem-per-cpu=64G
+#SBATCH --mem-per-cpu=128G
 #SBATCH --cpus-per-task=1
 #SBATCH --job-name=lidar_huc
 #SBATCH --ntasks=2
@@ -16,7 +16,7 @@ module load R/4.4.3
 
 # Define the list of numbers
 # include=(11 12 22 46 50 51 53 56 60 64 67 84 86 90 92 102 105 116 120 123 126 136 138 152 176 183 187 189 192 193 198 203 208 218 225 240 250)
-include=(208 11 123)
+include=(123 208)
 
 # Loop through each number in the list
 for number in "${include[@]}"; do
