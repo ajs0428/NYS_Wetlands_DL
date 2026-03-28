@@ -63,7 +63,7 @@ lidar_index_all_sf_noe <- lidar_index_all_sf_collect[!st_is_empty(lidar_index_al
 
 lidar_huc <- function(huc_num){
     huc <- cluster_hucs[cluster_hucs$huc12 == huc_num, ]
-    lidar_huc_fn <-  paste0(out_dir, "Lidar_cluster_", cluster_num, "_huc_", huc_num, ".tif")
+    lidar_huc_fn <- file.path(out_dir, paste0("Lidar_cluster_", cluster_num, "_huc_", huc_num, ".tif"))
     
     if(!file.exists(lidar_huc_fn)){
         message("New file created for: ", lidar_huc_fn)
@@ -73,14 +73,11 @@ lidar_huc <- function(huc_num){
         message("length of total lidar filenames in index: ", length(lidar_fn))
         lidar_metrics_in_huc <- current_lidar_metrics[current_lidar_metrics_fn %in% lidar_fn]
         message("length of lidar filenames in huc ",huc_num, ": ", length(lidar_metrics_in_huc))
-        # lidar_metrics_in_huc |>
-        #     purrr::map(\(r) {
-        #         target <- c("pct_below_0.5m", "pct_0.5_to_2m", "pct_2m_to_p95")
-        #         available <- intersect(target, names(r))
-        #         if (length(available) == 0) return(NULL)
-        #         global(r[[available]], "max", na.rm = TRUE)
-        #     })
-        lidar_metrics_huc <- sprc(lidar_metrics_in_huc) |>
+        if (length(lidar_metrics_in_huc) == 0) {
+            warning("No matching metrics tiles for HUC ", huc_num, " — skipping")
+            return(NULL)
+        }
+        lidar_metrics_huc <- sprc(lapply(lidar_metrics_in_huc, rast)) |>
             terra::mosaic(fun = "mean") |>
             terra::crop(y = vect(huc), mask = TRUE)
         writeRaster(lidar_metrics_huc, lidar_huc_fn)
