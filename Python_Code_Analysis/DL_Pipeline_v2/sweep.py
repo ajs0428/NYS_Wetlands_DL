@@ -69,7 +69,6 @@ def run_sweep(
     depth: int = 4,
     num_workers: int = 4,
     early_stopping_patience: int = 15,
-    architecture: str = "resunet34",
     precision: str = "32-true",
     label_smoothing: float = 0.0,
 ):
@@ -100,7 +99,6 @@ def run_sweep(
                 num_workers=num_workers,
                 seed=None,  # random seed each run
                 early_stopping_patience=early_stopping_patience,
-                architecture=architecture,
                 precision=precision,
                 label_smoothing=label_smoothing,
                 **exp,
@@ -178,8 +176,6 @@ if __name__ == "__main__":
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--early-stopping", type=int, default=15)
-    parser.add_argument("--architecture", type=str, default="resunet34",
-                        choices=["unet", "resunet34"])
     parser.add_argument("--precision", type=str, default="32-true",
                         choices=["32-true", "16-mixed", "bf16-mixed"])
     args = parser.parse_args()
@@ -202,6 +198,5 @@ if __name__ == "__main__":
         depth=args.depth,
         num_workers=args.workers,
         early_stopping_patience=args.early_stopping,
-        architecture=args.architecture,
         precision=args.precision,
     )

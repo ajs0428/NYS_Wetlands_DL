@@ -112,7 +112,6 @@ def main(
     depth: int = 4,
     seed: int = 42,
     sort_by: str = "overall_accuracy",
-    architecture: str = "unet",
     use_aspp: bool = False,
     aspp_rates: tuple = (6, 12, 18),
 ):
@@ -128,7 +127,6 @@ def main(
         depth: Model depth
         seed: Random seed (must match training)
         sort_by: Column to sort results by (ascending = worst first)
-        architecture: Model architecture
         use_aspp: Whether model uses ASPP at bottleneck
         aspp_rates: Dilation rates for ASPP branches
     """
@@ -145,7 +143,7 @@ def main(
 
     # Load model
     model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
-                       architecture=architecture, use_aspp=use_aspp, aspp_rates=aspp_rates)
+                       use_aspp=use_aspp, aspp_rates=aspp_rates)
 
     # Create test split (no DataLoader — we need per-patch access)
     print("\nCreating test split...")
@@ -212,9 +210,6 @@ if __name__ == "__main__":
         "--sort-by", type=str, default="overall_accuracy",
         help="Column to sort by ascending (worst first). Options: overall_accuracy, mean_iou, macro_f1"
     )
-    parser.add_argument("--architecture", type=str, default="unet",
-                        choices=["unet", "resunet34", "dualbranch"],
-                        help="Model architecture (default: unet)")
     parser.add_argument("--use-aspp", action="store_true",
                         help="Model uses ASPP at U-Net bottleneck")
     parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
@@ -246,7 +241,6 @@ if __name__ == "__main__":
         depth=args.depth,
         seed=args.seed,
         sort_by=args.sort_by,
-        architecture=args.architecture,
         use_aspp=args.use_aspp,
         aspp_rates=tuple(args.aspp_rates),
     )

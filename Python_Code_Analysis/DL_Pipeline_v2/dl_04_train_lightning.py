@@ -3,10 +3,7 @@ dl_04_train_lightning.py
 
 PyTorch Lightning training for wetland segmentation.
 Replaces the manual training loop in dl_04_train.py with Lightning's Trainer.
-
-The network architecture is passed as a constructor argument (`net`),
-making it trivial to swap between UNet, ResUNet34, or any nn.Module
-with signature (B, C, H, W) -> (B, num_classes, H, W).
+Uses a U-Net architecture with residual blocks and SE attention.
 """
 
 import json
@@ -28,9 +25,6 @@ from typing import Optional
 
 from dl_02_dataset import create_dataloaders, create_kfold_splits, create_fold_dataloaders
 from dl_03_unet_model import UNet
-from dl_03b_resunet34 import ResUNet34
-from dl_03c_dualbranch import DualBranchUNet
-from dl_band_utils import load_band_config, get_branch_indices
 from dl_losses import HybridLoss
 
 
@@ -125,10 +119,10 @@ class WetlandFoldDataModule(L.LightningDataModule):
 
 class WetlandSegmentationModule(L.LightningModule):
     """
-    LightningModule wrapping any segmentation network.
+    LightningModule wrapping the U-Net segmentation network.
 
-    The network is passed in as `net` — it can be UNet, ResUNet34,
-    or any nn.Module with signature (B, C, H, W) -> (B, num_classes, H, W).
+    The network is passed in as `net` — any nn.Module with
+    signature (B, C, H, W) -> (B, num_classes, H, W).
     """
 
     def __init__(
@@ -284,8 +278,6 @@ def train(
     seed: Optional[int] = None,
     early_stopping_patience: int = 15,
     lr_patience: int = 5,
-    architecture: str = "unet",
-    fusion: str = "gated",
     precision: str = "32-true",
     ce_weight: float = 1.0,
     dice_weight: float = 1.0,
@@ -313,7 +305,6 @@ def train(
         seed: Random seed
         early_stopping_patience: Epochs to wait before early stopping
         lr_patience: Epochs to wait before reducing LR
-        architecture: Model architecture ('unet' or 'resunet34')
         precision: Training precision ('32-true', '16-mixed', 'bf16-mixed')
         ce_weight: Cross-entropy weight in hybrid loss
         dice_weight: Dice weight in hybrid loss
@@ -341,7 +332,7 @@ def train(
     print(f"{'='*60}")
     print("Wetland Classification Training (Lightning)")
     print(f"{'='*60}")
-    print(f"Architecture: {architecture}" + (f" + ASPP(rates={aspp_rates})" if use_aspp else ""))
+    print(f"Architecture: UNet" + (f" + ASPP(rates={aspp_rates})" if use_aspp else ""))
     print(f"Classification mode: {mode}")
     print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
@@ -359,17 +350,16 @@ def train(
     class_weights = dm.class_weights
     print(f"Class weights: {class_weights.tolist()}")
 
-    # Network — select architecture
-    net = _build_network(
-        architecture, in_channels, num_classes,
-        base_filters, depth, dropout,
-        use_aspp, aspp_rates, fusion, stats,
+    # Network
+    net = UNet(
+        in_channels=in_channels,
+        num_classes=num_classes,
+        base_filters=base_filters,
+        depth=depth,
+        dropout=dropout,
+        use_aspp=use_aspp,
+        aspp_rates=aspp_rates,
     )
-    if architecture == "dualbranch":
-        config = load_band_config()
-        optical_idx, terrain_idx = get_branch_indices(stats, config)
-        print(f"Dual-branch: {len(optical_idx)} optical channels, "
-              f"{len(terrain_idx)} terrain channels, fusion={fusion}")
 
     # Lightning module
     module = WetlandSegmentationModule(
@@ -393,7 +383,7 @@ def train(
     callbacks = [
         ModelCheckpoint(
             dirpath=output_dir,
-            filename=f"best_{mode}_{architecture}",
+            filename=f"best_{mode}_unet",
             monitor="val/loss",
             save_top_k=1,
             mode="min",
@@ -407,7 +397,7 @@ def train(
     ]
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    run_name = f"{architecture}_bf{base_filters}_{timestamp}"
+    run_name = f"unet_bf{base_filters}_{timestamp}"
     csv_logger = CSVLogger(save_dir=output_dir, name="lightning_logs", version=run_name)
     tb_logger = TensorBoardLogger(save_dir=output_dir, name="tb_logs", version=run_name,
                                    log_graph=True)
@@ -464,57 +454,12 @@ def train(
                 history[hist_key] = values
 
     # Save JSON (parity with legacy dl_04_train.py)
-    history_path = output_dir / f"training_history_{mode}_{architecture}.json"
+    history_path = output_dir / f"training_history_{mode}_unet.json"
     with open(history_path, "w") as f:
         json.dump(history, f, indent=2)
     print(f"Training history saved to {history_path}")
 
     return history
-
-
-# ── Network factory ─────────────────────────────────────────────────
-
-def _build_network(
-    architecture: str,
-    in_channels: int,
-    num_classes: int,
-    base_filters: int,
-    depth: int,
-    dropout: float,
-    use_aspp: bool,
-    aspp_rates: tuple,
-    fusion: str,
-    stats: dict,
-):
-    """Create a fresh network instance for the given architecture."""
-    if architecture == "dualbranch":
-        config = load_band_config()
-        optical_idx, terrain_idx = get_branch_indices(stats, config)
-        return DualBranchUNet(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            optical_indices=optical_idx,
-            terrain_indices=terrain_idx,
-            fusion=fusion,
-            dropout=dropout,
-        )
-    elif architecture == "resunet34":
-        return ResUNet34(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            base_filters=base_filters,
-            dropout=dropout,
-        )
-    else:
-        return UNet(
-            in_channels=in_channels,
-            num_classes=num_classes,
-            base_filters=base_filters,
-            depth=depth,
-            dropout=dropout,
-            use_aspp=use_aspp,
-            aspp_rates=aspp_rates,
-        )
 
 
 # ── K-Fold Cross-Validation ────────────────────────────────────────
@@ -534,8 +479,6 @@ def train_kfold(
     seed: Optional[int] = None,
     early_stopping_patience: int = 15,
     lr_patience: int = 5,
-    architecture: str = "unet",
-    fusion: str = "gated",
     precision: str = "32-true",
     ce_weight: float = 1.0,
     dice_weight: float = 1.0,
@@ -572,7 +515,7 @@ def train_kfold(
     print(f"\n{'='*60}")
     print(f"K-FOLD CROSS-VALIDATION ({n_folds} folds)")
     print(f"{'='*60}")
-    print(f"Architecture: {architecture}" + (f" + ASPP(rates={aspp_rates})" if use_aspp else ""))
+    print(f"Architecture: UNet" + (f" + ASPP(rates={aspp_rates})" if use_aspp else ""))
     print(f"Classification mode: {mode}")
     print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
@@ -584,7 +527,7 @@ def train_kfold(
 
     # Output directory for this CV run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    kfold_dir = output_dir / f"kfold_{n_folds}fold_{architecture}_{timestamp}"
+    kfold_dir = output_dir / f"kfold_{n_folds}fold_unet_{timestamp}"
     kfold_dir.mkdir(parents=True, exist_ok=True)
 
     fold_results = []
@@ -608,10 +551,14 @@ def train_kfold(
         dm.setup()
 
         # Fresh network
-        net = _build_network(
-            architecture, in_channels, num_classes,
-            base_filters, depth, dropout,
-            use_aspp, aspp_rates, fusion, stats,
+        net = UNet(
+            in_channels=in_channels,
+            num_classes=num_classes,
+            base_filters=base_filters,
+            depth=depth,
+            dropout=dropout,
+            use_aspp=use_aspp,
+            aspp_rates=aspp_rates,
         )
 
         # Lightning module
@@ -634,7 +581,7 @@ def train_kfold(
         callbacks = [
             ModelCheckpoint(
                 dirpath=kfold_dir,
-                filename=f"best_{mode}_{architecture}_{fold_name}",
+                filename=f"best_{mode}_unet_{fold_name}",
                 monitor="val/loss",
                 save_top_k=1,
                 mode="min",
@@ -647,7 +594,7 @@ def train_kfold(
             LearningRateMonitor(logging_interval="epoch"),
         ]
 
-        run_name = f"{architecture}_bf{base_filters}_{fold_name}_{timestamp}"
+        run_name = f"unet_bf{base_filters}_{fold_name}_{timestamp}"
         csv_logger = CSVLogger(
             save_dir=kfold_dir, name="lightning_logs", version=run_name,
         )
@@ -720,7 +667,7 @@ def train_kfold(
     # Save results JSON
     results = {
         "n_folds": n_folds,
-        "architecture": architecture,
+        "architecture": "unet",
         "base_filters": base_filters,
         "depth": depth,
         "seed": seed,
@@ -738,7 +685,7 @@ def train_kfold(
         "summary": summary,
     }
 
-    results_path = kfold_dir / f"kfold_results_{mode}_{architecture}.json"
+    results_path = kfold_dir / f"kfold_results_{mode}_unet.json"
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Results saved to {results_path}")
@@ -773,12 +720,6 @@ if __name__ == "__main__":
                         help="Early stopping patience (epochs)")
     parser.add_argument("--lr-patience", type=int, default=5,
                         help="ReduceLROnPlateau patience (epochs, default: 5)")
-    parser.add_argument("--architecture", type=str, default="unet",
-                        choices=["unet", "resunet34", "dualbranch"],
-                        help="Model architecture (default: unet)")
-    parser.add_argument("--fusion", type=str, default="gated",
-                        choices=["gated", "concat"],
-                        help="Dual-branch fusion strategy (default: gated)")
     parser.add_argument("--precision", type=str, default="32-true",
                         choices=["32-true", "16-mixed", "bf16-mixed"],
                         help="Training precision (default: 32-true)")
@@ -824,8 +765,6 @@ if __name__ == "__main__":
         seed=args.seed,
         early_stopping_patience=args.early_stopping,
         lr_patience=args.lr_patience,
-        architecture=args.architecture,
-        fusion=args.fusion,
         precision=args.precision,
         ce_weight=args.ce_weight,
         dice_weight=args.dice_weight,

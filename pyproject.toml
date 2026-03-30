@@ -22,8 +22,6 @@ dependencies = [
     # Utilities
     "tqdm>=4.60",
     "tensorboard>=2.20.0",
-    # Model backbones
-    "timm>=1.0.0",
 ]
 
 [project.optional-dependencies]

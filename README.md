@@ -1,14 +1,10 @@
 # NYS Wetlands Deep Learning
 
-A deep learning pipeline for wetland semantic segmentation in New York State. The project uses swappable encoder-decoder architectures (U-Net, dual-branch ResNet) trained on multi-source remote sensing data (terrain, spectral indices, SAR, and NAIP imagery) to classify pixels into wetland categories. Training data is derived from the National Wetlands Inventory and organized by HUC12 watersheds for systematic processing across the state.
+A deep learning pipeline for wetland semantic segmentation in New York State. The project uses a U-Net encoder-decoder architecture with residual blocks and squeeze-and-excitation (SE) attention, trained on multi-source remote sensing data (terrain, spectral indices, SAR, and NAIP imagery) to classify pixels into wetland categories. Training data is derived from the National Wetlands Inventory and organized by HUC12 watersheds for systematic processing across the state.
 
-Available architectures:
-- **U-Net** (default): Single-encoder U-Net with residual blocks and SE attention
-- **Dual-Branch U-Net**: Separate ResNet-34 (optical/spectral) and ResNet-18 (terrain/LiDAR) encoders with cross-modal fusion, following [Jamali & Mahdianpari (2022)](https://doi.org/10.3390/rs14020359)
+The pipeline supports two classification modes, toggled via `dl_band_config.json`:
 
-The pipeline supports two classification modes, toggled via `band_config.json`:
-
-- **Multiclass** (default): Five classes — EMW, FSW, OWW, SSW, UPL
+- **Multiclass** (default): Four classes — EMW, FSW, SSW, UPL
 - **Binary**: Two classes — WET (all wetland types merged) vs UPL (upland)
 
 Binary mode remaps labels at runtime so both modes use the same training patches. See the [pipeline README](Python_Code_Analysis/DL_Pipeline_v2/README.md) for details.
@@ -17,24 +13,25 @@ Training patches are currently 256x256 pixels, but the pipeline is patch-size ag
 
 ## Environment Setup
 
-**Conda** (current local setup):
-
-```bash
-conda env create -f Python_Code_Analysis/wetland-cnn-env.yml
-conda activate wetland-cnn
-```
-
-**uv** (alternative, recommended for HPC deployment):
+**uv (recommended):**
 
 ```bash
 uv sync                        # core dependencies
 uv sync --extra notebooks      # include Jupyter and SHAP
+source .venv/bin/activate
 ```
 
 For CUDA-enabled PyTorch on HPC, add the appropriate index:
 
 ```bash
 uv sync --extra-index-url https://download.pytorch.org/whl/cu121
+```
+
+**Conda** (alternative):
+
+```bash
+conda env create -f Python_Code_Analysis/wetland-cnn-env.yml
+conda activate wetland-cnn
 ```
 
 Dependencies are defined in `pyproject.toml`.

@@ -92,8 +92,8 @@ Output directories are created with `mkdir(parents=True, exist_ok=True)` before 
 - Any `nn.Module` with signature `(B, C, H, W) -> (B, num_classes, H, W)` is a valid architecture
 - `in_channels` has no default — must be provided explicitly from stats
 - All architectures implement a `count_parameters()` method
-- Architecture is swappable in `dl_04_train_lightning.py` via the `--architecture` arg (`"unet"` or `"resunet34"`)
-- Architecture registry lives in `dl_model_utils.py` (`_ARCHITECTURES` dict)
+- The pipeline uses a single U-Net architecture (`dl_03_unet_model.py`)
+- Model loading is handled by `dl_model_utils.py`
 
 ---
 

@@ -14,7 +14,6 @@ from typing import Dict, List, Optional
 
 from dl_02_dataset import create_dataloaders
 from dl_03_unet_model import get_device
-from dl_band_utils import load_band_config, get_branch_indices
 from dl_model_utils import load_model
 
 
@@ -197,8 +196,6 @@ def main(
     base_filters: int = 32,
     depth: int = 4,
     seed: int = 42,
-    architecture: str = "unet",
-    fusion: str = "gated",
     use_aspp: bool = False,
     aspp_rates: tuple = (6, 12, 18),
 ):
@@ -214,8 +211,6 @@ def main(
         base_filters: Model base filters
         depth: Model depth
         seed: Random seed (must match training)
-        architecture: Model architecture
-        fusion: Dual-branch fusion strategy (only used with dualbranch)
         use_aspp: Whether model uses ASPP at bottleneck
         aspp_rates: Dilation rates for ASPP branches
     """
@@ -230,16 +225,8 @@ def main(
     class_names = stats["class_names"]
     ignore_index = stats.get("ignore_index", 255)
 
-    # Compute branch indices for dual-branch architecture
-    optical_idx = terrain_idx = None
-    if architecture == "dualbranch":
-        config = load_band_config()
-        optical_idx, terrain_idx = get_branch_indices(stats, config)
-
     # Load model
     model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
-                       architecture=architecture, optical_indices=optical_idx,
-                       terrain_indices=terrain_idx, fusion=fusion,
                        use_aspp=use_aspp, aspp_rates=aspp_rates)
 
     # Create test loader
@@ -278,12 +265,6 @@ if __name__ == "__main__":
     parser.add_argument("--depth", type=int, default=4)
     parser.add_argument("--seed", type=int, required=True,
                         help="Random seed (must match training seed for correct test split)")
-    parser.add_argument("--architecture", type=str, default="unet",
-                        choices=["unet", "resunet34", "dualbranch"],
-                        help="Model architecture (default: unet)")
-    parser.add_argument("--fusion", type=str, default="gated",
-                        choices=["gated", "concat"],
-                        help="Dual-branch fusion strategy (default: gated)")
     parser.add_argument("--use-aspp", action="store_true",
                         help="Model uses ASPP at U-Net bottleneck")
     parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
@@ -306,8 +287,6 @@ if __name__ == "__main__":
         base_filters=args.base_filters,
         depth=args.depth,
         seed=args.seed,
-        architecture=args.architecture,
-        fusion=args.fusion,
         use_aspp=args.use_aspp,
         aspp_rates=tuple(args.aspp_rates),
     )

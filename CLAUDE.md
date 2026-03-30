@@ -1,7 +1,7 @@
 # NYS Wetlands Deep Learning
 
 ## Project Overview
-U-Net semantic segmentation pipeline for wetland classification in New York State. Multi-source remote sensing inputs (terrain, spectral, SAR, NAIP imagery) → pixel-level wetland type predictions.
+U-Net semantic segmentation pipeline for wetland classification in New York State. Multi-source remote sensing inputs (terrain, spectral, SAR, NAIP imagery) -> pixel-level wetland type predictions.
 
 ## Environment
 - **Package manager:** uv (preferred) or conda
@@ -14,22 +14,21 @@ U-Net semantic segmentation pipeline for wetland classification in New York Stat
 ## Project Structure
 ```
 Python_Code_Analysis/DL_Pipeline_v2/   # Main pipeline (production)
-  dl_01_compute_statistics.py             # Scan patches → normalization_stats.json
+  dl_01_compute_statistics.py             # Scan patches -> normalization_stats.json
   dl_02_dataset.py                        # PyTorch Dataset, normalization, splits
   dl_03_unet_model.py                     # U-Net with residual blocks + SE attention
-  dl_03b_resunet34.py                     # ResUNet34 scaffold (swappable architecture)
-  dl_03c_dualbranch.py                    # Dual-branch: ResNet-34 optical + ResNet-18 terrain + fusion
   dl_04_train.py                          # Legacy training loop (fallback/reference)
-  dl_04_train_lightning.py                # Lightning training (primary) — swappable architectures
+  dl_04_train_lightning.py                # Lightning training (primary)
   dl_05_evaluate.py                       # Test metrics, confusion matrix, IoU
   dl_05b_evaluate_patches.py              # Per-patch evaluation
-  dl_06_predict.py                        # Sliding-window inference → GeoTIFF
-  dl_07_shap_analysis.ipynb              # Feature importance
-  dl_losses.py                            # DiceLoss + HybridLoss
+  dl_06_predict.py                        # Sliding-window inference -> GeoTIFF
+  dl_07_shap_analysis.ipynb               # Feature importance
+  dl_losses.py                            # FocalLoss + DiceLoss + HybridLoss
   dl_model_utils.py                       # Shared model loading (legacy + Lightning checkpoints)
   dl_band_utils.py                        # Shared band discovery/config utilities
   dl_band_config.json                     # Normalization rules, class names, mode
-  wetland_pipeline.ipynb               # Interactive notebook (full pipeline)
+  sweep.py                                # Loss hyperparameter sweep
+  wetland_pipeline.ipynb                  # Interactive notebook (full pipeline)
 Models/                                # Trained checkpoints + evaluation outputs
 Data/Training_Data/R_Patches/          # 256x256 GeoTIFF training patches
 Data/Training_Data/normalization_stats.json
@@ -37,10 +36,10 @@ pyproject.toml                         # Dependencies + uv config
 ```
 
 ## Pipeline Workflow
-Run scripts in order: dl_01 → dl_02 (imported by dl_04) → dl_03 (imported by dl_04) → dl_04_train_lightning → dl_05 → dl_06
+Run scripts in order: dl_01 -> dl_02 (imported by dl_04) -> dl_03 (imported by dl_04) -> dl_04_train_lightning -> dl_05 -> dl_06
 - **Primary training:** `dl_04_train_lightning.py` (Lightning Trainer with callbacks)
 - **Legacy training:** `dl_04_train.py` (manual loop, kept as fallback)
-- Architecture is swappable via `--architecture` flag: `unet` (default), `resunet34`, `dualbranch`
+- **Architecture:** U-Net with residual blocks + SE attention (`dl_03_unet_model.py`)
 
 ## Key Conventions
 - **Band handling is dynamic** — band names/indices are discovered from raster descriptions at runtime, never hardcoded
@@ -53,16 +52,14 @@ Run scripts in order: dl_01 → dl_02 (imported by dl_04) → dl_03 (imported by
 
 ## Architecture Details
 - **U-Net:** Residual blocks + SE attention (depth 4 local / 5 HPC, base filters 32/64). Optional ASPP module at bottleneck (`--use-aspp`) expands receptive field to ~250m+ via parallel dilated convolutions (rates 6/12/18 default; use 3/6/12 for depth=5). Off by default for backward compatibility.
-- **Dual-Branch U-Net:** ResNet-34 optical encoder + ResNet-18 terrain encoder + gated/concat fusion + SE decoder (~36M params). Band routing configured in `dl_band_config.json` `branch_assignment`. Requires `timm`.
-- **Swappable:** Any `nn.Module` with `(B, C, H, W) → (B, num_classes, H, W)` interface works
 - Input: 18 predictor channels (no geomorphon one-hot; see band list below)
-- Loss: Hybrid CrossEntropy + Dice with class weights (in `dl_losses.py`)
+- Loss: Hybrid Focal + Dice with class weights (in `dl_losses.py`)
 - Optimizer: AdamW + ReduceLROnPlateau
 - Callbacks: ModelCheckpoint, EarlyStopping, LearningRateMonitor
-- Patch size must be divisible by 2^depth (32 for dual-branch)
+- Patch size must be divisible by 2^depth (16 for depth=4, 32 for depth=5)
 
 ## Data Notes
-- Training patches: 245 files, 256×256 pixels, 19 bands (18 predictors + 1 label)
+- Training patches: 245 files, 256x256 pixels, 19 bands (18 predictors + 1 label)
 - **Predictor bands (18):**
   - Terrain (7): DEM, meanc_local, planc_local, profc_local, dmv_local, slope_local, TPI_local
   - Vegetation structure (1): CHM

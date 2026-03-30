@@ -1,6 +1,6 @@
 # NYS Wetlands DL Pipeline v2 — User Guide
 
-Deep learning pipeline for wetland semantic segmentation in New York State using a U-Net architecture. Supports two classification modes: **multiclass** (4-class: EMW, FSW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `dl_band_config.json` — both modes use the same training patches with label remapping applied at runtime.
+Deep learning pipeline for wetland semantic segmentation in New York State using a U-Net architecture with residual blocks and SE attention. Supports two classification modes: **multiclass** (4-class: EMW, FSW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `dl_band_config.json` — both modes use the same training patches with label remapping applied at runtime.
 
 ## Table of Contents
 
@@ -20,7 +20,6 @@ Deep learning pipeline for wetland semantic segmentation in New York State using
 - [Step 5: Evaluate](#step-5-evaluate-dl_05_evaluatepy)
 - [Step 6: Predict](#step-6-predict-dl_06_predictpy)
 - [Interactive Notebook](#interactive-notebook-wetland_pipelineipynb)
-- [Swappable Architectures](#swappable-architectures)
 - [Loss Function: Hybrid Focal + Dice](#loss-function-hybrid-focal--dice)
 - [Adding a New Band](#adding-a-new-band)
 - [Patch Size](#patch-size)
@@ -47,7 +46,7 @@ python dl_01_compute_statistics.py \
 python dl_04_train_lightning.py --epochs 50 --batch-size 16
 
 # 5. Evaluate on the held-out test set
-python dl_05_evaluate.py --model "../../Models/best_multiclass.ckpt"
+python dl_05_evaluate.py --model "../../Models/best_multiclass_unet.ckpt" --seed 42
 
 # 6. Run inference on a new raster
 python dl_06_predict.py input_raster.tif output_classification.tif --probs
@@ -159,40 +158,40 @@ Key dependencies: PyTorch, Lightning, rasterio, NumPy, scikit-learn, matplotlib.
 
 ```
 GeoTIFF Patches (19 bands: 18 predictors + 1 label)
-        │
-        ▼
- ┌─────────────────────┐
- │ dl_01_compute_stats  │ → normalization_stats.json
- └─────────────────────┘
-        │
-        ▼
- ┌─────────────────────┐
- │ dl_02_dataset        │ → PyTorch DataLoaders (train / val / test)
- └─────────────────────┘
-        │
-        ▼
- ┌─────────────────────┐
- │ dl_03_unet_model     │ → U-Net architecture (swappable — see dl_03b, dl_03c)
- └─────────────────────┘
-        │
-        ▼
- ┌─────────────────────────────────┐
- │ dl_04_train_lightning            │ → best_{mode}.ckpt (Lightning checkpoints)
- │  (or dl_04_train.py legacy)     │    + CSV/TensorBoard logs
- └─────────────────────────────────┘
-        │
-        ▼
- ┌─────────────────────┐
- │ dl_05_evaluate       │ → Per-class metrics, confusion matrix
- └─────────────────────┘
-        │
-        ▼
- ┌─────────────────────┐
- │ dl_06_predict        │ → Classification GeoTIFF + probability maps
- └─────────────────────┘
+        |
+        v
+ +---------------------+
+ | dl_01_compute_stats  | -> normalization_stats.json
+ +---------------------+
+        |
+        v
+ +---------------------+
+ | dl_02_dataset        | -> PyTorch DataLoaders (train / val / test)
+ +---------------------+
+        |
+        v
+ +---------------------+
+ | dl_03_unet_model     | -> U-Net architecture (residual blocks + SE attention)
+ +---------------------+
+        |
+        v
+ +---------------------------------+
+ | dl_04_train_lightning            | -> best_{mode}_unet.ckpt (Lightning checkpoints)
+ |  (or dl_04_train.py legacy)     |    + CSV/TensorBoard logs
+ +---------------------------------+
+        |
+        v
+ +---------------------+
+ | dl_05_evaluate       | -> Per-class metrics, confusion matrix
+ +---------------------+
+        |
+        v
+ +---------------------+
+ | dl_06_predict        | -> Classification GeoTIFF + probability maps
+ +---------------------+
 
 Shared modules: dl_losses.py (FocalLoss, DiceLoss, HybridLoss), dl_model_utils.py (checkpoint loading),
-                dl_band_utils.py (band discovery/config/branch routing)
+                dl_band_utils.py (band discovery/config)
 ```
 
 ---
@@ -264,22 +263,16 @@ The single file to edit when changing band normalization. Located alongside the 
     "Geomorph_local": {"method": "one_hot", "num_classes": 10, "class_range": [1, 10]}
   },
   "class_names": ["EMW", "FSW", "SSW", "UPL"],
-  "ignore_index": 255,
-  "branch_assignment": {
-    "optical": ["EVI", "NDYI", "GDVI", "VV", "VH", "r", "g", "b", "nir", "n_ndvi", "n_ndwi"],
-    "terrain": ["DEM", "meanc_local", "planc_local", "profc_local", "dmv_local", "slope_local", "TPI_local", "CHM"]
-  }
+  "ignore_index": 255
 }
 ```
-
-The `branch_assignment` field is used only by the dual-branch architecture (`--architecture dualbranch`). It maps each predictor band to either the optical or terrain encoder branch. Every band in `predictor_names` must appear in exactly one branch.
 
 **Normalization methods:**
 
 | Method | Formula | Use Case |
 |--------|---------|----------|
-| `min_max` | (x - min) / (max - min) → [0, 1] | Default for continuous bands (DEM, CHM, slope, SAR, etc.) |
-| `shift_scale` | (x + shift) / scale → [0, 1] | Spectral indices with known range (e.g., NDVI: [-1, 1]) |
+| `min_max` | (x - min) / (max - min) -> [0, 1] | Default for continuous bands (DEM, CHM, slope, SAR, etc.) |
+| `shift_scale` | (x + shift) / scale -> [0, 1] | Spectral indices with known range (e.g., NDVI: [-1, 1]) |
 | `one_hot` | Encode to N binary channels | Categorical bands (e.g., Geomorph if present) |
 
 Any band **not listed** in `band_normalization` automatically uses `min_max`. You only need to add entries for `shift_scale` or `one_hot` bands.
@@ -306,7 +299,7 @@ The pipeline supports two classification modes, controlled by `classification_mo
 - The `binary_mapping` field in `dl_band_config.json` defines how original classes group into binary classes. The key order determines integer encoding (WET=0, UPL=1).
 - `dl_01_compute_statistics.py` builds a `label_remap` dict (e.g., `{0:0, 1:0, 2:0, 3:0, 4:1}`) and aggregates class counts under the binary labels. Both `label_remap` and `classification_mode` are stored in `normalization_stats.json`.
 - `dl_02_dataset.py` reads `label_remap` from the stats and applies it on-the-fly via a vectorized numpy lookup table. The original training patches are never modified.
-- Downstream scripts (`dl_04_train`, `dl_05_evaluate`, `dl_06_predict`) derive `num_classes` from `len(stats["class_names"])`, so they work with either 2 or 5 classes without any code changes.
+- Downstream scripts (`dl_04_train`, `dl_05_evaluate`, `dl_06_predict`) derive `num_classes` from `len(stats["class_names"])`, so they work with either 2 or 4 classes without any code changes.
 
 ### Custom Groupings
 
@@ -334,8 +327,6 @@ Imported by all pipeline scripts. Key functions:
 | `get_normalization_method(band, config)` | Look up a band's normalization (with default fallback) |
 | `compute_in_channels(names, config)` | Count total input channels after one-hot expansion |
 | `compute_in_channels_from_stats(path)` | Read `in_channels` from `normalization_stats.json` |
-| `get_branch_indices(stats, config)` | Compute (optical, terrain) channel index lists for dual-branch model |
-| `get_branch_channels(stats, config)` | Return (optical_count, terrain_count) channel counts |
 | `validate_prediction_bands(raster, expected, label)` | Match raster bands to expected predictors by name |
 
 ---
@@ -427,7 +418,7 @@ U-Net encoder-decoder architecture with skip connections, residual encoder block
 ### Architecture
 
 ```
-Input (18 ch) → Residual Encoder (progressive downsampling) → Bottleneck → SE Decoder (upsampling + skip + attention) → Output (4 ch)
+Input (18 ch) -> Residual Encoder (progressive downsampling) -> Bottleneck -> SE Decoder (upsampling + skip + attention) -> Output (4 ch)
 ```
 
 - **Encoder blocks**: Double Conv-BN-ReLU with residual (shortcut) connections. A 1x1 projection handles channel mismatches. Improves gradient flow through the encoder.
@@ -441,7 +432,7 @@ Input (18 ch) → Residual Encoder (progressive downsampling) → Bottleneck →
 |---------|-------------------|-------------------|
 | `base_filters` | 32 | 64 |
 | `depth` | 4 | 5 |
-| Filter progression | 32→64→128→256→512 | 64→128→256→512→1024 |
+| Filter progression | 32->64->128->256->512 | 64->128->256->512->1024 |
 | Parameters (approx) | ~7.8M | ~125.3M |
 
 - `in_channels` and `num_classes` are read from `normalization_stats.json` — not hardcoded.
@@ -458,7 +449,7 @@ Runs a forward pass with dummy data to verify the model builds correctly.
 
 ## Step 4: Train (Lightning) (`dl_04_train_lightning.py`)
 
-Primary training script using PyTorch Lightning. Provides automatic checkpointing, early stopping, LR monitoring, and progress bars. The network architecture is swappable — see [Swappable Architectures](#swappable-architectures).
+Primary training script using PyTorch Lightning. Provides automatic checkpointing, early stopping, LR monitoring, and progress bars.
 
 ### Usage
 
@@ -490,16 +481,15 @@ python dl_04_train_lightning.py \
 | `--base-filters` | 32 | U-Net base filter count |
 | `--depth` | 4 | U-Net encoder/decoder depth |
 | `--workers` | 4 | DataLoader worker processes (use 0 on macOS if issues arise) |
-| `--seed` | 42 | Random seed for reproducibility |
+| `--seed` | None | Random seed for reproducibility |
 | `--early-stopping` | 15 | Early stopping patience (epochs without improvement) |
-| `--architecture` | `unet` | Model architecture (`unet`, `resunet34`, or `dualbranch`) |
-| `--fusion` | `gated` | Dual-branch fusion strategy (`gated` or `concat`) |
-| `--use-aspp` | False | Add ASPP module at U-Net bottleneck (UNet only) |
+| `--use-aspp` | False | Add ASPP module at U-Net bottleneck |
 | `--aspp-rates` | `6 12 18` | Dilation rates for ASPP branches (space-separated) |
-| `--ce-weight` | 0.5 | Weight for Focal Loss component |
+| `--ce-weight` | 1.0 | Weight for Focal Loss component |
 | `--dice-weight` | 1.0 | Weight for Dice Loss component |
 | `--focal-gamma` | 2.0 | Focal Loss gamma (0 = plain CE, 2 = standard focal) |
 | `--label-smoothing` | 0.0 | Label smoothing factor (0.0 = off) |
+| `--kfold` | 0 | Number of cross-validation folds (0 = disabled) |
 
 ### Training Details
 
@@ -514,13 +504,13 @@ python dl_04_train_lightning.py \
 
 | File | Description |
 |------|-------------|
-| `Models/best_{mode}.ckpt` | Best Lightning checkpoint (lowest validation loss) |
+| `Models/best_{mode}_unet.ckpt` | Best Lightning checkpoint (lowest validation loss) |
 | `Models/lightning_logs/` | CSV logs and optional TensorBoard logs |
 
 ### Key Components
 
 - **`WetlandDataModule`**: Wraps `create_dataloaders()` from `dl_02_dataset.py` as a Lightning data module
-- **`WetlandSegmentationModule`**: Lightning module accepting any `nn.Module` as the backbone network
+- **`WetlandSegmentationModule`**: Lightning module wrapping the U-Net backbone
 - **`train()`**: Entry point that wires up data, model, callbacks, and Trainer
 
 ---
@@ -555,7 +545,7 @@ Runs the trained model on the held-out test set and computes detailed metrics.
 
 ```bash
 python dl_05_evaluate.py \
-  --model ../../Models/best_model.pth \
+  --model ../../Models/best_multiclass_unet.ckpt \
   --patches-dir ../../Data/Training_Data/R_Patches \
   --stats-path ../../Data/Training_Data/normalization_stats.json \
   --output evaluation_metrics.json \
@@ -577,9 +567,7 @@ python dl_05_evaluate.py \
 | `--base-filters` | 32 | Must match the trained model |
 | `--depth` | 4 | Must match the trained model |
 | `--seed` | 42 | Must match training seed (same test split) |
-| `--architecture` | `unet` | Must match the trained model |
-| `--fusion` | `gated` | Must match the trained model (dualbranch only) |
-| `--use-aspp` | False | Must match the trained model (UNet only) |
+| `--use-aspp` | False | Must match the trained model |
 | `--aspp-rates` | `6 12 18` | Must match the trained model |
 
 ### Metrics Reported
@@ -600,7 +588,7 @@ Applies a trained model to a new raster for wall-to-wall classification.
 python dl_06_predict.py \
   input_raster.tif \
   output_classification.tif \
-  --model ../../Models/best_model.pth \
+  --model ../../Models/best_multiclass_unet.ckpt \
   --stats ../../Data/Training_Data/normalization_stats.json \
   --patch-size 128 \
   --overlap 32 \
@@ -622,17 +610,15 @@ python dl_06_predict.py \
 | `--base-filters` | 32 | Must match the trained model |
 | `--depth` | 4 | Must match the trained model |
 | `--probs` | False | Also save per-class probability maps |
-| `--architecture` | `unet` | Must match the trained model |
-| `--fusion` | `gated` | Must match the trained model (dualbranch only) |
-| `--use-aspp` | False | Must match the trained model (UNet only) |
+| `--use-aspp` | False | Must match the trained model |
 | `--aspp-rates` | `6 12 18` | Must match the trained model |
 
 ### Output Files
 
 | File | Format | Description |
 |------|--------|-------------|
-| `output_classification.tif` | uint8, 1 band | Class IDs (0–4 multiclass, 0–1 binary); 255 = unclassified |
-| `output_classification.probs.tif` | float32, N bands | Per-class probabilities; N = num_classes (5 multiclass, 2 binary). Only if `--probs`. |
+| `output_classification.tif` | uint8, 1 band | Class IDs (0-3 multiclass, 0-1 binary); 255 = unclassified |
+| `output_classification.probs.tif` | float32, N bands | Per-class probabilities; N = num_classes (4 multiclass, 2 binary). Only if `--probs`. |
 
 ### How Band Matching Works
 
@@ -662,11 +648,9 @@ BASE_FILTERS = 32      # 32 for local (M1), 64 for HPC
 DEPTH = 4              # 4 for local, 5 for HPC
 NUM_WORKERS = 4        # Set to 0 if issues on macOS
 SEED = 42
-ARCHITECTURE = "unet"  # "unet", "resunet34", or "dualbranch"
-FUSION = "gated"       # "gated" or "concat" (dualbranch only)
 
 # ASPP at U-Net bottleneck (expands receptive field to ~250m+)
-USE_ASPP = False            # Set True to enable (UNet only)
+USE_ASPP = False            # Set True to enable
 ASPP_RATES = (6, 12, 18)   # Dilation rates; use (3, 6, 12) for depth=5
 
 # Loss parameters
@@ -680,92 +664,18 @@ LABEL_SMOOTHING = 0.0  # 0.0 = off
 
 | Cells | Step |
 |-------|------|
-| 1–4 | Setup, imports, configuration |
-| 5–8 | Compute statistics, visualize class distributions |
-| 9–14 | Create DataLoaders, inspect batches, plot sample patches |
-| 15–20 | Train model with progress tracking |
-| 21–25 | Evaluate on test set, confusion matrix |
-| 26–30 | Predict on new rasters, visualize results |
-
----
-
-## Swappable Architectures
-
-The Lightning training script (`dl_04_train_lightning.py`) accepts any `nn.Module` as the backbone network. To swap architectures, change one line in the `train()` function:
-
-```python
-# Current (default):
-net = UNet(in_channels=in_channels, num_classes=num_classes, base_filters=32, depth=4)
-
-# Future example:
-net = ResUNet34(in_channels=in_channels, num_classes=num_classes, base_filters=64)
-```
-
-The `WetlandSegmentationModule` wraps the network — loss, optimizer, metrics, checkpointing, and data loading all stay the same regardless of which backbone is used.
-
-### Requirements for a new architecture
-
-Any `nn.Module` that satisfies this contract:
-- **Input**: `(batch, in_channels, H, W)` tensor
-- **Output**: `(batch, num_classes, H, W)` raw logits
-- **Constructor**: Must accept `in_channels` and `num_classes` (no hardcoded defaults)
-
-### Available architectures
-
-| File | Architecture | CLI Flag | Status |
-|------|-------------|----------|--------|
-| `dl_03_unet_model.py` | U-Net (residual + SE attention) | `--architecture unet` | Production |
-| `dl_03b_resunet34.py` | ResUNet34 (ResNet-34 encoder + U-Net decoder + SE attention) | `--architecture resunet34` | Production |
-| `dl_03c_dualbranch.py` | Dual-Branch U-Net (ResNet-34 optical + ResNet-18 terrain + cross-modal fusion) | `--architecture dualbranch` | Production |
-
-### Dual-Branch Architecture
-
-The dual-branch model (`dl_03c_dualbranch.py`) processes optical/spectral and terrain/LiDAR features through separate encoder branches with attention-based fusion, following [Jamali & Mahdianpari (2022)](https://doi.org/10.3390/rs14020359).
-
-```
-Optical Branch (spectral + SAR + NAIP)    Terrain Branch (DEM derivatives + CHM)
-    ResNet-34 encoder                         ResNet-18 encoder
-         |                                         |
-    [stage feats] ----> CrossModalFusion <---- [stage feats]  (x5 stages)
-                            |
-                    Shared U-Net Decoder
-                    (SE attention + skip connections)
-                            |
-                       Output logits
-```
-
-**Band routing** is configured declaratively in `dl_band_config.json` via the `branch_assignment` field. The model accepts the full stacked input tensor and splits channels internally — no changes needed in `dl_02_dataset.py` or downstream scripts.
-
-**Fusion strategies** (`--fusion`):
-- `gated` (default): Squeeze-excitation-style gated fusion — learns per-channel soft routing between branches
-- `concat`: Simple concatenation + 1x1 projection — lower parameter count, useful as ablation baseline
-
-**Usage:**
-
-```bash
-# Train with dual-branch architecture
-python dl_04_train_lightning.py --architecture dualbranch --fusion gated
-
-# Evaluate
-python dl_05_evaluate.py --model ../../Models/best_multiclass_dualbranch.ckpt \
-  --architecture dualbranch --fusion gated
-
-# Predict
-python dl_06_predict.py input.tif output.tif \
-  --model ../../Models/best_multiclass_dualbranch.ckpt \
-  --architecture dualbranch --fusion gated
-```
-
-**Notes:**
-- `--base-filters` and `--depth` are accepted but not used (ResNet channel widths are fixed at 64/128/256/512)
-- Requires `timm` library (included in `pyproject.toml`)
-- Patch size must be divisible by 32 (5 downsampling levels)
+| 1-4 | Setup, imports, configuration |
+| 5-8 | Compute statistics, visualize class distributions |
+| 9-14 | Create DataLoaders, inspect batches, plot sample patches |
+| 15-20 | Train model with progress tracking |
+| 21-25 | Evaluate on test set, confusion matrix |
+| 26-30 | Predict on new rasters, visualize results |
 
 ---
 
 ## Loss Function: Hybrid Focal + Dice
 
-The training loss (`dl_losses.py`) combines two complementary components to handle severe class imbalance (e.g., UPL at ~74% of pixels vs. wetland classes at 6–13%):
+The training loss (`dl_losses.py`) combines two complementary components to handle severe class imbalance (e.g., UPL at ~74% of pixels vs. wetland classes at 6-13%):
 
 ### Focal Loss (replaces plain CrossEntropy)
 
@@ -887,8 +797,8 @@ docker1 run --shm-size=8g --gpus all \
   nys-wetlands-dl
 ```
 
-- **`--user $(id -u):$(id -g)`**: Required — runs the container as your HPC user so output files (checkpoints, logs) are owned by you, not root. Without this, files written to mounted volumes will have root ownership and you won't be able to copy or modify them.
-- **`--shm-size=8g`**: Required — PyTorch DataLoader workers use shared memory for IPC. Docker's default (64MB) causes `bus error` crashes. Increase to `16g` if needed for large batch sizes.
+- **`--user $(id -u):$(id -g)`**: Required — runs the container as your HPC user so output files (checkpoints, logs) are owned by you, not root.
+- **`--shm-size=8g`**: Required — PyTorch DataLoader workers use shared memory for IPC. Docker's default (64MB) causes `bus error` crashes.
 - **`--gpus all`**: Exposes all available NVIDIA GPUs. Lightning auto-detects multi-GPU and uses DDP.
 - **Volume mounts**: `Data/` and `Models/` are mounted at runtime (not baked into the image) so training data and checkpoints persist on the host.
 
@@ -905,19 +815,6 @@ Two pipeline scripts are provided:
 | EPOCHS | 50 | 100 |
 | ASPP_RATES | 6 12 18 | 3 6 12 (for depth=5) |
 | KFOLD | 0 (disabled) | 2 (enabled) |
-
-### Updating the Shell Script Without Rebuilding
-
-To iterate on the shell script without rebuilding the image, mount it at runtime:
-
-```bash
-docker1 run --shm-size=8g --gpus all \
-  --user $(id -u):$(id -g) \
-  -v /workdir/user/NYS_Wetlands_DL/Data:/app/Data \
-  -v /workdir/user/NYS_Wetlands_DL/Models:/app/Models \
-  -v /workdir/user/DL_model_pipeline_HPC.sh:/app/Shell_Scripts/DL_model_pipeline_HPC.sh \
-  nys-wetlands-dl
-```
 
 ### Monitoring Training
 
@@ -960,7 +857,7 @@ NYS_Wetlands_DL/
 │   │   └── normalization_stats.json    # Generated by Step 1
 │   └── Predictions/                    # Output from Step 6
 ├── Models/
-│   ├── best_{mode}.ckpt               # Best Lightning checkpoint
+│   ├── best_{mode}_unet.ckpt          # Best Lightning checkpoint
 │   ├── lightning_logs/                 # Training logs (CSV/TensorBoard)
 │   └── (legacy .pth files)            # From dl_04_train.py if used
 └── Python_Code_Analysis/
@@ -974,8 +871,6 @@ NYS_Wetlands_DL/
         ├── dl_01_compute_statistics.py     # Step 1: Stats
         ├── dl_02_dataset.py               # Step 2: Dataset + normalize_bands()
         ├── dl_03_unet_model.py            # Step 3: U-Net architecture
-        ├── dl_03b_resunet34.py            # ResUNet34 architecture
-        ├── dl_03c_dualbranch.py           # Dual-branch architecture (ResNet-34/18 + fusion)
         ├── dl_04_train_lightning.py        # Step 4: Train (Lightning, primary)
         ├── dl_04_train.py                 # Step 4: Train (legacy fallback)
         ├── dl_05_evaluate.py              # Step 5: Evaluate
