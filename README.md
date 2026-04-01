@@ -40,17 +40,41 @@ Dependencies are defined in `pyproject.toml`.
 
 The project includes a Dockerfile for running on Cornell BioHPC GPU nodes. The image uses `pytorch/pytorch` with CUDA 11.8, compatible with all available GPU nodes (A40, A100, H100, A6000).
 
-### 1. Transfer code to HPC
+There are two ways to get the Docker image onto the HPC: build locally and transfer a tarball, or build directly on the HPC.
+
+### Option A: Build locally and transfer
 
 ```bash
+# Build for linux/amd64 (required even if developing on Apple Silicon)
+docker build --platform linux/amd64 -t nys-wetlands-dl .
+
+# Save as tarball
+docker save nys-wetlands-dl | gzip > nys-wetlands-dl.tar.gz
+
+# Transfer tarball to HPC
+scp nys-wetlands-dl.tar.gz <username>@<gpu-node>.biohpc.cornell.edu:/workdir/<labid>/
+
+# On the HPC: load the image
+docker1 load < /workdir/<labid>/nys-wetlands-dl.tar.gz
+docker1 tag nys-wetlands-dl biohpc_<labid>/wetland-dl
+```
+
+### Option B: Build on the HPC
+
+```bash
+# Transfer code to HPC
 rsync -av --exclude='.venv' --exclude='Data' --exclude='Models' --exclude='.git' \
   "/path/to/NYS_Wetlands_DL/" \
   <username>@<gpu-node>.biohpc.cornell.edu:/workdir/<labid>/nys_wetlands/
+
+# Or git clone directly on the HPC (Data/ and Models/ are gitignored)
+
+# Build on HPC
+cd /workdir/<labid>/nys_wetlands
+docker1 build -t biohpc_<labid>/wetland-dl .
 ```
 
-Or `git clone` directly on the HPC (Data/ and Models/ are gitignored).
-
-### 2. Copy data from network storage
+### Copy data from network storage
 
 ```bash
 mkdir -p /workdir/<labid>/nys_wetlands/Data/Training_Data
@@ -60,40 +84,35 @@ cp /network/mount/path/normalization_stats.json /workdir/<labid>/nys_wetlands/Da
 mkdir -p /workdir/<labid>/nys_wetlands/Models
 ```
 
-### 3. Build the Docker image
+### Run training
 
 ```bash
-cd /workdir/<labid>/nys_wetlands
-docker1 build -t biohpc_<labid>/wetland-dl .
-```
-
-### 4. Run training
-
-```bash
-docker1 run --gpus all \
+docker1 run --gpus all --shm-size=8g \
   -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
   -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
   biohpc_<labid>/wetland-dl
 ```
 
+> **Note:** `--shm-size=8g` increases shared memory from the default 64MB. PyTorch DataLoader workers use shared memory for IPC, and the default is too small for multi-worker training.
+
 ### Other run modes
 
 ```bash
 # Interactive shell
-docker1 run --gpus all -it \
+docker1 run --gpus all --shm-size=8g -it \
   -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
   -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
   biohpc_<labid>/wetland-dl /bin/bash
 
 # Run a specific script
-docker1 run --gpus all \
+docker1 run --gpus all --shm-size=8g \
   -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
   -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
   biohpc_<labid>/wetland-dl \
   python Python_Code_Analysis/DL_Pipeline_v2/dl_05_evaluate.py
 
 # Mount code for live editing (no rebuild needed)
-docker1 run --gpus all -it \
+docker1 run --gpus all --shm-size=8g -it \
   -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
   -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
   -v /workdir/<labid>/nys_wetlands/Python_Code_Analysis:/app/Python_Code_Analysis \
@@ -106,7 +125,7 @@ BioHPC restricts web services to ports 8009–8039. Use `find_open_ports` on the
 
 ```bash
 # Start container with ports in the allowed range (e.g., 8015 for TensorBoard, 8016 for Jupyter)
-docker1 run --gpus all -it \
+docker1 run --gpus all --shm-size=8g -it \
   -p 8015:8015 -p 8016:8016 \
   -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
   -v /workdir/<labid>/nys_wetlands/Models:/app/Models \

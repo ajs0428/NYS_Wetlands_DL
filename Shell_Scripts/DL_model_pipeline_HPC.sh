@@ -2,10 +2,8 @@
 set -e  # Exit on error
 
 # === CONFIGURATION ===
-ARCHITECTURE="unet"        # "unet", "resunet34", or "dualbranch"
-FUSION="gated"             # "gated" or "concat" (only used with dualbranch)
-USE_ASPP=true             # true to enable ASPP at U-Net bottleneck (unet only)
-ASPP_RATES="3 6 12"      # dilation rates for ASPP; use "3 6 12" for depth=5
+USE_ASPP=true             # true to enable ASPP at U-Net bottleneck
+ASPP_RATES="3 6 12"      # dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for depth=4
 KFOLD=2                    # 0=disabled, 2+=run k-fold CV instead of single split
 BASE_FILTERS=64
 DEPTH=5
@@ -14,7 +12,7 @@ EPOCHS=100
 SEED=420
 WORKERS=6
 
-# To switch between binary and multiclass, you edit classification_mode in dl_band_config.json 
+# To switch between binary and multiclass, edit classification_mode in dl_band_config.json
 # before running the pipeline — step 1 (dl_01_compute_statistics.py)
 
 # === PATHS (relative to project root) ===
@@ -23,25 +21,21 @@ STATS_PATH="Data/Training_Data/normalization_stats.json"
 BAND_CONFIG="Python_Code_Analysis/DL_Pipeline_v2/dl_band_config.json"
 SCRIPT_DIR="Python_Code_Analysis/DL_Pipeline_v2"
 
-# Build architecture flags
-ARCH_FLAGS="--architecture $ARCHITECTURE"
-if [ "$ARCHITECTURE" = "dualbranch" ]; then
-    ARCH_FLAGS="$ARCH_FLAGS --fusion $FUSION"
-fi
+# Build optional flags
+ASPP_FLAGS=""
 if [ "$USE_ASPP" = true ]; then
-    ARCH_FLAGS="$ARCH_FLAGS --use-aspp --aspp-rates $ASPP_RATES"
+    ASPP_FLAGS="--use-aspp --aspp-rates $ASPP_RATES"
 fi
 
 # Read classification mode from band config
 CLASS_MODE=$(python -c "import json; print(json.load(open('$BAND_CONFIG'))['classification_mode'])" 2>/dev/null || echo "multiclass")
 
-echo "=== NYS Wetlands DL Pipeline ==="
+echo "=== NYS Wetlands DL Pipeline (HPC) ==="
 echo "Classification: $CLASS_MODE"
-echo "Architecture: $ARCHITECTURE"
-[ "$ARCHITECTURE" = "dualbranch" ] && echo "Fusion: $FUSION"
+echo "Architecture: U-Net (bf=$BASE_FILTERS, depth=$DEPTH)"
 [ "$USE_ASPP" = true ] && echo "ASPP: enabled (rates: $ASPP_RATES)"
 [ "$KFOLD" -ge 2 ] 2>/dev/null && echo "K-Fold CV: $KFOLD folds"
-echo "================================"
+echo "======================================="
 
 # Step 1: Normalization stats and band configuration
 python $SCRIPT_DIR/dl_01_compute_statistics.py \
@@ -67,7 +61,7 @@ python $SCRIPT_DIR/dl_04_train_lightning.py \
         --lr-patience 10 \
         --dice-weight 1.5 \
         --focal-gamma 2.0 \
-        $ARCH_FLAGS \
+        $ASPP_FLAGS \
         $KFOLD_FLAG
 
 # Skip evaluate/predict steps when running k-fold CV
@@ -94,17 +88,17 @@ python $SCRIPT_DIR/dl_05_evaluate.py \
         --base-filters $BASE_FILTERS \
         --depth $DEPTH \
         --seed $SEED \
-        $ARCH_FLAGS
+        $ASPP_FLAGS
 
-# Step 4: Predict
-python $SCRIPT_DIR/dl_06_predict.py \
-        Data/HUC_DL_Stacks/cluster_11_huc_042900030103_stack.tif \
-        Data/HUC_DL_Predictions/DLpred_cluster_11_huc_042900030103.tif \
-        --model "$BEST_CKPT" \
-        --stats $STATS_PATH \
-        --patch-size 256 \
-        --overlap 128 \
-        --base-filters $BASE_FILTERS \
-        --depth $DEPTH \
-        --probs \
-        $ARCH_FLAGS
+# # Step 4: Predict
+# python $SCRIPT_DIR/dl_06_predict.py \
+#         Data/HUC_DL_Stacks/cluster_11_huc_042900030103_stack.tif \
+#         Data/HUC_DL_Predictions/DLpred_cluster_11_huc_042900030103.tif \
+#         --model "$BEST_CKPT" \
+#         --stats $STATS_PATH \
+#         --patch-size 256 \
+#         --overlap 128 \
+#         --base-filters $BASE_FILTERS \
+#         --depth $DEPTH \
+#         --probs \
+#         $ASPP_FLAGS

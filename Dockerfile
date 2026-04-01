@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir \
     ) jupyterlab ipykernel
 
 # Copy pipeline code and shell scripts
-COPY Python_Code_Analysis/ Python_Code_Analysis/
+COPY Python_Code_Analysis/DL_Pipeline_v2/ Python_Code_Analysis/DL_Pipeline_v2/
 COPY Shell_Scripts/ Shell_Scripts/
 
 # Expose ports for Jupyter and TensorBoard (BioHPC allows 8009-8039)

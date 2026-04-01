@@ -5,4 +5,6 @@ Data/
 __pycache__/
 .git/
 .gitignore
-*.ipynb_checkpoints/
+.DS_Store
+**/.ipynb_checkpoints/
+Python_Code_Analysis/Archive/
