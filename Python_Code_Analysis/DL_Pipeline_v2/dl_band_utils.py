@@ -135,6 +135,33 @@ def compute_in_channels_from_stats(stats_path: Path) -> int:
 
 
 
+def load_global_band_stats(stats_path: Path) -> Dict[str, dict]:
+    """
+    Load global band min/max statistics from a JSON file produced by
+    compute_global_band_stats.R.
+
+    Expected JSON structure:
+        { "band_name": {"band": "...", "min": ..., "max": ...}, ... }
+
+    Args:
+        stats_path: Path to global_band_stats.json.
+
+    Returns:
+        Dict mapping band name -> {"min": float, "max": float}.
+    """
+    with open(stats_path) as f:
+        raw = json.load(f)
+
+    stats = {}
+    for band_name, entry in raw.items():
+        stats[band_name] = {
+            "min": float(entry["min"]),
+            "max": float(entry["max"]),
+        }
+
+    return stats
+
+
 def validate_prediction_bands(
     raster_bands: List[str],
     expected_predictors: List[str],

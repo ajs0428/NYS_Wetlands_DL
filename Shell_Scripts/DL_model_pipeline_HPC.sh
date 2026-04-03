@@ -19,6 +19,7 @@ WORKERS=6
 PATCHES_DIR="Data/Training_Data/R_Patches"
 STATS_PATH="Data/Training_Data/normalization_stats.json"
 BAND_CONFIG="Python_Code_Analysis/DL_Pipeline_v2/dl_band_config.json"
+GLOBAL_STATS="Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json"
 SCRIPT_DIR="Python_Code_Analysis/DL_Pipeline_v2"
 
 # Build optional flags
@@ -41,7 +42,8 @@ echo "======================================="
 python $SCRIPT_DIR/dl_01_compute_statistics.py \
         --patches-dir $PATCHES_DIR \
         --output $STATS_PATH \
-        --config $BAND_CONFIG
+        --config $BAND_CONFIG \
+        --global-stats $GLOBAL_STATS
 
 # Build k-fold flag
 KFOLD_FLAG=""

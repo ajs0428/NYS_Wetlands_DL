@@ -52,21 +52,23 @@ Run scripts in order: dl_01 -> dl_02 (imported by dl_04) -> dl_03 (imported by d
 
 ## Architecture Details
 - **U-Net:** Residual blocks + SE attention (depth 4 local / 5 HPC, base filters 32/64). Optional ASPP module at bottleneck (`--use-aspp`) expands receptive field to ~250m+ via parallel dilated convolutions (rates 6/12/18 default; use 3/6/12 for depth=5). Off by default for backward compatibility.
-- Input: 18 predictor channels (no geomorphon one-hot; see band list below)
+- Input: 31 channels (22 predictor bands; Geomorph_local one-hot expands 1 band to 10 channels)
 - Loss: Hybrid Focal + Dice with class weights (in `dl_losses.py`)
 - Optimizer: AdamW + ReduceLROnPlateau
 - Callbacks: ModelCheckpoint, EarlyStopping, LearningRateMonitor
 - Patch size must be divisible by 2^depth (16 for depth=4, 32 for depth=5)
 
 ## Data Notes
-- Training patches: 245 files, 256x256 pixels, 19 bands (18 predictors + 1 label)
-- **Predictor bands (18):**
-  - Terrain (7): DEM, meanc_local, planc_local, profc_local, dmv_local, slope_local, TPI_local
-  - Vegetation structure (1): CHM
+- Training patches: 256x256 pixels, 23 bands (22 predictors + 1 label)
+- **Predictor bands (22):**
+  - Terrain (7): DEM, meanc_local, planc_local, profc_local, slope_local, flowacc, twi
+  - Vegetation structure (3): CHM, pct_below_0.5m, pct_0.5_to_2m
   - Spectral indices (3): EVI, NDYI, GDVI
   - SAR (2): VV, VH
   - NAIP imagery (4): r, g, b, nir
-  - NAIP-derived indices (2): n_ndvi, n_ndwi (note: different from Sentinel-derived NDVI)
+  - NAIP-derived indices (2): n_ndvi, n_ndwi
+  - Geomorphon (1): Geomorph_local (one-hot encoded to 10 channels)
+- **Normalization:** min_max bands use global raster statistics (`--global-stats` flag in dl_01) to ensure normalization covers full inference range. Spectral indices (EVI, NDYI, GDVI, n_ndvi, n_ndwi) use shift_scale [-1,1]->[0,1]. Geomorph_local uses one-hot encoding (10 classes).
 - **Label band:** MOD_CLASS
 - Classes: 0=EMW, 1=FSW, 2=SSW, 3=UPL, 255=unlabeled (OWW removed; can be re-added via dl_band_config.json)
 - **Class balance:** UPL=74.4%, FSW=13.3%, EMW=6.6%, SSW=5.7%

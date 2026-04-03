@@ -25,10 +25,12 @@ from dl_band_utils import (
     get_predictor_band_names,
     get_normalization_method,
     compute_in_channels,
+    load_global_band_stats,
 )
 
 
-def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path = None):
+def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path = None,
+                       global_stats_path: Path = None):
     """
     Compute normalization statistics from all training patches.
 
@@ -36,6 +38,10 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
         patches_dir: Directory containing GeoTIFF patches
         output_path: Path to save JSON statistics file
         config_path: Path to dl_band_config.json (default: alongside this script)
+        global_stats_path: Optional path to global_band_stats.json from R.
+            If provided, min_max bands use these global values instead of
+            patch-derived min/max, ensuring normalization covers the full
+            inference raster range.
     """
     config = load_band_config(config_path)
     label_band = config["label_band"]
@@ -227,6 +233,27 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
                 "note": "Maps to [0, 1]"
             }
 
+    # Override min_max bands with global raster statistics if provided
+    if global_stats_path is not None:
+        global_stats = load_global_band_stats(global_stats_path)
+        overridden = []
+        for band_name, norm_entry in normalization.items():
+            if norm_entry["method"] == "min_max" and band_name in global_stats:
+                norm_entry["min"] = global_stats[band_name]["min"]
+                norm_entry["max"] = global_stats[band_name]["max"]
+                norm_entry["note"] = "Maps to [0, 1] (global raster min/max)"
+                overridden.append(band_name)
+
+        missing = [
+            name for name in normalization
+            if normalization[name]["method"] == "min_max" and name not in global_stats
+        ]
+        if missing:
+            print(f"\nWarning: No global stats for min_max bands: {missing}")
+            print("  These bands will use patch-derived min/max.")
+
+        print(f"\nOverrode min/max with global stats for: {overridden}")
+
     # Compute in_channels after normalization/one-hot expansion
     in_channels = compute_in_channels(predictor_names, config)
 
@@ -307,6 +334,12 @@ if __name__ == "__main__":
         default=None,
         help="Path to dl_band_config.json (default: alongside this script)"
     )
+    parser.add_argument(
+        "--global-stats",
+        type=Path,
+        default=None,
+        help="Path to global_band_stats.json from R (overrides patch min/max)"
+    )
     args = parser.parse_args()
 
     # Handle relative paths from project root
@@ -314,4 +347,8 @@ if __name__ == "__main__":
     patches_dir = project_root / args.patches_dir if not args.patches_dir.is_absolute() else args.patches_dir
     output_path = project_root / args.output if not args.output.is_absolute() else args.output
 
-    compute_statistics(patches_dir, output_path, args.config)
+    global_stats_path = None
+    if args.global_stats is not None:
+        global_stats_path = project_root / args.global_stats if not args.global_stats.is_absolute() else args.global_stats
+
+    compute_statistics(patches_dir, output_path, args.config, global_stats_path)
