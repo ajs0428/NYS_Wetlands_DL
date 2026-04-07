@@ -26,6 +26,7 @@ from typing import Optional
 from dl_02_dataset import create_dataloaders, create_kfold_splits, create_fold_dataloaders
 from dl_03_unet_model import UNet
 from dl_losses import HybridLoss
+from dl_model_utils import export_safetensors
 
 
 # ── Data Module ──────────────────────────────────────────────────────
@@ -129,6 +130,14 @@ class WetlandSegmentationModule(L.LightningModule):
         self,
         net: nn.Module,
         num_classes: int,
+        # Architecture params — stored in checkpoint for reproducibility
+        in_channels: int = 1,
+        base_filters: int = 32,
+        depth: int = 4,
+        dropout: float = 0.0,
+        use_aspp: bool = False,
+        aspp_rates: tuple = (6, 12, 18),
+        # Training params
         class_weights: Optional[torch.Tensor] = None,
         class_names: Optional[list] = None,
         ignore_index: int = 255,
@@ -365,6 +374,12 @@ def train(
     module = WetlandSegmentationModule(
         net=net,
         num_classes=num_classes,
+        in_channels=in_channels,
+        base_filters=base_filters,
+        depth=depth,
+        dropout=dropout,
+        use_aspp=use_aspp,
+        aspp_rates=aspp_rates,
         class_weights=class_weights,
         class_names=class_names,
         ignore_index=ignore_index,
@@ -424,6 +439,10 @@ def train(
     print(f"Best model: {best_path}")
     print(f"Best val/loss: {best_score:.4f}")
     print(f"{'='*60}\n")
+
+    # Export to safetensors for safe, fast inference loading
+    if best_path:
+        export_safetensors(Path(best_path))
 
     # ── Build history dict from CSV log ──────────────────────────────
     metrics_file = Path(csv_logger.log_dir) / "metrics.csv"
@@ -565,6 +584,12 @@ def train_kfold(
         module = WetlandSegmentationModule(
             net=net,
             num_classes=num_classes,
+            in_channels=in_channels,
+            base_filters=base_filters,
+            depth=depth,
+            dropout=dropout,
+            use_aspp=use_aspp,
+            aspp_rates=aspp_rates,
             class_weights=dm.class_weights,
             class_names=class_names,
             ignore_index=ignore_index,
@@ -625,6 +650,8 @@ def train_kfold(
         best_path = trainer.checkpoint_callback.best_model_path
         best_score = trainer.checkpoint_callback.best_model_score
         fold_metrics["best_checkpoint"] = best_path
+        if best_path:
+            export_safetensors(Path(best_path))
         fold_metrics["best_val_loss"] = (
             best_score.item() if best_score is not None else None
         )

@@ -203,17 +203,19 @@ if __name__ == "__main__":
     parser.add_argument("--stats-path", type=Path, default=Path("Data/Training_Data/normalization_stats.json"))
     parser.add_argument("--output-csv", type=Path, default=None,
                         help="Path to save results CSV. Auto-detects binary/multiclass if not specified.")
-    parser.add_argument("--base-filters", type=int, default=32)
-    parser.add_argument("--depth", type=int, default=4)
+    parser.add_argument("--base-filters", type=int, default=32,
+                        help="Model base filters (auto-detected from checkpoint if available)")
+    parser.add_argument("--depth", type=int, default=4,
+                        help="Model depth (auto-detected from checkpoint if available)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--sort-by", type=str, default="overall_accuracy",
         help="Column to sort by ascending (worst first). Options: overall_accuracy, mean_iou, macro_f1"
     )
     parser.add_argument("--use-aspp", action="store_true",
-                        help="Model uses ASPP at U-Net bottleneck")
+                        help="Model uses ASPP (auto-detected from checkpoint if available)")
     parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
-                        help="Dilation rates for ASPP branches (default: 6 12 18)")
+                        help="ASPP dilation rates (auto-detected from checkpoint if available)")
     args = parser.parse_args()
 
     # Handle relative paths

@@ -239,13 +239,15 @@ if __name__ == "__main__":
     parser.add_argument("--stats", type=Path, default=Path("Data/Training_Data/normalization_stats.json"))
     parser.add_argument("--patch-size", type=int, default=128)
     parser.add_argument("--overlap", type=int, default=64)
-    parser.add_argument("--base-filters", type=int, default=32)
-    parser.add_argument("--depth", type=int, default=4)
+    parser.add_argument("--base-filters", type=int, default=32,
+                        help="Model base filters (auto-detected from checkpoint if available)")
+    parser.add_argument("--depth", type=int, default=4,
+                        help="Model depth (auto-detected from checkpoint if available)")
     parser.add_argument("--probs", action="store_true", help="Save probability maps")
     parser.add_argument("--use-aspp", action="store_true",
-                        help="Model uses ASPP at U-Net bottleneck")
+                        help="Model uses ASPP (auto-detected from checkpoint if available)")
     parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
-                        help="Dilation rates for ASPP branches (default: 6 12 18)")
+                        help="ASPP dilation rates (auto-detected from checkpoint if available)")
 
     args = parser.parse_args()
 

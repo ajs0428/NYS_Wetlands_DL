@@ -261,14 +261,16 @@ if __name__ == "__main__":
     parser.add_argument("--stats-path", type=Path, default=Path("Data/Training_Data/normalization_stats.json"))
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--base-filters", type=int, default=32)
-    parser.add_argument("--depth", type=int, default=4)
+    parser.add_argument("--base-filters", type=int, default=32,
+                        help="Model base filters (auto-detected from checkpoint if available)")
+    parser.add_argument("--depth", type=int, default=4,
+                        help="Model depth (auto-detected from checkpoint if available)")
     parser.add_argument("--seed", type=int, required=True,
                         help="Random seed (must match training seed for correct test split)")
     parser.add_argument("--use-aspp", action="store_true",
-                        help="Model uses ASPP at U-Net bottleneck")
+                        help="Model uses ASPP (auto-detected from checkpoint if available)")
     parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
-                        help="Dilation rates for ASPP branches (default: 6 12 18)")
+                        help="ASPP dilation rates (auto-detected from checkpoint if available)")
     args = parser.parse_args()
 
     # Handle relative paths

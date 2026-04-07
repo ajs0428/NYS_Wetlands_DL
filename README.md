@@ -9,6 +9,8 @@ The pipeline supports two classification modes, toggled via `dl_band_config.json
 
 Binary mode remaps labels at runtime so both modes use the same training patches. See the [pipeline README](Python_Code_Analysis/DL_Pipeline_v2/README.md) for details.
 
+The loss function is configurable via CLI flags or notebook parameters. **Weighted cross-entropy** (`--focal-gamma 0 --dice-weight 0`) has produced the best results to date, outperforming hybrid Focal + Dice configurations. Alternative loss options (Focal Loss, Dice Loss, and hybrid combinations) are available — see the [pipeline README](Python_Code_Analysis/DL_Pipeline_v2/README.md#loss-function) for details and tuning guidelines.
+
 Training patches are currently 256x256 pixels, but the pipeline is patch-size agnostic — the U-Net is fully convolutional and all dimensions are discovered at runtime. To use different patch sizes, just create patches at the desired size, set `PATCH_SIZE` accordingly for prediction, and retrain. The only constraint is that the patch size must be divisible by 2^depth (e.g., 16 for depth=4, 32 for depth=5).
 
 ## Environment Setup

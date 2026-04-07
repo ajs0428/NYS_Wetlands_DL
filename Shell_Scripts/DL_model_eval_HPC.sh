@@ -39,13 +39,16 @@ echo "=========================================="
 
 # --- Resolve checkpoint(s) ---
 evaluate_checkpoint() {
-    local CKPT="$1"
-    local EVAL_OUTPUT="${CKPT%.ckpt}_evaluation_metrics.json"
+    local MODEL="$1"
+    # Strip either .safetensors or .ckpt for output naming
+    local EVAL_OUTPUT="${MODEL%.*}_evaluation_metrics.json"
 
     echo ""
-    echo "--- Evaluating: $CKPT ---"
+    echo "--- Evaluating: $MODEL ---"
+    # Architecture params are auto-detected from checkpoint/sidecar metadata;
+    # CLI flags here serve as fallback for legacy checkpoints only.
     python $SCRIPT_DIR/dl_05_evaluate.py \
-            --model "$CKPT" \
+            --model "$MODEL" \
             --output "$EVAL_OUTPUT" \
             --patches-dir $PATCHES_DIR \
             --stats-path $STATS_PATH \
@@ -60,28 +63,34 @@ evaluate_checkpoint() {
 if [ -n "$MODEL_PATH" ]; then
     # User specified a path
     if [ -d "$MODEL_PATH" ]; then
-        # It's a directory — treat as k-fold run, evaluate each fold checkpoint
+        # It's a directory — treat as k-fold run, prefer safetensors per fold
         echo "K-Fold directory: $MODEL_PATH"
-        FOLD_CKPTS=( "$MODEL_PATH"/best_*_fold*.ckpt )
-        if [ ${#FOLD_CKPTS[@]} -eq 0 ]; then
+        FOLD_MODELS=( "$MODEL_PATH"/best_*_fold*.safetensors )
+        if [ ${#FOLD_MODELS[@]} -eq 0 ] || [ ! -e "${FOLD_MODELS[0]}" ]; then
+            FOLD_MODELS=( "$MODEL_PATH"/best_*_fold*.ckpt )
+        fi
+        if [ ${#FOLD_MODELS[@]} -eq 0 ] || [ ! -e "${FOLD_MODELS[0]}" ]; then
             echo "ERROR: No fold checkpoints found in $MODEL_PATH" >&2
             exit 1
         fi
-        for CKPT in "${FOLD_CKPTS[@]}"; do
-            evaluate_checkpoint "$CKPT"
+        for MODEL in "${FOLD_MODELS[@]}"; do
+            evaluate_checkpoint "$MODEL"
         done
         echo ""
-        echo "=== All ${#FOLD_CKPTS[@]} folds evaluated ==="
+        echo "=== All ${#FOLD_MODELS[@]} folds evaluated ==="
     else
         # Single checkpoint file
         evaluate_checkpoint "$MODEL_PATH"
     fi
 else
-    # Auto-select newest checkpoint
-    BEST_CKPT=$(ls -t Models/best_*.ckpt 2>/dev/null | head -1)
-    if [ -z "$BEST_CKPT" ]; then
+    # Auto-select newest — prefer safetensors, fall back to .ckpt
+    BEST_MODEL=$(ls -t Models/best_*.safetensors 2>/dev/null | head -1)
+    if [ -z "$BEST_MODEL" ]; then
+        BEST_MODEL=$(ls -t Models/best_*.ckpt 2>/dev/null | head -1)
+    fi
+    if [ -z "$BEST_MODEL" ]; then
         echo "ERROR: No checkpoints found in Models/" >&2
         exit 1
     fi
-    evaluate_checkpoint "$BEST_CKPT"
+    evaluate_checkpoint "$BEST_MODEL"
 fi

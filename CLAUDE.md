@@ -75,5 +75,11 @@ Run scripts in order: dl_01 -> dl_02 (imported by dl_04) -> dl_03 (imported by d
 - Git tracks only code/scripts (Data/ and Models/ are gitignored)
 
 ## Checkpoint Compatibility
-- `dl_model_utils.py` handles both legacy (`model_state_dict` key) and Lightning (`state_dict` with `net.` prefix) checkpoint formats
-- Evaluate and predict scripts work with checkpoints from either `dl_04_train.py` or `dl_04_train_lightning.py`
+- **Three formats supported** (in priority order):
+  1. **safetensors** (`.safetensors` + `.meta.json` sidecar) — safe (no pickle), fast, self-describing architecture
+  2. **Lightning** (`.ckpt`) — includes `hyper_parameters` for architecture auto-detection
+  3. **Legacy** (`.pth`) — requires manual `--base-filters`, `--depth`, etc. flags
+- Training auto-exports `.safetensors` alongside `.ckpt`; `load_model()` prefers sibling `.safetensors` when present
+- Architecture params (in_channels, base_filters, depth, dropout, use_aspp, aspp_rates) are stored in Lightning checkpoints and `.meta.json` sidecars
+- Convert existing `.ckpt` files: `python dl_model_utils.py Models/best_model.ckpt --base-filters 64 --depth 5`
+- `dl_model_utils.py` handles all three formats; evaluate and predict scripts work with any format

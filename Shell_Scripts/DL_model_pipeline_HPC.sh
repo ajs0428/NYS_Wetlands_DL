@@ -2,9 +2,9 @@
 set -e  # Exit on error
 
 # === CONFIGURATION ===
-USE_ASPP=true             # true to enable ASPP at U-Net bottleneck
+USE_ASPP=false             # true to enable ASPP at U-Net bottleneck
 ASPP_RATES="3 6 12"      # dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for depth=4
-KFOLD=2                    # 0=disabled, 2+=run k-fold CV instead of single split
+KFOLD=0                    # 0=disabled, 2+=run k-fold CV instead of single split
 BASE_FILTERS=64
 DEPTH=5
 BATCH_SIZE=16
@@ -61,8 +61,9 @@ python $SCRIPT_DIR/dl_04_train_lightning.py \
         --seed $SEED \
         --early-stopping 15 \
         --lr-patience 10 \
-        --dice-weight 1.5 \
-        --focal-gamma 2.0 \
+        --ce-weight 1.0 \
+        --dice-weight 0.0 \
+        --focal-gamma 0.0 \
         $ASPP_FLAGS \
         $KFOLD_FLAG
 
@@ -73,16 +74,25 @@ if [ "$KFOLD" -ge 2 ] 2>/dev/null; then
     exit 0
 fi
 
-# Find the newest checkpoint
-BEST_CKPT=$(ls -t Models/best_*.ckpt | head -1)
-echo "Using checkpoint: $BEST_CKPT"
+# Find the newest checkpoint — prefer safetensors, fall back to .ckpt
+BEST_MODEL=$(ls -t Models/best_*.safetensors 2>/dev/null | head -1)
+if [ -z "$BEST_MODEL" ]; then
+    BEST_MODEL=$(ls -t Models/best_*.ckpt 2>/dev/null | head -1)
+fi
+if [ -z "$BEST_MODEL" ]; then
+    echo "ERROR: No checkpoints found in Models/" >&2
+    exit 1
+fi
+echo "Using checkpoint: $BEST_MODEL"
 
-# Derive output name: best_multiclass_unet-v2.ckpt -> best_multiclass_unet-v2_evaluation_metrics.json
-EVAL_OUTPUT="${BEST_CKPT%.ckpt}_evaluation_metrics.json"
+# Derive output name (strip either .safetensors or .ckpt)
+EVAL_OUTPUT="${BEST_MODEL%.*}_evaluation_metrics.json"
 
 # Step 3: Evaluate the model
+# Architecture params are auto-detected from checkpoint/sidecar metadata;
+# CLI flags here serve as fallback for legacy checkpoints only.
 python $SCRIPT_DIR/dl_05_evaluate.py \
-        --model "$BEST_CKPT" \
+        --model "$BEST_MODEL" \
         --output "$EVAL_OUTPUT" \
         --patches-dir $PATCHES_DIR \
         --stats-path $STATS_PATH \
@@ -96,7 +106,7 @@ python $SCRIPT_DIR/dl_05_evaluate.py \
 # python $SCRIPT_DIR/dl_06_predict.py \
 #         Data/HUC_DL_Stacks/cluster_11_huc_042900030103_stack.tif \
 #         Data/HUC_DL_Predictions/DLpred_cluster_11_huc_042900030103.tif \
-#         --model "$BEST_CKPT" \
+#         --model "$BEST_MODEL" \
 #         --stats $STATS_PATH \
 #         --patch-size 256 \
 #         --overlap 128 \

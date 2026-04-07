@@ -673,13 +673,32 @@ LABEL_SMOOTHING = 0.0  # 0.0 = off
 
 ---
 
-## Loss Function: Hybrid Focal + Dice
+## Loss Function
 
-The training loss (`dl_losses.py`) combines two complementary components to handle severe class imbalance (e.g., UPL at ~74% of pixels vs. wetland classes at 6-13%):
+The pipeline supports several loss configurations via `dl_losses.py`, controlled by four parameters: `--ce-weight`, `--dice-weight`, `--focal-gamma`, and `--label-smoothing`. All configurations apply inverse-frequency **class weights** to handle the severe class imbalance (UPL ~74% vs. wetland classes at 6-13%) and use `ignore_index=255` to exclude unlabeled pixels.
 
-### Focal Loss (replaces plain CrossEntropy)
+### Weighted Cross-Entropy (recommended)
 
-Standard CrossEntropy treats all pixels equally — the model can achieve low loss by simply predicting the dominant class everywhere. Focal Loss adds a modulating factor `(1 - p_t)^gamma` that **down-weights easy, well-classified pixels** and focuses training on hard examples:
+Plain weighted cross-entropy has produced the best results so far, outperforming hybrid loss configurations in both overall accuracy and IoU. To use it:
+
+```
+--ce-weight 1.0 --dice-weight 0.0 --focal-gamma 0 --label-smoothing 0.0
+```
+
+Or in the notebook:
+
+```python
+CE_WEIGHT = 1.0
+DICE_WEIGHT = 0.0
+FOCAL_GAMMA = 0
+LABEL_SMOOTHING = 0.0
+```
+
+The class weights (computed from training data pixel counts) handle imbalance directly — minority wetland classes receive higher weight in the loss so the model doesn't collapse to predicting UPL everywhere.
+
+### Focal Loss (optional)
+
+Focal Loss adds a modulating factor `(1 - p_t)^gamma` that **down-weights easy, well-classified pixels** and focuses training on hard examples:
 
 ```
 FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
@@ -689,30 +708,33 @@ FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
 |---------|--------|
 | 0 | Plain CrossEntropy (no modulation) |
 | 1 | Mild down-weighting of easy examples |
-| **2** | **Standard focal loss (default)** — a UPL pixel classified at 95% confidence contributes only 0.25% of its original loss |
+| 2 | Standard focal loss — a pixel classified at 95% confidence contributes only 0.25% of its original loss |
 | 3+ | More aggressive; may under-weight even moderately confident predictions |
 
-Focal Loss still carries the inverse-frequency **class weights** from the training data, so it combines both pixel-level difficulty weighting and class-level imbalance correction.
+Enable by setting `--focal-gamma 2` (or higher). Note that Focal Loss applies class weights on top of its difficulty modulation, creating a combined pixel-level and class-level correction.
 
-### Dice Loss
+### Dice Loss (optional)
 
-Dice Loss is computed per-class then averaged, making it **inherently class-balanced** — each class contributes equally regardless of pixel count. It directly optimizes the overlap (IoU-like) between predicted and true segmentation masks.
+Dice Loss is computed per-class then averaged, making it **inherently class-balanced** — each class contributes equally regardless of pixel count. It directly optimizes the overlap (IoU-like) between predicted and true segmentation masks. Enable by setting `--dice-weight` to a positive value.
 
-### Combined Loss
+### Hybrid Focal + Dice (optional)
+
+Combines both components:
 
 ```
 total_loss = ce_weight * FocalLoss + dice_weight * DiceLoss
 ```
 
-Default: `0.5 * Focal + 1.0 * Dice`. This shifts the balance toward Dice (class-balanced) while retaining Focal's pixel-level difficulty weighting. Both components use `ignore_index=255` to exclude unlabeled pixels.
+**Caution:** In testing, hybrid loss has underperformed plain weighted CE on this dataset. Likely causes include: (1) Dice loss gradient noise from rare classes that may be absent from individual batches, (2) redundant imbalance correction (class weights in Focal + inherent balance in Dice), and (3) conflicting gradient directions between the two objectives. If experimenting with hybrid loss, consider starting with a low Dice weight (e.g., `--dice-weight 0.3`) to use it as a regularizer rather than a co-equal objective.
 
 ### Tuning Guidelines
 
 | Goal | Adjustment |
 |------|-----------|
-| More focus on minority classes | Increase `--dice-weight` or decrease `--ce-weight` |
-| Revert to plain CE behavior | Set `--focal-gamma 0` |
-| Prevent overconfident UPL predictions | Add `--label-smoothing 0.05` |
+| Best tested performance | `--ce-weight 1.0 --dice-weight 0.0 --focal-gamma 0` (plain weighted CE) |
+| More focus on minority classes | Increase class weights in training data, or try `--focal-gamma 2` |
+| Experiment with Dice regularization | `--dice-weight 0.3 --ce-weight 1.0` |
+| Prevent overconfident predictions | Add `--label-smoothing 0.05` |
 | More aggressive hard-example mining | Increase `--focal-gamma` to 3 or higher |
 
 ---
