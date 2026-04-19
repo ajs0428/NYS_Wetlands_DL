@@ -248,6 +248,8 @@ class WetlandSegmentationModule(L.LightningModule):
         self._compute_and_log_iou("train")
 
     def on_validation_epoch_end(self):
+        # Snapshot confusion matrix before _compute_and_log_iou zeros it
+        self._val_cm_snapshot = self._cm_val.clone().cpu()
         self._compute_and_log_iou("val")
 
     def on_test_epoch_end(self):
@@ -522,6 +524,7 @@ def train(
     journal_entry = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "checkpoint": Path(best_path).name if best_path else None,
+        "kfold": False,
         "best_epoch": module.current_epoch,
         "best_val_loss": round(best_score.item(), 4) if best_score is not None else None,
         "config": {
@@ -747,6 +750,10 @@ def train_kfold(
         fold_metrics["best_val_loss"] = (
             best_score.item() if best_score is not None else None
         )
+
+        # Capture confusion matrix for this fold
+        fold_cm = getattr(module, "_val_cm_snapshot", None)
+        fold_metrics["confusion_matrix"] = fold_cm.tolist() if fold_cm is not None else None
         fold_results.append(fold_metrics)
 
         val_loss = fold_metrics.get("val/loss", float("nan"))
@@ -808,6 +815,105 @@ def train_kfold(
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Results saved to {results_path}")
+
+    # ── Training journal ────────────────────────────────────────────
+    # Build per-class metrics from the summed confusion matrix across folds
+    summed_cm = None
+    for fr in fold_results:
+        cm = fr.get("confusion_matrix")
+        if cm is not None:
+            cm_tensor = torch.tensor(cm, dtype=torch.float)
+            summed_cm = cm_tensor if summed_cm is None else summed_cm + cm_tensor
+
+    per_class = {}
+    macro_f1 = 0.0
+    if summed_cm is not None:
+        for i, name in enumerate(class_names):
+            tp = summed_cm[i, i].item()
+            support = summed_cm[i].sum().item()
+            pred_total = summed_cm[:, i].sum().item()
+            precision_val = tp / pred_total if pred_total > 0 else 0.0
+            recall_val = tp / support if support > 0 else 0.0
+            f1 = (2 * precision_val * recall_val / (precision_val + recall_val)
+                   if (precision_val + recall_val) > 0 else 0.0)
+            iou_val = summary.get(f"val/iou_{name}", {})
+            per_class[name] = {
+                "precision": round(precision_val, 4),
+                "recall": round(recall_val, 4),
+                "f1": round(f1, 4),
+                "iou_mean": iou_val.get("mean", 0.0) if isinstance(iou_val, dict) else 0.0,
+                "iou_std": iou_val.get("std", 0.0) if isinstance(iou_val, dict) else 0.0,
+                "support": int(support),
+            }
+            macro_f1 += f1
+        macro_f1 /= len(class_names)
+
+    # Per-fold journal details (epoch, val_loss, per-fold confusion matrices)
+    per_fold_details = []
+    for fr in fold_results:
+        per_fold_details.append({
+            "fold": fr["fold"],
+            "best_val_loss": round(fr["best_val_loss"], 4) if fr.get("best_val_loss") is not None else None,
+            "val_accuracy": round(fr.get("val/acc", 0.0), 4),
+            "val_iou": round(fr.get("val/iou", 0.0), 4),
+            "confusion_matrix": fr.get("confusion_matrix"),
+        })
+
+    val_loss_summary = summary.get("val/loss", {})
+    val_iou_summary = summary.get("val/iou", {})
+    val_acc_summary = summary.get("val/acc", {})
+
+    journal_entry = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "kfold": True,
+        "n_folds": n_folds,
+        "results_dir": str(kfold_dir),
+        "config": {
+            "in_channels": in_channels,
+            "num_classes": num_classes,
+            "class_names": class_names,
+            "base_filters": base_filters,
+            "depth": depth,
+            "use_aspp": use_aspp,
+            "aspp_rates": list(aspp_rates),
+            "dropout": dropout,
+            "learning_rate": learning_rate,
+            "weight_decay": weight_decay,
+            "ce_weight": ce_weight,
+            "dice_weight": dice_weight,
+            "focal_gamma": focal_gamma,
+            "label_smoothing": label_smoothing,
+            "batch_size": batch_size,
+            "seed": seed,
+            "early_stopping_patience": early_stopping_patience,
+            "lr_patience": lr_patience,
+            "precision": precision,
+            "gradient_clip_val": gradient_clip_val,
+        },
+        "summary_metrics": {
+            "val_loss": val_loss_summary if val_loss_summary else None,
+            "val_accuracy": val_acc_summary if val_acc_summary else None,
+            "val_iou": val_iou_summary if val_iou_summary else None,
+            "macro_f1": round(macro_f1, 4),
+            "per_class": per_class,
+        },
+        "confusion_matrix_summed": {
+            "labels": class_names,
+            "matrix": summed_cm.long().tolist() if summed_cm is not None else None,
+        },
+        "per_fold": per_fold_details,
+    }
+
+    journal_path = output_dir / "training_log.json"
+    if journal_path.exists():
+        with open(journal_path) as f:
+            journal = json.load(f)
+    else:
+        journal = []
+    journal.append(journal_entry)
+    with open(journal_path, "w") as f:
+        json.dump(journal, f, indent=2)
+    print(f"Training journal updated: {journal_path} ({len(journal)} entries)")
 
     return results
 
