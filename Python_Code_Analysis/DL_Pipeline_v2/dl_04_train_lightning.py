@@ -251,6 +251,8 @@ class WetlandSegmentationModule(L.LightningModule):
         self._compute_and_log_iou("val")
 
     def on_test_epoch_end(self):
+        # Snapshot confusion matrix before _compute_and_log_iou zeros it
+        self._test_cm_snapshot = self._cm_test.clone().cpu()
         self._compute_and_log_iou("test")
 
     def configure_optimizers(self):
@@ -395,10 +397,13 @@ def train(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    ckpt_basename = f"best_{mode}_bf{base_filters}_d{depth}_{run_timestamp}"
+
     callbacks = [
         ModelCheckpoint(
             dirpath=output_dir,
-            filename=f"best_{mode}_unet",
+            filename=ckpt_basename,
             monitor="val/loss",
             save_top_k=1,
             mode="min",
@@ -430,7 +435,7 @@ def train(
 
     
     trainer.fit(module, datamodule=dm)
-    trainer.test(module, datamodule=dm, ckpt_path="best")
+    test_results = trainer.test(module, datamodule=dm, ckpt_path="best")
 
     # Report best checkpoint
     best_path = trainer.checkpoint_callback.best_model_path
@@ -477,6 +482,93 @@ def train(
     with open(history_path, "w") as f:
         json.dump(history, f, indent=2)
     print(f"Training history saved to {history_path}")
+
+    # ── Training journal ────────────────────────────────────────────
+    # Append a structured entry to training_log.json for run-over-run comparison
+    test_metrics_dict = test_results[0] if test_results else {}
+
+    # Build per-class metrics from the confusion matrix snapshot
+    cm = getattr(module, "_test_cm_snapshot", None)
+    per_class = {}
+    macro_f1 = 0.0
+    if cm is not None:
+        cm_float = cm.float()
+        for i, name in enumerate(class_names):
+            tp = cm_float[i, i].item()
+            support = cm_float[i].sum().item()
+            pred_total = cm_float[:, i].sum().item()
+            precision = tp / pred_total if pred_total > 0 else 0.0
+            recall = tp / support if support > 0 else 0.0
+            f1 = (2 * precision * recall / (precision + recall)
+                   if (precision + recall) > 0 else 0.0)
+            iou = test_metrics_dict.get(f"test/iou_{name}", 0.0)
+            per_class[name] = {
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+                "f1": round(f1, 4),
+                "iou": round(iou, 4),
+                "support": int(support),
+            }
+            macro_f1 += f1
+        macro_f1 /= len(class_names)
+
+    # Data split sizes
+    data_split = {
+        "train": len(dm.train_dataloader().dataset),
+        "val": len(dm.val_dataloader().dataset),
+        "test": len(dm.test_dataloader().dataset),
+    }
+
+    journal_entry = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "checkpoint": Path(best_path).name if best_path else None,
+        "best_epoch": module.current_epoch,
+        "best_val_loss": round(best_score.item(), 4) if best_score is not None else None,
+        "config": {
+            "in_channels": in_channels,
+            "num_classes": num_classes,
+            "class_names": class_names,
+            "base_filters": base_filters,
+            "depth": depth,
+            "use_aspp": use_aspp,
+            "aspp_rates": list(aspp_rates),
+            "dropout": dropout,
+            "learning_rate": learning_rate,
+            "weight_decay": weight_decay,
+            "ce_weight": ce_weight,
+            "dice_weight": dice_weight,
+            "focal_gamma": focal_gamma,
+            "label_smoothing": label_smoothing,
+            "batch_size": batch_size,
+            "seed": seed,
+            "early_stopping_patience": early_stopping_patience,
+            "lr_patience": lr_patience,
+            "precision": precision,
+            "gradient_clip_val": gradient_clip_val,
+        },
+        "data_split": data_split,
+        "test_metrics": {
+            "overall_accuracy": round(test_metrics_dict.get("test/acc", 0.0), 4),
+            "mean_iou": round(test_metrics_dict.get("test/iou", 0.0), 4),
+            "macro_f1": round(macro_f1, 4),
+            "per_class": per_class,
+        },
+        "confusion_matrix": {
+            "labels": class_names,
+            "matrix": cm.tolist() if cm is not None else None,
+        },
+    }
+
+    journal_path = output_dir / "training_log.json"
+    if journal_path.exists():
+        with open(journal_path) as f:
+            journal = json.load(f)
+    else:
+        journal = []
+    journal.append(journal_entry)
+    with open(journal_path, "w") as f:
+        json.dump(journal, f, indent=2)
+    print(f"Training journal updated: {journal_path} ({len(journal)} entries)")
 
     return history
 
