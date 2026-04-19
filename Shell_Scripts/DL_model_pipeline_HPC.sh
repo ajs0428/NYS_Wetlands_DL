@@ -3,14 +3,14 @@ set -e  # Exit on error
 
 # === CONFIGURATION ===
 USE_ASPP=false             # true to enable ASPP at U-Net bottleneck
-ASPP_RATES="3 6 12"      # dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for depth=4
+ASPP_RATES="3 6 12"      # dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for
 KFOLD=0                    # 0=disabled, 2+=run k-fold CV instead of single split
 BASE_FILTERS=64
-DEPTH=5
-BATCH_SIZE=16
+DEPTH=4
+BATCH_SIZE=32
 EPOCHS=100
 SEED=420
-WORKERS=6
+WORKERS=4
 
 # To switch between binary and multiclass, edit classification_mode in dl_band_config.json
 # before running the pipeline — step 1 (dl_01_compute_statistics.py)
@@ -59,11 +59,13 @@ python $SCRIPT_DIR/dl_04_train_lightning.py \
         --depth $DEPTH \
         --workers $WORKERS \
         --seed $SEED \
-        --early-stopping 15 \
-        --lr-patience 10 \
+        --early-stopping 25 \
+        --lr-patience 15 \
         --ce-weight 1.0 \
-        --dice-weight 0.0 \
-        --focal-gamma 0.0 \
+        --dice-weight 1.5 \
+        --focal-gamma 2.0 \
+        --label-smoothing 0.0 \
+         --lr 5e-5 \
         $ASPP_FLAGS \
         $KFOLD_FLAG
 
