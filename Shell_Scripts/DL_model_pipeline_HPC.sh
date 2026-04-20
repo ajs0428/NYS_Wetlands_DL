@@ -3,7 +3,7 @@ set -e  # Exit on error
 
 # === CONFIGURATION ===
 USE_ASPP=false             # true to enable ASPP at U-Net bottleneck
-ASPP_RATES="3 6 12"      # dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for
+ASPP_RATES="6 12 18"      # dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for
 KFOLD=0                    # 0=disabled, 2+=run k-fold CV instead of single split
 BASE_FILTERS=64
 DEPTH=4
@@ -62,10 +62,12 @@ python $SCRIPT_DIR/dl_04_train_lightning.py \
         --early-stopping 25 \
         --lr-patience 15 \
         --ce-weight 1.0 \
-        --dice-weight 1.5 \
+        --dice-weight 1.0 \
         --focal-gamma 2.0 \
         --label-smoothing 0.0 \
-         --lr 5e-5 \
+        --lr 1e-4 \
+        --dropout 0.2 \
+        --weight-decay 1e-4 \
         $ASPP_FLAGS \
         $KFOLD_FLAG
 
