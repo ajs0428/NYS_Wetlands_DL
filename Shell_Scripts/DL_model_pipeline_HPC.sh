@@ -45,76 +45,76 @@ python $SCRIPT_DIR/dl_01_compute_statistics.py \
         --config $BAND_CONFIG \
         --global-stats $GLOBAL_STATS
 
-# Build k-fold flag
-KFOLD_FLAG=""
-if [ "$KFOLD" -ge 2 ] 2>/dev/null; then
-    KFOLD_FLAG="--kfold $KFOLD"
-fi
+# # Build k-fold flag
+# KFOLD_FLAG=""
+# if [ "$KFOLD" -ge 2 ] 2>/dev/null; then
+#     KFOLD_FLAG="--kfold $KFOLD"
+# fi
 
-# Step 2: Train the model
-python $SCRIPT_DIR/dl_04_train_lightning.py \
-        --epochs $EPOCHS \
-        --batch-size $BATCH_SIZE \
-        --base-filters $BASE_FILTERS \
-        --depth $DEPTH \
-        --workers $WORKERS \
-        --seed $SEED \
-        --early-stopping 25 \
-        --lr-patience 15 \
-        --ce-weight 1.0 \
-        --dice-weight 1.0 \
-        --focal-gamma 2.0 \
-        --label-smoothing 0.0 \
-        --lr 1e-4 \
-        --dropout 0.2 \
-        --weight-decay 1e-4 \
-        $ASPP_FLAGS \
-        $KFOLD_FLAG
-
-# Skip evaluate/predict steps when running k-fold CV
-# (k-fold validates internally across all folds)
-if [ "$KFOLD" -ge 2 ] 2>/dev/null; then
-    echo "=== K-Fold CV complete — see results in Models/kfold_*/ ==="
-    exit 0
-fi
-
-# Find the newest checkpoint — prefer safetensors, fall back to .ckpt
-BEST_MODEL=$(ls -t Models/best_*.safetensors 2>/dev/null | head -1)
-if [ -z "$BEST_MODEL" ]; then
-    BEST_MODEL=$(ls -t Models/best_*.ckpt 2>/dev/null | head -1)
-fi
-if [ -z "$BEST_MODEL" ]; then
-    echo "ERROR: No checkpoints found in Models/" >&2
-    exit 1
-fi
-echo "Using checkpoint: $BEST_MODEL"
-
-# Derive output name (strip either .safetensors or .ckpt)
-EVAL_OUTPUT="${BEST_MODEL%.*}_evaluation_metrics.json"
-
-# Step 3: Evaluate the model
-# Architecture params are auto-detected from checkpoint/sidecar metadata;
-# CLI flags here serve as fallback for legacy checkpoints only.
-python $SCRIPT_DIR/dl_05_evaluate.py \
-        --model "$BEST_MODEL" \
-        --output "$EVAL_OUTPUT" \
-        --patches-dir $PATCHES_DIR \
-        --stats-path $STATS_PATH \
-        --batch-size $BATCH_SIZE \
-        --base-filters $BASE_FILTERS \
-        --depth $DEPTH \
-        --seed $SEED \
-        $ASPP_FLAGS
-
-# # Step 4: Predict
-# python $SCRIPT_DIR/dl_06_predict.py \
-#         Data/HUC_DL_Stacks/cluster_11_huc_042900030103_stack.tif \
-#         Data/HUC_DL_Predictions/DLpred_cluster_11_huc_042900030103.tif \
-#         --model "$BEST_MODEL" \
-#         --stats $STATS_PATH \
-#         --patch-size 256 \
-#         --overlap 128 \
+# # Step 2: Train the model
+# python $SCRIPT_DIR/dl_04_train_lightning.py \
+#         --epochs $EPOCHS \
+#         --batch-size $BATCH_SIZE \
 #         --base-filters $BASE_FILTERS \
 #         --depth $DEPTH \
-#         --probs \
+#         --workers $WORKERS \
+#         --seed $SEED \
+#         --early-stopping 25 \
+#         --lr-patience 15 \
+#         --ce-weight 1.0 \
+#         --dice-weight 1.0 \
+#         --focal-gamma 2.0 \
+#         --label-smoothing 0.0 \
+#         --lr 1e-4 \
+#         --dropout 0.2 \
+#         --weight-decay 1e-4 \
+#         $ASPP_FLAGS \
+#         $KFOLD_FLAG
+
+# # Skip evaluate/predict steps when running k-fold CV
+# # (k-fold validates internally across all folds)
+# if [ "$KFOLD" -ge 2 ] 2>/dev/null; then
+#     echo "=== K-Fold CV complete — see results in Models/kfold_*/ ==="
+#     exit 0
+# fi
+
+# # Find the newest checkpoint — prefer safetensors, fall back to .ckpt
+# BEST_MODEL=$(ls -t Models/best_*.safetensors 2>/dev/null | head -1)
+# if [ -z "$BEST_MODEL" ]; then
+#     BEST_MODEL=$(ls -t Models/best_*.ckpt 2>/dev/null | head -1)
+# fi
+# if [ -z "$BEST_MODEL" ]; then
+#     echo "ERROR: No checkpoints found in Models/" >&2
+#     exit 1
+# fi
+# echo "Using checkpoint: $BEST_MODEL"
+
+# # Derive output name (strip either .safetensors or .ckpt)
+# EVAL_OUTPUT="${BEST_MODEL%.*}_evaluation_metrics.json"
+
+# # Step 3: Evaluate the model
+# # Architecture params are auto-detected from checkpoint/sidecar metadata;
+# # CLI flags here serve as fallback for legacy checkpoints only.
+# python $SCRIPT_DIR/dl_05_evaluate.py \
+#         --model "$BEST_MODEL" \
+#         --output "$EVAL_OUTPUT" \
+#         --patches-dir $PATCHES_DIR \
+#         --stats-path $STATS_PATH \
+#         --batch-size $BATCH_SIZE \
+#         --base-filters $BASE_FILTERS \
+#         --depth $DEPTH \
+#         --seed $SEED \
 #         $ASPP_FLAGS
+
+# # # Step 4: Predict
+# # python $SCRIPT_DIR/dl_06_predict.py \
+# #         Data/HUC_DL_Stacks/cluster_11_huc_042900030103_stack.tif \
+# #         Data/HUC_DL_Predictions/DLpred_cluster_11_huc_042900030103.tif \
+# #         --model "$BEST_MODEL" \
+# #         --stats $STATS_PATH \
+# #         --patch-size 256 \
+# #         --overlap 128 \
+# #         --base-filters $BASE_FILTERS \
+# #         --depth $DEPTH \
+# #         --probs \
+# #         $ASPP_FLAGS
