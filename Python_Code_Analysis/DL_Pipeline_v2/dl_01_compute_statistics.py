@@ -44,6 +44,10 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
             inference raster range.
     """
     config = load_band_config(config_path)
+    resolved_config = (config_path if config_path is not None
+                       else Path(__file__).parent / "dl_band_config.json").resolve()
+    print(f"[dl_01] Loaded config from: {resolved_config}")
+    print(f"[dl_01] config['classification_mode'] = {config.get('classification_mode')!r}")
     label_band = config["label_band"]
     original_class_names = config["class_names"]
     ignore_index = config["ignore_index"]
