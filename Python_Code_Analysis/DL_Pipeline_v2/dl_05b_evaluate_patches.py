@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 from dl_02_dataset import create_data_splits, WetlandPatchDataset
 from dl_03_unet_model import get_device
 from dl_05_evaluate import load_model, compute_confusion_matrix, compute_class_metrics
+from dl_model_utils import assert_mode_matches
 
 
 # ── Per-patch evaluation ─────────────────────────────────────────────
@@ -140,6 +141,10 @@ def main(
     num_classes = len(stats["class_names"])
     class_names = stats["class_names"]
     ignore_index = stats.get("ignore_index", 255)
+    mode = stats.get("classification_mode", "multiclass")
+
+    # Verify model and stats were built for the same classification mode
+    assert_mode_matches(model_path, mode)
 
     # Load model
     model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,

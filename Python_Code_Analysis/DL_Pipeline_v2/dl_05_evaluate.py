@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 
 from dl_02_dataset import create_dataloaders
 from dl_03_unet_model import get_device
-from dl_model_utils import load_model
+from dl_model_utils import assert_mode_matches, load_model
 
 
 def compute_confusion_matrix(
@@ -224,6 +224,10 @@ def main(
     num_classes = len(stats["class_names"])
     class_names = stats["class_names"]
     ignore_index = stats.get("ignore_index", 255)
+    mode = stats.get("classification_mode", "multiclass")
+
+    # Verify model and stats were built for the same classification mode
+    assert_mode_matches(model_path, mode)
 
     # Load model
     model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,

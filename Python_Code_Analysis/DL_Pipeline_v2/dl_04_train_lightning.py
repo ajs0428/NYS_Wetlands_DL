@@ -140,6 +140,7 @@ class WetlandSegmentationModule(L.LightningModule):
         # Training params
         class_weights: Optional[torch.Tensor] = None,
         class_names: Optional[list] = None,
+        classification_mode: str = "multiclass",
         ignore_index: int = 255,
         learning_rate: float = 1e-4,
         weight_decay: float = 1e-4,
@@ -386,6 +387,7 @@ def train(
         aspp_rates=aspp_rates,
         class_weights=class_weights,
         class_names=class_names,
+        classification_mode=mode,
         ignore_index=ignore_index,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
@@ -687,6 +689,7 @@ def train_kfold(
             aspp_rates=aspp_rates,
             class_weights=dm.class_weights,
             class_names=class_names,
+            classification_mode=mode,
             ignore_index=ignore_index,
             learning_rate=learning_rate,
             weight_decay=weight_decay,

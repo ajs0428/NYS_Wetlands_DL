@@ -20,7 +20,7 @@ from tqdm import tqdm
 from dl_02_dataset import normalize_bands
 from dl_03_unet_model import get_device
 from dl_band_utils import validate_prediction_bands
-from dl_model_utils import load_model
+from dl_model_utils import assert_mode_matches, load_model
 
 
 def load_normalization_stats(stats_path: Path) -> dict:
@@ -145,7 +145,7 @@ def predict_raster(
 
     # Save probability maps if requested
     if save_probabilities:
-        prob_path = output_path.with_suffix('.probs.tif')
+        prob_path = output_path.with_name(f"{output_path.stem}_probs.tif")
         prob_profile = profile.copy()
         prob_profile.update(
             count=num_classes,
@@ -209,6 +209,12 @@ def main(
     stats = load_normalization_stats(stats_path)
     in_channels = stats["in_channels"]
     num_classes = len(stats["class_names"])
+
+    mode = stats.get("classification_mode", "multiclass")
+    output_path = output_path.with_name(f"{output_path.stem}_{mode}{output_path.suffix}")
+
+    # Verify model and stats were built for the same classification mode
+    assert_mode_matches(model_path, mode)
 
     # Load model
     print(f"\nLoading model from {model_path}")

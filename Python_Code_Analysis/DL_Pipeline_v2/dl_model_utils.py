@@ -145,7 +145,7 @@ def export_safetensors(
 
     # Also carry over non-architecture metadata if available
     ckpt_hparams = checkpoint.get("hyper_parameters", {})
-    for key in ("class_names", "ignore_index"):
+    for key in ("class_names", "ignore_index", "classification_mode"):
         if key in ckpt_hparams and key not in hparams:
             hparams[key] = ckpt_hparams[key]
 
@@ -214,6 +214,54 @@ def _load_from_safetensors(
 
 
 # ── Public API ────────────────────────────────────────────────────────
+
+def get_checkpoint_mode(model_path: Path) -> Optional[str]:
+    """
+    Read classification_mode from a checkpoint without loading weights.
+
+    Returns None if the checkpoint predates mode tracking (legacy .pth or
+    older Lightning checkpoints that did not persist the field).
+    """
+    model_path = Path(model_path)
+
+    # Prefer a sibling .safetensors/.meta.json when present
+    if model_path.suffix == ".safetensors":
+        meta_path = model_path.with_suffix(".meta.json")
+    else:
+        st_sibling = model_path.with_suffix(".safetensors")
+        meta_path = st_sibling.with_suffix(".meta.json") if st_sibling.exists() else None
+
+    if meta_path is not None and meta_path.exists():
+        with open(meta_path) as f:
+            return json.load(f).get("classification_mode")
+
+    # Fall back to reading hparams from the .ckpt
+    if model_path.suffix == ".ckpt":
+        ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
+        return ckpt.get("hyper_parameters", {}).get("classification_mode")
+
+    return None
+
+
+def assert_mode_matches(model_path: Path, stats_mode: str) -> None:
+    """
+    Raise if the checkpoint's classification_mode disagrees with stats.
+
+    Warns (does not raise) for legacy checkpoints that predate mode tracking.
+    """
+    ckpt_mode = get_checkpoint_mode(model_path)
+    if ckpt_mode is None:
+        print(f"Warning: checkpoint does not record classification_mode; "
+              f"proceeding on the assumption that it matches stats ({stats_mode}).")
+        return
+    if ckpt_mode != stats_mode:
+        raise ValueError(
+            f"Classification mode mismatch: checkpoint was trained with "
+            f"'{ckpt_mode}' but normalization_stats.json is '{stats_mode}'. "
+            f"Regenerate stats (dl_01) for the correct mode, or use a "
+            f"checkpoint trained in '{stats_mode}' mode."
+        )
+
 
 def load_model_from_checkpoint(
     model_path: Path,
