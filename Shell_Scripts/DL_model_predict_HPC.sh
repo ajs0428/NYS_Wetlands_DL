@@ -14,7 +14,7 @@ OVERLAP=128
 STATS_PATH="Data/Training_Data/normalization_stats.json"
 BAND_CONFIG="Python_Code_Analysis/DL_Pipeline_v2/dl_band_config.json"
 SCRIPT_DIR="Python_Code_Analysis/DL_Pipeline_v2"
-INPUT_DIR="Data/HUC_DL_Stacks/Test/"
+INPUT_DIR="Data/HUC_DL_Stacks/HUC_DL_Stacks/"
 OUTPUT_DIR="Data/HUC_DL_Predictions"
 TRAINING_LOG="Models/training_log.json"
 
