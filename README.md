@@ -90,35 +90,27 @@ mkdir -p /workdir/<labid>/nys_wetlands/Models
 
 ```bash
 docker1 run --gpus all --shm-size=8g \
-  -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
-  -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
+  -v /workdir/<labid>/nys_wetlands:/app \
   biohpc_<labid>/wetland-dl
 ```
 
 > **Note:** `--shm-size=8g` increases shared memory from the default 64MB. PyTorch DataLoader workers use shared memory for IPC, and the default is too small for multi-worker training.
+
+> **Why mount the whole repo at `/app`?** The Dockerfile `COPY`s the scripts into the image at build time, so without a bind mount, `/app/Python_Code_Analysis/` inside the container is a frozen snapshot from the build. Edits to `dl_band_config.json`, training scripts, etc. on the host won't reach the container unless the repo is bind-mounted. Mounting the full tree keeps `git pull` on the host as the single source of truth and avoids silent script/config drift.
 
 ### Other run modes
 
 ```bash
 # Interactive shell
 docker1 run --gpus all --shm-size=8g -it \
-  -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
-  -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
+  -v /workdir/<labid>/nys_wetlands:/app \
   biohpc_<labid>/wetland-dl /bin/bash
 
 # Run a specific script
 docker1 run --gpus all --shm-size=8g \
-  -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
-  -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
+  -v /workdir/<labid>/nys_wetlands:/app \
   biohpc_<labid>/wetland-dl \
   python Python_Code_Analysis/DL_Pipeline_v2/dl_05_evaluate.py
-
-# Mount code for live editing (no rebuild needed)
-docker1 run --gpus all --shm-size=8g -it \
-  -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
-  -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
-  -v /workdir/<labid>/nys_wetlands/Python_Code_Analysis:/app/Python_Code_Analysis \
-  biohpc_<labid>/wetland-dl /bin/bash
 ```
 
 ### Jupyter + TensorBoard
@@ -129,9 +121,7 @@ BioHPC restricts web services to ports 8009–8039. Use `find_open_ports` on the
 # Start container with ports in the allowed range (e.g., 8015 for TensorBoard, 8016 for Jupyter)
 docker1 run --gpus all --shm-size=8g -it \
   -p 8015:8015 -p 8016:8016 \
-  -v /workdir/<labid>/nys_wetlands/Data:/app/Data \
-  -v /workdir/<labid>/nys_wetlands/Models:/app/Models \
-  -v /workdir/<labid>/nys_wetlands/Python_Code_Analysis:/app/Python_Code_Analysis \
+  -v /workdir/<labid>/nys_wetlands:/app \
   biohpc_<labid>/wetland-dl /bin/bash
 
 # Inside the container:
