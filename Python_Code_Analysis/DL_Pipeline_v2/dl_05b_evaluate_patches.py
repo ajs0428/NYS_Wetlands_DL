@@ -20,8 +20,8 @@ from typing import Dict, List, Optional
 
 from dl_02_dataset import create_data_splits, WetlandPatchDataset
 from dl_03_unet_model import get_device
-from dl_05_evaluate import load_model, compute_confusion_matrix, compute_class_metrics
-from dl_model_utils import assert_mode_matches
+from dl_05_evaluate import compute_confusion_matrix, compute_class_metrics
+from dl_model_utils import assert_mode_matches, load_model
 
 
 # ── Per-patch evaluation ─────────────────────────────────────────────

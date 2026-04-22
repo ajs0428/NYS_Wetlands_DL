@@ -36,13 +36,11 @@ class FocalLoss(nn.Module):
         self.gamma = gamma
         self.label_smoothing = label_smoothing
 
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor,
-                probs: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
         Args:
             inputs: (B, C, H, W) raw logits
             targets: (B, H, W) integer class labels
-            probs: (B, C, H, W) pre-computed softmax (optional, avoids recomputation)
         """
         # Unweighted CE to get true pt for focal modulation
         ce_unweighted = nn.functional.cross_entropy(
@@ -146,7 +144,7 @@ class HybridLoss(nn.Module):
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         probs = torch.softmax(inputs, dim=1)
-        focal_loss = self.focal(inputs, targets, probs=probs)
+        focal_loss = self.focal(inputs, targets)
         dice_loss = self.dice(inputs, targets, probs=probs)
         if torch.isnan(focal_loss):
             return self.dice_weight * dice_loss
