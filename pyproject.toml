@@ -24,13 +24,14 @@ dependencies = [
     "tensorboard>=2.20.0",
     # Safe checkpoint format
     "safetensors>=0.4",
+    # Model interpretability (dl_07_shap_analysis)
+    "shap>=0.46",
 ]
 
 [project.optional-dependencies]
 # Extras not needed for core training/prediction
 notebooks = [
     "ipykernel>=6.0",
-    "shap>=0.46",
 ]
 
 [tool.uv]
