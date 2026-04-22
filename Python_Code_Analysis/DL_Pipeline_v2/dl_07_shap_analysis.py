@@ -29,6 +29,38 @@ from dl_03_unet_model import get_device
 from dl_model_utils import load_model
 
 
+def read_model_class_info(model_path: Path):
+    """
+    Return (class_names, num_classes) from a checkpoint's own metadata.
+
+    Prefers the .meta.json sidecar (safetensors exports) and falls back to
+    Lightning hyper_parameters in a .ckpt. Returns (None, None) if absent.
+    """
+    model_path = Path(model_path)
+
+    # .safetensors → sidecar; .ckpt → possible sibling sidecar
+    if model_path.suffix == ".safetensors":
+        meta_path = model_path.with_suffix(".meta.json")
+    else:
+        sibling = model_path.with_suffix(".safetensors").with_suffix(".meta.json")
+        meta_path = sibling if sibling.exists() else None
+
+    if meta_path is not None and meta_path.exists():
+        with open(meta_path) as f:
+            meta = json.load(f)
+        cn = meta.get("class_names")
+        nc = meta.get("num_classes")
+        if cn is not None or nc is not None:
+            return cn, nc
+
+    if model_path.suffix == ".ckpt":
+        ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
+        hp = ckpt.get("hyper_parameters", {})
+        return hp.get("class_names"), hp.get("num_classes")
+
+    return None, None
+
+
 class SpatialAvgWrapper(torch.nn.Module):
     """Wrap a segmentation model so GradientExplainer sees (B, C) scalar-per-class outputs."""
 
@@ -92,14 +124,22 @@ def run_shap(
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = model_path.stem
 
-    # Stats
+    # Stats: normalization & bands only. Class info comes from the model so that
+    # a single stats file can serve binary and multiclass checkpoints (they share
+    # identical bands/normalization — only class_names/num_classes differ).
     with open(stats_path) as f:
         stats = json.load(f)
     in_channels = stats["in_channels"]
-    class_names = stats["class_names"]
-    num_classes = len(class_names)
     predictor_names = stats["predictor_names"]
     normalization = stats["normalization"]
+
+    class_names, num_classes = read_model_class_info(model_path)
+    if class_names is None or num_classes is None:
+        # Legacy checkpoint without class metadata — fall back to stats.
+        class_names = stats["class_names"]
+        num_classes = len(class_names)
+        print("Warning: class info not found in checkpoint; falling back to stats file.")
+    print(f"Classes ({num_classes}): {class_names}")
 
     # Model (architecture flags are fallbacks; auto-detected when checkpoint has hparams)
     device = get_device()
