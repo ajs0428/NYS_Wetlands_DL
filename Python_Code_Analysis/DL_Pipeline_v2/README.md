@@ -19,6 +19,7 @@ Deep learning pipeline for wetland semantic segmentation in New York State using
 - [Step 4 (Legacy): Train](#step-4-legacy-train-dl_04_trainpy)
 - [Step 5: Evaluate](#step-5-evaluate-dl_05_evaluatepy)
 - [Step 6: Predict](#step-6-predict-dl_06_predictpy)
+- [Step 7: SHAP Band Importance](#step-7-shap-band-importance-dl_07_shap_analysispy)
 - [Interactive Notebook](#interactive-notebook-wetland_pipelineipynb)
 - [Loss Function: Hybrid Focal + Dice](#loss-function-hybrid-focal--dice)
 - [Adding a New Band](#adding-a-new-band)
@@ -60,13 +61,13 @@ python dl_06_predict.py input_raster.tif output_classification.tif --probs
 
 ```bash
 # From project root (NYS_Wetlands_DL/)
-uv sync                        # Mac/CPU — auto-detects MPS
+uv sync                        # Mac/CPU — auto-detects MPS (includes SHAP)
 source .venv/bin/activate
 
 # On HPC with CUDA:
 uv sync --extra-index-url https://download.pytorch.org/whl/cu121
 
-# For notebook extras (ipykernel, shap):
+# For Jupyter notebook support (ipykernel):
 uv sync --extra notebooks
 ```
 
@@ -188,6 +189,11 @@ GeoTIFF Patches (19 bands: 18 predictors + 1 label)
         v
  +---------------------+
  | dl_06_predict        | -> Classification GeoTIFF + probability maps
+ +---------------------+
+        |
+        v
+ +---------------------+
+ | dl_07_shap_analysis  | -> Per-band SHAP importance plots + JSON (Models/SHAP/)
  +---------------------+
 
 Shared modules: dl_losses.py (FocalLoss, DiceLoss, HybridLoss), dl_model_utils.py (checkpoint loading),
@@ -626,6 +632,61 @@ The prediction script matches bands **by name**, not position. Your input raster
 
 ---
 
+## Step 7: SHAP Band Importance (`dl_07_shap_analysis.py`)
+
+Computes per-band importance using `shap.GradientExplainer` to understand which input features the trained model relies on. Uses a wrapper that spatially averages the segmentation output so the explainer sees per-class scalar outputs.
+
+### Usage
+
+```bash
+# Single model
+python dl_07_shap_analysis.py --model ../../Models/best_multiclass_unet.ckpt
+
+# Custom output directory, more background/test samples
+python dl_07_shap_analysis.py \
+  --model ../../Models/best_multiclass_bf64_d4_20260420_2239.safetensors \
+  --output-dir ../../Models/SHAP \
+  --n-background 100 --n-test 30 --crop-size 128
+```
+
+A shell script wrapper (`Shell_Scripts/DL_model_shap_HPC.sh`) runs the analysis for a single checkpoint, a k-fold directory, or a list of models.
+
+### Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--model` | *(required)* | Path to `.ckpt`, `.safetensors`, or `.pth` checkpoint |
+| `--patches-dir` | `Data/Training_Data/R_Patches` | Patches directory |
+| `--stats-path` | `Data/Training_Data/normalization_stats.json` | Stats JSON (used for band normalization only) |
+| `--output-dir` | `Models/SHAP` | Where plots and JSON are written |
+| `--seed` | 420 | Data-split seed (match training seed to reproduce the test split) |
+| `--n-background` | 50 | Training patches used as the SHAP background distribution |
+| `--n-test` | 20 | Test patches explained |
+| `--crop-size` | 128 | Center-crop each patch to reduce memory (`0` to disable) |
+| `--base-filters`, `--depth`, `--use-aspp`, `--aspp-rates` | — | Fallbacks only; architecture is auto-detected from the checkpoint |
+
+### Outputs
+
+All files are prefixed with the checkpoint stem so multiple models can be compared side-by-side in the same directory:
+
+| File | Description |
+|------|-------------|
+| `{stem}_shap_band_importance.png` | Overall per-band importance (mean \|SHAP\|) |
+| `{stem}_shap_band_importance_by_class.png` | Per-class grouped bar chart |
+| `{stem}_shap_summary_plot.png` | SHAP beeswarm summary |
+| `{stem}_shap_importance.json` | Ranked importance values (overall + per-class) for programmatic comparison |
+
+### Stats file and classification mode
+
+`class_names` and `num_classes` are read from the checkpoint's own metadata (`.meta.json` sidecar for safetensors, `hyper_parameters` for Lightning `.ckpt`). Because the normalization rules and predictor bands are identical across binary and multiclass stats files, a single `normalization_stats.json` can serve both modes — you do **not** need to regenerate stats when switching between binary and multiclass models as long as the input bands are unchanged.
+
+### Notes
+
+- `shap.GradientExplainer` backpropagates through the model on whatever device the model is on (GPU if available), so the GPU accelerates the dominant cost. The aggregation and plotting steps are CPU/NumPy.
+- One-hot-encoded bands (e.g., `Geomorph_local`) are aggregated back to a single band-level importance value by summing contributions across their expanded channels.
+
+---
+
 ## Interactive Notebook: wetland_pipeline.ipynb
 
 The Jupyter notebook provides an interactive version of the full pipeline with inline visualizations.
@@ -881,6 +942,7 @@ NYS_Wetlands_DL/
 ├── Models/
 │   ├── best_{mode}_unet.ckpt          # Best Lightning checkpoint
 │   ├── lightning_logs/                 # Training logs (CSV/TensorBoard)
+│   ├── SHAP/                           # Per-model SHAP plots + JSON (from Step 7)
 │   └── (legacy .pth files)            # From dl_04_train.py if used
 └── Python_Code_Analysis/
     └── DL_Pipeline_v2/
@@ -898,6 +960,7 @@ NYS_Wetlands_DL/
         ├── dl_05_evaluate.py              # Step 5: Evaluate
         ├── dl_05b_evaluate_patches.py     # Step 5b: Per-patch evaluation
         ├── dl_06_predict.py               # Step 6: Predict
-        ├── dl_07_shap_analysis.ipynb   # Feature importance
-        └── wetland_pipeline.ipynb      # Interactive notebook
+        ├── dl_07_shap_analysis.py         # Step 7: SHAP band importance (CLI)
+        ├── dl_07_shap_analysis.ipynb      # Step 7: SHAP (interactive)
+        └── wetland_pipeline.ipynb         # Interactive notebook
 ```

@@ -18,8 +18,8 @@ Training patches are currently 256x256 pixels, but the pipeline is patch-size ag
 **uv (recommended):**
 
 ```bash
-uv sync                        # core dependencies
-uv sync --extra notebooks      # include Jupyter and SHAP
+uv sync                        # core dependencies (includes SHAP)
+uv sync --extra notebooks      # add Jupyter (ipykernel) for running notebooks
 source .venv/bin/activate
 ```
 
