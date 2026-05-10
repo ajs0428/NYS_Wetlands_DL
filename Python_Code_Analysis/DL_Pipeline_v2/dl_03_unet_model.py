@@ -209,7 +209,7 @@ class UNet(nn.Module):
         num_classes: int = 4,
         base_filters: int = 32,
         depth: int = 4,
-        dropout: float = 0.0,
+        dropout: float = 0.2,
         use_aspp: bool = False,
         aspp_rates: tuple = (6, 12, 18),
     ):
