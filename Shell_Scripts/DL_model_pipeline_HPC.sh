@@ -17,7 +17,6 @@ WORKERS=4
 
 # === PATHS (relative to project root) ===
 PATCHES_DIR="Data/Training_Data/R_Patches"
-STATS_PATH="Data/Training_Data/normalization_stats.json"
 BAND_CONFIG="Python_Code_Analysis/DL_Pipeline_v2/dl_band_config.json"
 GLOBAL_STATS="Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json"
 SCRIPT_DIR="Python_Code_Analysis/DL_Pipeline_v2"
@@ -30,6 +29,8 @@ fi
 
 # Read classification mode from band config
 CLASS_MODE=$(python -c "import json; print(json.load(open('$BAND_CONFIG'))['classification_mode'])" 2>/dev/null || echo "multiclass")
+
+STATS_PATH="Data/Training_Data/${CLASS_MODE}_normalization_stats.json"
 
 echo "=== NYS Wetlands DL Pipeline (HPC) ==="
 echo "Classification: $CLASS_MODE"
