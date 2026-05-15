@@ -20,6 +20,7 @@ from typing import Dict, List, Optional
 
 from dl_02_dataset import create_data_splits, WetlandPatchDataset
 from dl_03_unet_model import get_device
+from dl_band_utils import default_stats_path
 from dl_05_evaluate import compute_confusion_matrix, compute_class_metrics
 from dl_model_utils import assert_mode_matches, load_model
 
@@ -205,7 +206,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--model", type=Path, default=Path("Models/best_model_multiclass.pth"))
     parser.add_argument("--patches-dir", type=Path, default=Path("Data/Training_Data/R_Patches"))
-    parser.add_argument("--stats-path", type=Path, default=Path("Data/Training_Data/normalization_stats.json"))
+    parser.add_argument("--stats-path", type=Path, default=default_stats_path())
     parser.add_argument("--output-csv", type=Path, default=None,
                         help="Path to save results CSV. Auto-detects binary/multiclass if not specified.")
     parser.add_argument("--base-filters", type=int, default=32,

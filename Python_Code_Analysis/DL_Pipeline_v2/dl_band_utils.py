@@ -31,6 +31,24 @@ def load_band_config(config_path: Optional[Path] = None) -> dict:
         return json.load(f)
 
 
+def default_stats_path(config_path: Optional[Path] = None) -> Path:
+    """
+    Resolve the default normalization stats path for the active mode.
+
+    Stats files are now mode-specific: multiclass_normalization_stats.json
+    and binary_normalization_stats.json. This reads classification_mode from
+    dl_band_config.json and returns the matching path under Data/Training_Data.
+
+    Args:
+        config_path: Path to dl_band_config.json (default: alongside module).
+
+    Returns:
+        Path("Data/Training_Data/<mode>_normalization_stats.json").
+    """
+    mode = load_band_config(config_path).get("classification_mode", "multiclass")
+    return Path("Data/Training_Data") / f"{mode}_normalization_stats.json"
+
+
 def discover_bands_from_raster(path: Path) -> List[str]:
     """
     Read band names from a raster file's band descriptions.

@@ -25,6 +25,7 @@ from typing import Optional
 
 from dl_02_dataset import create_dataloaders, create_kfold_splits, create_fold_dataloaders
 from dl_03_unet_model import UNet
+from dl_band_utils import default_stats_path
 from dl_losses import HybridLoss
 from dl_model_utils import export_safetensors
 
@@ -932,7 +933,7 @@ if __name__ == "__main__":
     parser.add_argument("--patches-dir", type=Path,
                         default=Path("Data/Training_Data/R_Patches"))
     parser.add_argument("--stats-path", type=Path,
-                        default=Path("Data/Training_Data/normalization_stats.json"))
+                        default=default_stats_path())
     parser.add_argument("--output-dir", type=Path, default=Path("Models"))
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=16)

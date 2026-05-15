@@ -485,9 +485,10 @@ def create_fold_dataloaders(
 
 if __name__ == "__main__":
     # Test the dataset
+    from dl_band_utils import default_stats_path
     project_root = Path(__file__).parent.parent.parent
     patches_dir = project_root / "Data" / "Training_Data" / "R_Patches"
-    stats_path = project_root / "Data" / "Training_Data" / "normalization_stats.json"
+    stats_path = project_root / default_stats_path()
 
     if not stats_path.exists():
         print(f"Stats file not found: {stats_path}")

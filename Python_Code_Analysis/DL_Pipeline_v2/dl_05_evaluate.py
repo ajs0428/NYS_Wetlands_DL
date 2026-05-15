@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 from dl_02_dataset import create_dataloaders
 from dl_03_unet_model import get_device
+from dl_band_utils import default_stats_path
 from dl_model_utils import assert_mode_matches, load_model
 
 
@@ -262,7 +263,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate wetland classification model")
     parser.add_argument("--model", type=Path, default=Path("Models/best_model.pth"))
     parser.add_argument("--patches-dir", type=Path, default=Path("Data/Training_Data/R_Patches"))
-    parser.add_argument("--stats-path", type=Path, default=Path("Data/Training_Data/normalization_stats.json"))
+    parser.add_argument("--stats-path", type=Path, default=default_stats_path())
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--base-filters", type=int, default=32,

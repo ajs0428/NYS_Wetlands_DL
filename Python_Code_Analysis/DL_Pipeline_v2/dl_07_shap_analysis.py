@@ -26,6 +26,7 @@ import torch
 
 from dl_02_dataset import WetlandPatchDataset, create_data_splits
 from dl_03_unet_model import get_device
+from dl_band_utils import default_stats_path
 from dl_model_utils import load_model
 
 
@@ -289,7 +290,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=Path, required=True,
                         help="Path to .ckpt, .safetensors, or .pth checkpoint")
     parser.add_argument("--patches-dir", type=Path, default=Path("Data/Training_Data/R_Patches"))
-    parser.add_argument("--stats-path", type=Path, default=Path("Data/Training_Data/normalization_stats.json"))
+    parser.add_argument("--stats-path", type=Path, default=default_stats_path())
     parser.add_argument("--output-dir", type=Path, default=Path("Models/SHAP"),
                         help="Directory for plots and JSON (default: Models/SHAP)")
     parser.add_argument("--seed", type=int, default=420,

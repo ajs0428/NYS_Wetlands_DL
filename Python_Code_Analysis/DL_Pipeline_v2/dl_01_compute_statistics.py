@@ -21,6 +21,7 @@ from tqdm import tqdm
 
 from dl_band_utils import (
     load_band_config,
+    default_stats_path,
     discover_bands_from_raster,
     get_predictor_band_names,
     get_normalization_method,
@@ -329,8 +330,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("Data/Training_Data/normalization_stats.json"),
-        help="Output path for statistics JSON"
+        default=default_stats_path(),
+        help="Output path for statistics JSON (default: mode-specific name from dl_band_config.json)"
     )
     parser.add_argument(
         "--config",

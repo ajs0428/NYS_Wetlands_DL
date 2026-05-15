@@ -21,6 +21,7 @@ from pathlib import Path
 from datetime import datetime
 
 from dl_04_train_lightning import train
+from dl_band_utils import default_stats_path
 
 
 # ── Experiment configurations ────────────────────────────────────────
@@ -167,7 +168,7 @@ if __name__ == "__main__":
     parser.add_argument("--patches-dir", type=Path,
                         default=Path("Data/Training_Data/R_Patches"))
     parser.add_argument("--stats-path", type=Path,
-                        default=Path("Data/Training_Data/normalization_stats.json"))
+                        default=default_stats_path())
     parser.add_argument("--output-dir", type=Path, default=Path("Models"))
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=16)

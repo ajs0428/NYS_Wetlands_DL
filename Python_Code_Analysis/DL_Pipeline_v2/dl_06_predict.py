@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from dl_02_dataset import normalize_bands
 from dl_03_unet_model import get_device
-from dl_band_utils import validate_prediction_bands
+from dl_band_utils import validate_prediction_bands, default_stats_path
 from dl_model_utils import assert_mode_matches, load_model
 
 
@@ -242,7 +242,7 @@ if __name__ == "__main__":
     parser.add_argument("input", type=Path, help="Input raster (predictor bands)")
     parser.add_argument("output", type=Path, help="Output classification raster")
     parser.add_argument("--model", type=Path, default=Path("Models/best_model.pth"))
-    parser.add_argument("--stats", type=Path, default=Path("Data/Training_Data/normalization_stats.json"))
+    parser.add_argument("--stats", type=Path, default=default_stats_path())
     parser.add_argument("--patch-size", type=int, default=128)
     parser.add_argument("--overlap", type=int, default=64)
     parser.add_argument("--base-filters", type=int, default=32,
