@@ -11,17 +11,17 @@ PATCH_SIZE=256
 OVERLAP=128
 
 # === PATHS (relative to project root) ===
-STATS_PATH="Data/Training_Data/normalization_stats.json"
+STATS_PATH="Data/Training_Data/multiclass_normalization_stats.json"
 BAND_CONFIG="Python_Code_Analysis/DL_Pipeline_v2/dl_band_config.json"
 SCRIPT_DIR="Python_Code_Analysis/DL_Pipeline_v2"
-INPUT_DIR="Data/HUC_DL_Stacks/HUC_DL_Stacks/"
+INPUT_DIR="Data/HUC_Raster_Stacks/"
 OUTPUT_DIR="Data/HUC_DL_Predictions"
 TRAINING_LOG="Models/training_log.json"
 
 # === MODEL SELECTION ===
 # Set MODEL_PATH to use a specific checkpoint. Leave empty to auto-select newest
 # (preferring .safetensors over .ckpt).
-MODEL_PATH="Models/best_binary_bf64_d4_20260421_1730.safetensors"
+MODEL_PATH="Models/best_multiclass_bf64_d4_20260515_2257.safetensors"
 
 # Read classification mode from band config (purely for the banner)
 CLASS_MODE=$(python -c "import json; print(json.load(open('$BAND_CONFIG'))['classification_mode'])" 2>/dev/null || echo "multiclass")

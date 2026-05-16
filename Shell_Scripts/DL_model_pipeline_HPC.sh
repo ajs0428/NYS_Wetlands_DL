@@ -54,6 +54,7 @@ fi
 
 # Step 2: Train the model
 python $SCRIPT_DIR/dl_04_train_lightning.py \
+        --stats-path $STATS_PATH \
         --epochs $EPOCHS \
         --batch-size $BATCH_SIZE \
         --base-filters $BASE_FILTERS \
@@ -97,6 +98,7 @@ EVAL_OUTPUT="${BEST_MODEL%.*}_evaluation_metrics.json"
 # Architecture params are auto-detected from checkpoint/sidecar metadata;
 # CLI flags here serve as fallback for legacy checkpoints only.
 python $SCRIPT_DIR/dl_05_evaluate.py \
+        --stats-path $STATS_PATH \
         --model "$BEST_MODEL" \
         --output "$EVAL_OUTPUT" \
         --patches-dir $PATCHES_DIR \
