@@ -31,7 +31,7 @@ from dl_band_utils import (
 
 
 def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path = None,
-                       global_stats_path: Path = None):
+                       global_stats_path: Path = None, weight_power: float = 1.0):
     """
     Compute normalization statistics from all training patches.
 
@@ -195,12 +195,15 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
     if total_class_pixels > 0:
         class_frequencies = {k: v / total_class_pixels for k, v in class_counts.items()}
 
-    # Inverse frequency weighting
+    # Power-scaled inverse frequency weighting: (1/freq) ** weight_power
+    # weight_power=1.0 -> pure inverse frequency (legacy behavior)
+    # weight_power=0.5 -> sqrt-inverse (gentler, mitigates minority over-prediction)
+    # weight_power=0.0 -> uniform weights
     class_weights = {}
     for class_idx in range(len(class_names)):
         freq = class_frequencies.get(class_idx, 0)
         if freq > 0:
-            class_weights[class_idx] = 1.0 / freq
+            class_weights[class_idx] = (1.0 / freq) ** weight_power
         else:
             class_weights[class_idx] = 0.0
 
@@ -289,7 +292,8 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
         "class_names": class_names,
         "class_counts": {class_names[k]: v for k, v in sorted(class_counts.items()) if k < len(class_names)},
         "class_frequencies": {class_names[k]: round(v, 6) for k, v in sorted(class_frequencies.items()) if k < len(class_names)},
-        "class_weights": {class_names[k]: round(v, 4) for k, v in sorted(class_weights.items()) if k < len(class_names)}
+        "class_weights": {class_names[k]: round(v, 4) for k, v in sorted(class_weights.items()) if k < len(class_names)},
+        "weight_power": weight_power
     }
 
     # Save to JSON
@@ -307,6 +311,8 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
     print(f"  Model input channels: {in_channels}")
     if geomorph_classes:
         print(f"  Categorical classes found: {sorted(list(geomorph_classes))}")
+    print(f"  Class weight power: {weight_power} "
+          f"({'pure inverse-freq' if weight_power == 1.0 else 'sqrt-inverse' if weight_power == 0.5 else 'uniform' if weight_power == 0.0 else 'custom'})")
     print(f"\nClass distribution:")
     for class_idx, name in enumerate(class_names):
         count = class_counts.get(class_idx, 0)
@@ -345,6 +351,14 @@ if __name__ == "__main__":
         default=None,
         help="Path to global_band_stats.json from R (overrides patch min/max)"
     )
+    parser.add_argument(
+        "--weight-power",
+        type=float,
+        default=1.0,
+        help="Exponent for inverse-frequency class weights: (1/freq)**power. "
+             "1.0=pure inverse-freq (legacy), 0.5=sqrt-inverse, 0.0=uniform. "
+             "Lower values reduce minority over-prediction (default: 1.0)"
+    )
     args = parser.parse_args()
 
     # Handle relative paths from project root
@@ -356,4 +370,5 @@ if __name__ == "__main__":
     if args.global_stats is not None:
         global_stats_path = project_root / args.global_stats if not args.global_stats.is_absolute() else args.global_stats
 
-    compute_statistics(patches_dir, output_path, args.config, global_stats_path)
+    compute_statistics(patches_dir, output_path, args.config, global_stats_path,
+                        weight_power=args.weight_power)
