@@ -14,6 +14,11 @@ BATCH_SIZE=32
 EPOCHS=100
 SEED=420
 WORKERS=4
+PRECISION="32-true"        # 32-true | 16-mixed | bf16-mixed
+# UNet3+ memory hint: full-scale skips are heavier than the plain U-Net, especially
+# at DEPTH=5 / high BASE_FILTERS with DEEP_SUPERVISION=true. If you hit CUDA OOM,
+# set PRECISION="16-mixed" (or "bf16-mixed" on A100/H100) and/or lower BATCH_SIZE
+# (e.g. 16 or 8). These don't change the default unet path (32-true is its default).
 
 # To switch between binary and multiclass, edit classification_mode in dl_band_config.json
 # before running the pipeline — step 1 (dl_01_compute_statistics.py)
@@ -82,6 +87,7 @@ python $SCRIPT_DIR/dl_04_train_lightning.py \
         --lr 1e-4 \
         --dropout 0.2 \
         --weight-decay 1e-4 \
+        --precision "$PRECISION" \
         $ARCH_FLAGS \
         $ASPP_FLAGS \
         $KFOLD_FLAG
