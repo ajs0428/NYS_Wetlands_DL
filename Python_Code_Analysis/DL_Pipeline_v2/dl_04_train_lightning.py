@@ -24,10 +24,19 @@ from pathlib import Path
 from typing import Optional
 
 from dl_02_dataset import create_dataloaders, create_kfold_splits, create_fold_dataloaders
-from dl_03_unet_model import UNet
+from dl_model_factory import build_net, ARCHITECTURES
 from dl_band_utils import default_stats_path
 from dl_losses import HybridLoss
 from dl_model_utils import export_safetensors
+
+
+def _arch_label(arch: str, use_aspp: bool, aspp_rates, deep_supervision: bool) -> str:
+    """Human-readable architecture string for logs."""
+    if arch == "unet":
+        return "UNet" + (f" + ASPP(rates={aspp_rates})" if use_aspp else "")
+    if arch == "unet3plus":
+        return "UNet3+" + (" + deep supervision" if deep_supervision else "")
+    return arch
 
 
 # ── Data Module ──────────────────────────────────────────────────────
@@ -132,12 +141,15 @@ class WetlandSegmentationModule(L.LightningModule):
         net: nn.Module,
         num_classes: int,
         # Architecture params — stored in checkpoint for reproducibility
+        arch: str = "unet",
         in_channels: int = 1,
         base_filters: int = 32,
         depth: int = 4,
         dropout: float = 0.0,
         use_aspp: bool = False,
         aspp_rates: tuple = (6, 12, 18),
+        cat_channels: int = 64,
+        deep_supervision: bool = False,
         # Training params
         class_weights: Optional[torch.Tensor] = None,
         class_names: Optional[list] = None,
@@ -194,8 +206,16 @@ class WetlandSegmentationModule(L.LightningModule):
 
     def _shared_step(self, batch, stage: str):
         X, y = batch
-        logits = self(X)
-        loss = self.criterion(logits, y)
+        out = self(X)
+        # Deep supervision: the net returns a list of full-res heads during
+        # training (element 0 = main head). Sum the loss over all heads; compute
+        # metrics on the main head only. Single tensor otherwise (incl. eval).
+        if isinstance(out, (list, tuple)):
+            loss = sum(self.criterion(o, y) for o in out) / len(out)
+            logits = out[0]
+        else:
+            loss = self.criterion(out, y)
+            logits = out
 
         # Metrics — detach from autograd, stay on-device
         with torch.no_grad():
@@ -302,6 +322,9 @@ def train(
     dropout: float = 0.2,
     use_aspp: bool = False,
     aspp_rates: tuple = (6, 12, 18),
+    arch: str = "unet",
+    cat_channels: int = 64,
+    deep_supervision: bool = False,
 ):
     """
     Full training pipeline using PyTorch Lightning.
@@ -347,7 +370,7 @@ def train(
     print(f"{'='*60}")
     print("Wetland Classification Training (Lightning)")
     print(f"{'='*60}")
-    print(f"Architecture: UNet" + (f" + ASPP(rates={aspp_rates})" if use_aspp else ""))
+    print(f"Architecture: {_arch_label(arch, use_aspp, aspp_rates, deep_supervision)}")
     print(f"Classification mode: {mode}")
     print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
@@ -366,7 +389,8 @@ def train(
     print(f"Class weights: {class_weights.tolist()}")
 
     # Network
-    net = UNet(
+    net = build_net(
+        arch=arch,
         in_channels=in_channels,
         num_classes=num_classes,
         base_filters=base_filters,
@@ -374,18 +398,23 @@ def train(
         dropout=dropout,
         use_aspp=use_aspp,
         aspp_rates=aspp_rates,
+        cat_channels=cat_channels,
+        deep_supervision=deep_supervision,
     )
 
     # Lightning module
     module = WetlandSegmentationModule(
         net=net,
         num_classes=num_classes,
+        arch=arch,
         in_channels=in_channels,
         base_filters=base_filters,
         depth=depth,
         dropout=dropout,
         use_aspp=use_aspp,
         aspp_rates=aspp_rates,
+        cat_channels=cat_channels,
+        deep_supervision=deep_supervision,
         class_weights=class_weights,
         class_names=class_names,
         classification_mode=mode,
@@ -403,7 +432,7 @@ def train(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    ckpt_basename = f"best_{mode}_bf{base_filters}_d{depth}_{run_timestamp}"
+    ckpt_basename = f"best_{mode}_{arch}_bf{base_filters}_d{depth}_{run_timestamp}"
 
     callbacks = [
         ModelCheckpoint(
@@ -422,7 +451,7 @@ def train(
     ]
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    run_name = f"unet_bf{base_filters}_{timestamp}"
+    run_name = f"{arch}_bf{base_filters}_{timestamp}"
     csv_logger = CSVLogger(save_dir=output_dir, name="lightning_logs", version=run_name)
     tb_logger = TensorBoardLogger(save_dir=output_dir, name="tb_logs", version=run_name,
                                    log_graph=True)
@@ -483,7 +512,7 @@ def train(
                 history[hist_key] = values
 
     # Save JSON (parity with legacy dl_04_train.py)
-    history_path = output_dir / f"training_history_{mode}_unet.json"
+    history_path = output_dir / f"training_history_{mode}_{arch}.json"
     with open(history_path, "w") as f:
         json.dump(history, f, indent=2)
     print(f"Training history saved to {history_path}")
@@ -530,7 +559,9 @@ def train(
         "kfold": False,
         "best_epoch": module.current_epoch,
         "best_val_loss": round(best_score.item(), 4) if best_score is not None else None,
+        "architecture": arch,
         "config": {
+            "arch": arch,
             "in_channels": in_channels,
             "num_classes": num_classes,
             "class_names": class_names,
@@ -538,6 +569,8 @@ def train(
             "depth": depth,
             "use_aspp": use_aspp,
             "aspp_rates": list(aspp_rates),
+            "cat_channels": cat_channels,
+            "deep_supervision": deep_supervision,
             "dropout": dropout,
             "learning_rate": learning_rate,
             "weight_decay": weight_decay,
@@ -605,6 +638,9 @@ def train_kfold(
     dropout: float = 0.2,
     use_aspp: bool = False,
     aspp_rates: tuple = (6, 12, 18),
+    arch: str = "unet",
+    cat_channels: int = 64,
+    deep_supervision: bool = False,
 ):
     """
     K-fold cross-validation training.
@@ -632,7 +668,7 @@ def train_kfold(
     print(f"\n{'='*60}")
     print(f"K-FOLD CROSS-VALIDATION ({n_folds} folds)")
     print(f"{'='*60}")
-    print(f"Architecture: UNet" + (f" + ASPP(rates={aspp_rates})" if use_aspp else ""))
+    print(f"Architecture: {_arch_label(arch, use_aspp, aspp_rates, deep_supervision)}")
     print(f"Classification mode: {mode}")
     print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
@@ -644,7 +680,7 @@ def train_kfold(
 
     # Output directory for this CV run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    kfold_dir = output_dir / f"kfold_{n_folds}fold_unet_{timestamp}"
+    kfold_dir = output_dir / f"kfold_{n_folds}fold_{arch}_{timestamp}"
     kfold_dir.mkdir(parents=True, exist_ok=True)
 
     fold_results = []
@@ -668,7 +704,8 @@ def train_kfold(
         dm.setup()
 
         # Fresh network
-        net = UNet(
+        net = build_net(
+            arch=arch,
             in_channels=in_channels,
             num_classes=num_classes,
             base_filters=base_filters,
@@ -676,18 +713,23 @@ def train_kfold(
             dropout=dropout,
             use_aspp=use_aspp,
             aspp_rates=aspp_rates,
+            cat_channels=cat_channels,
+            deep_supervision=deep_supervision,
         )
 
         # Lightning module
         module = WetlandSegmentationModule(
             net=net,
             num_classes=num_classes,
+            arch=arch,
             in_channels=in_channels,
             base_filters=base_filters,
             depth=depth,
             dropout=dropout,
             use_aspp=use_aspp,
             aspp_rates=aspp_rates,
+            cat_channels=cat_channels,
+            deep_supervision=deep_supervision,
             class_weights=dm.class_weights,
             class_names=class_names,
             classification_mode=mode,
@@ -705,7 +747,7 @@ def train_kfold(
         callbacks = [
             ModelCheckpoint(
                 dirpath=kfold_dir,
-                filename=f"best_{mode}_unet_{fold_name}",
+                filename=f"best_{mode}_{arch}_{fold_name}",
                 monitor="val/loss",
                 save_top_k=1,
                 mode="min",
@@ -718,7 +760,7 @@ def train_kfold(
             LearningRateMonitor(logging_interval="epoch"),
         ]
 
-        run_name = f"unet_bf{base_filters}_{fold_name}_{timestamp}"
+        run_name = f"{arch}_bf{base_filters}_{fold_name}_{timestamp}"
         csv_logger = CSVLogger(
             save_dir=kfold_dir, name="lightning_logs", version=run_name,
         )
@@ -797,7 +839,9 @@ def train_kfold(
     # Save results JSON
     results = {
         "n_folds": n_folds,
-        "architecture": "unet",
+        "architecture": arch,
+        "cat_channels": cat_channels,
+        "deep_supervision": deep_supervision,
         "base_filters": base_filters,
         "depth": depth,
         "seed": seed,
@@ -872,7 +916,9 @@ def train_kfold(
         "kfold": True,
         "n_folds": n_folds,
         "results_dir": str(kfold_dir),
+        "architecture": arch,
         "config": {
+            "arch": arch,
             "in_channels": in_channels,
             "num_classes": num_classes,
             "class_names": class_names,
@@ -880,6 +926,8 @@ def train_kfold(
             "depth": depth,
             "use_aspp": use_aspp,
             "aspp_rates": list(aspp_rates),
+            "cat_channels": cat_channels,
+            "deep_supervision": deep_supervision,
             "dropout": dropout,
             "learning_rate": learning_rate,
             "weight_decay": weight_decay,
@@ -964,10 +1012,16 @@ if __name__ == "__main__":
                         help="Max gradient norm for clipping (0=disabled, default: 1.0)")
     parser.add_argument("--dropout", type=float, default=0.2,
                         help="Spatial dropout after bottleneck (0=disabled, default: 0.2)")
+    parser.add_argument("--arch", type=str, default="unet", choices=list(ARCHITECTURES),
+                        help="Model architecture (default: unet)")
     parser.add_argument("--use-aspp", action="store_true",
-                        help="Add ASPP module at U-Net bottleneck for expanded receptive field")
+                        help="[unet] Add ASPP module at bottleneck for expanded receptive field")
     parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
-                        help="Dilation rates for ASPP branches (default: 6 12 18)")
+                        help="[unet] Dilation rates for ASPP branches (default: 6 12 18)")
+    parser.add_argument("--cat-channels", type=int, default=64,
+                        help="[unet3plus] Unified channels per skip branch (default: 64)")
+    parser.add_argument("--deep-supervision", action="store_true",
+                        help="[unet3plus] Attach a loss head to every decoder stage + bottleneck")
     parser.add_argument("--kfold", type=int, default=0,
                         help="Number of cross-validation folds (0=disabled, default: 0). "
                              "When set (e.g. --kfold 5), runs k-fold CV instead of a single train/val/test split.")
@@ -1003,6 +1057,9 @@ if __name__ == "__main__":
         dropout=args.dropout,
         use_aspp=args.use_aspp,
         aspp_rates=tuple(args.aspp_rates),
+        arch=args.arch,
+        cat_channels=args.cat_channels,
+        deep_supervision=args.deep_supervision,
     )
 
     if args.kfold >= 2:

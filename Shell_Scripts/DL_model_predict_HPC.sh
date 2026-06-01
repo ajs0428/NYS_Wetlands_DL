@@ -62,8 +62,8 @@ elif ckpt.suffix == ".ckpt":
         hp = torch.load(ckpt, map_location="cpu", weights_only=False).get("hyper_parameters", {})
         if hp:
             meta = {k: hp.get(k) for k in
-                    ("in_channels", "num_classes", "base_filters", "depth",
-                     "dropout", "use_aspp", "aspp_rates")}
+                    ("arch", "in_channels", "num_classes", "base_filters", "depth",
+                     "dropout", "use_aspp", "aspp_rates", "cat_channels", "deep_supervision")}
     except Exception:
         pass
 # 3) training_log.json lookup by checkpoint basename
@@ -74,15 +74,19 @@ if meta is None and log_path.exists():
         meta = match.get("config", {})
 
 if meta:
+    arch = meta.get("arch") or "unet"
     bf = meta.get("base_filters", "?")
     dp = meta.get("depth", "?")
     ic = meta.get("in_channels", "?")
     nc = meta.get("num_classes", "?")
-    aspp = meta.get("use_aspp", False)
-    rates = meta.get("aspp_rates", [])
-    line = f"UNet(in={ic}, classes={nc}, bf={bf}, depth={dp}"
-    if aspp:
-        line += f", aspp={list(rates)}"
+    label = "UNet3+" if arch == "unet3plus" else "UNet"
+    line = f"{label}(in={ic}, classes={nc}, bf={bf}, depth={dp}"
+    if arch == "unet3plus":
+        line += f", cat_channels={meta.get('cat_channels', '?')}"
+        if meta.get("deep_supervision"):
+            line += ", deep_supervision"
+    elif meta.get("use_aspp"):
+        line += f", aspp={list(meta.get('aspp_rates', []))}"
     line += ")"
     print(line)
 else:

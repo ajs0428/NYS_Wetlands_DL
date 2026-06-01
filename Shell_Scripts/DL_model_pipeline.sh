@@ -2,8 +2,11 @@
 set -e  # Exit on error
 
 # === CONFIGURATION ===
-USE_ASPP=true             # true to enable ASPP at U-Net bottleneck
-ASPP_RATES="6 12 18"      # dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for depth=4
+ARCH="unet"                # unet | unet3plus
+USE_ASPP=true             # [unet] true to enable ASPP at the bottleneck
+ASPP_RATES="6 12 18"      # [unet] dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for depth=4
+CAT_CHANNELS=64            # [unet3plus] unified channels per skip branch
+DEEP_SUPERVISION=false     # [unet3plus] true to add a loss head per decoder stage + bottleneck
 KFOLD=0                    # 0=disabled, 2+=run k-fold CV instead of single split
 BASE_FILTERS=64
 DEPTH=4
@@ -28,13 +31,22 @@ if [ "$USE_ASPP" = true ]; then
     ASPP_FLAGS="--use-aspp --aspp-rates $ASPP_RATES"
 fi
 
+# Build architecture flags (only the train step takes these; eval/predict
+# auto-detect the architecture from the checkpoint/sidecar metadata)
+ARCH_FLAGS="--arch $ARCH"
+if [ "$ARCH" = "unet3plus" ]; then
+    ARCH_FLAGS="$ARCH_FLAGS --cat-channels $CAT_CHANNELS"
+    [ "$DEEP_SUPERVISION" = true ] && ARCH_FLAGS="$ARCH_FLAGS --deep-supervision"
+fi
+
 # Read classification mode from band config
 CLASS_MODE=$(python -c "import json; print(json.load(open('$BAND_CONFIG'))['classification_mode'])" 2>/dev/null || echo "multiclass")
 
 echo "=== NYS Wetlands DL Pipeline ==="
 echo "Classification: $CLASS_MODE"
-echo "Architecture: U-Net (bf=$BASE_FILTERS, depth=$DEPTH)"
-[ "$USE_ASPP" = true ] && echo "ASPP: enabled (rates: $ASPP_RATES)"
+echo "Architecture: $ARCH (bf=$BASE_FILTERS, depth=$DEPTH)"
+[ "$ARCH" = "unet" ] && [ "$USE_ASPP" = true ] && echo "ASPP: enabled (rates: $ASPP_RATES)"
+[ "$ARCH" = "unet3plus" ] && echo "UNet3+: cat_channels=$CAT_CHANNELS, deep_supervision=$DEEP_SUPERVISION"
 [ "$KFOLD" -ge 2 ] 2>/dev/null && echo "K-Fold CV: $KFOLD folds"
 echo "================================"
 
@@ -63,6 +75,7 @@ python $SCRIPT_DIR/dl_04_train_lightning.py \
         --lr-patience 10 \
         --dice-weight 1.5 \
         --focal-gamma 2.0 \
+        $ARCH_FLAGS \
         $ASPP_FLAGS \
         $KFOLD_FLAG
 

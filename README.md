@@ -2,6 +2,8 @@
 
 A deep learning pipeline for wetland semantic segmentation in New York State. The project uses a U-Net encoder-decoder architecture with residual blocks and squeeze-and-excitation (SE) attention, trained on multi-source remote sensing data (terrain, spectral indices, SAR, and NAIP imagery) to classify pixels into wetland categories. Training data is derived from the National Wetlands Inventory and organized by HUC12 watersheds for systematic processing across the state.
 
+Two segmentation architectures are available, selected with `--arch` (default `unet`): the plain **U-Net** above, and **UNet3+** (`--arch unet3plus`), which adds full-scale skip connections and optional deep supervision. See the [pipeline README](Python_Code_Analysis/DL_Pipeline_v2/README.md#step-3-model-architecture-dl_03_unet_modelpy) for the trade-offs.
+
 The pipeline supports two classification modes, toggled via `dl_band_config.json`:
 
 - **Multiclass** (default): Four classes — EMW, FSW, SSW, UPL

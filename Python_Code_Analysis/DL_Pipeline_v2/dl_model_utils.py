@@ -14,7 +14,7 @@ import torch.nn as nn
 from pathlib import Path
 from typing import Optional
 
-from dl_03_unet_model import UNet
+from dl_model_factory import build_net
 
 
 # ── Internal helpers ──────────────────────────────────────────────────
@@ -23,6 +23,7 @@ def _extract_hparams(checkpoint: dict) -> dict:
     """Extract architecture hyperparameters from a Lightning checkpoint."""
     hparams = checkpoint.get("hyper_parameters", {})
     return {
+        "arch": hparams.get("arch"),
         "in_channels": hparams.get("in_channels"),
         "num_classes": hparams.get("num_classes"),
         "base_filters": hparams.get("base_filters"),
@@ -30,6 +31,8 @@ def _extract_hparams(checkpoint: dict) -> dict:
         "dropout": hparams.get("dropout"),
         "use_aspp": hparams.get("use_aspp"),
         "aspp_rates": hparams.get("aspp_rates"),
+        "cat_channels": hparams.get("cat_channels"),
+        "deep_supervision": hparams.get("deep_supervision"),
     }
 
 
@@ -81,6 +84,9 @@ def export_safetensors(
     dropout: Optional[float] = None,
     use_aspp: Optional[bool] = None,
     aspp_rates: Optional[tuple] = None,
+    arch: Optional[str] = None,
+    cat_channels: Optional[int] = None,
+    deep_supervision: Optional[bool] = None,
 ) -> Path:
     """
     Export a Lightning .ckpt to .safetensors + .meta.json sidecar.
@@ -111,6 +117,7 @@ def export_safetensors(
     # Build metadata from checkpoint hparams + manual overrides
     hparams = _extract_hparams(checkpoint)
     overrides = {
+        "arch": arch,
         "in_channels": in_channels,
         "num_classes": num_classes,
         "base_filters": base_filters,
@@ -118,6 +125,8 @@ def export_safetensors(
         "dropout": dropout,
         "use_aspp": use_aspp,
         "aspp_rates": aspp_rates,
+        "cat_channels": cat_channels,
+        "deep_supervision": deep_supervision,
     }
     # Manual overrides take precedence
     for key, val in overrides.items():
@@ -139,9 +148,12 @@ def export_safetensors(
         hparams["aspp_rates"] = list(hparams["aspp_rates"])
 
     # Set defaults for optional params
+    hparams.setdefault("arch", "unet")
     hparams.setdefault("dropout", 0.0)
     hparams.setdefault("use_aspp", False)
     hparams.setdefault("aspp_rates", [6, 12, 18])
+    hparams.setdefault("cat_channels", 64)
+    hparams.setdefault("deep_supervision", False)
 
     # Also carry over non-architecture metadata if available
     ckpt_hparams = checkpoint.get("hyper_parameters", {})
@@ -189,7 +201,9 @@ def _load_from_safetensors(
     with open(meta_path) as f:
         meta = json.load(f)
 
-    net = UNet(
+    arch = meta.get("arch", "unet")
+    net = build_net(
+        arch=arch,
         in_channels=meta["in_channels"],
         num_classes=meta["num_classes"],
         base_filters=meta["base_filters"],
@@ -197,6 +211,8 @@ def _load_from_safetensors(
         dropout=meta.get("dropout", 0.0),
         use_aspp=meta.get("use_aspp", False),
         aspp_rates=tuple(meta.get("aspp_rates", (6, 12, 18))),
+        cat_channels=meta.get("cat_channels", 64),
+        deep_supervision=meta.get("deep_supervision", False),
     )
 
     state_dict = load_safetensors(str(model_path), device=str(device))
@@ -205,8 +221,8 @@ def _load_from_safetensors(
     net.eval()
 
     print(f"Loaded model from {model_path} (safetensors)")
-    print(f"  Architecture: UNet(in={meta['in_channels']}, bf={meta['base_filters']}, "
-          f"depth={meta['depth']}, aspp={meta.get('use_aspp', False)})")
+    print(f"  Architecture: {arch}(in={meta['in_channels']}, bf={meta['base_filters']}, "
+          f"depth={meta['depth']})")
     if "epoch" in meta:
         print(f"  Epoch: {meta['epoch']}")
 
@@ -298,9 +314,12 @@ def load_model(
     dropout: float = 0.0,
     use_aspp: bool = False,
     aspp_rates: tuple = (6, 12, 18),
+    arch: str = "unet",
+    cat_channels: int = 64,
+    deep_supervision: bool = False,
 ) -> nn.Module:
     """
-    Construct a UNet model and load weights from checkpoint.
+    Construct a model and load weights from checkpoint.
 
     For .safetensors files, architecture is read from the .meta.json sidecar
     and the function arguments are ignored (with a warning if they differ).
@@ -340,6 +359,13 @@ def load_model(
     if "hyper_parameters" in checkpoint:
         hp = _extract_hparams(checkpoint)
         detected = []
+        if hp.get("arch") is not None:
+            arch = hp["arch"]
+            detected.append(f"arch={arch}")
+        if hp.get("cat_channels") is not None:
+            cat_channels = hp["cat_channels"]
+        if hp.get("deep_supervision") is not None:
+            deep_supervision = hp["deep_supervision"]
         if hp.get("in_channels") is not None:
             in_channels = hp["in_channels"]
             detected.append(f"in={in_channels}")
@@ -362,7 +388,8 @@ def load_model(
         if detected:
             print(f"Auto-detected architecture from checkpoint: {', '.join(detected)}")
 
-    net = UNet(
+    net = build_net(
+        arch=arch,
         in_channels=in_channels,
         num_classes=num_classes,
         base_filters=base_filters,
@@ -370,6 +397,8 @@ def load_model(
         dropout=dropout,
         use_aspp=use_aspp,
         aspp_rates=aspp_rates,
+        cat_channels=cat_channels,
+        deep_supervision=deep_supervision,
     )
 
     _load_weights_into_net(checkpoint, net)
@@ -406,6 +435,12 @@ if __name__ == "__main__":
                         help="Override: model uses ASPP")
     parser.add_argument("--aspp-rates", type=int, nargs="+", default=None,
                         help="Override: ASPP dilation rates")
+    parser.add_argument("--arch", type=str, default=None,
+                        help="Override: architecture (unet | unet3plus)")
+    parser.add_argument("--cat-channels", type=int, default=None,
+                        help="Override: UNet3+ unified channels per skip branch")
+    parser.add_argument("--deep-supervision", action="store_true", default=None,
+                        help="Override: UNet3+ model uses deep supervision")
     args = parser.parse_args()
 
     export_safetensors(
@@ -418,4 +453,7 @@ if __name__ == "__main__":
         dropout=args.dropout,
         use_aspp=args.use_aspp,
         aspp_rates=tuple(args.aspp_rates) if args.aspp_rates else None,
+        arch=args.arch,
+        cat_channels=args.cat_channels,
+        deep_supervision=args.deep_supervision,
     )

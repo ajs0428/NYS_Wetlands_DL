@@ -1,5 +1,7 @@
 # U-Net Model Architecture Overview
 
+> This document describes the default `--arch unet` model (`dl_03_unet_model.py`). An alternative **UNet3+** architecture (`dl_03_unet3plus_model.py`, `--arch unet3plus`) with full-scale skip connections and optional deep supervision is also available — see the [pipeline README](README.md#step-3-model-architecture-dl_03_unet_modelpy).
+
 ## Summary
 
 | Aspect | Value |

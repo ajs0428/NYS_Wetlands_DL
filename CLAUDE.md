@@ -17,6 +17,8 @@ Python_Code_Analysis/DL_Pipeline_v2/   # Main pipeline (production)
   dl_01_compute_statistics.py             # Scan patches -> normalization_stats.json
   dl_02_dataset.py                        # PyTorch Dataset, normalization, splits
   dl_03_unet_model.py                     # U-Net with residual blocks + SE attention
+  dl_03_unet3plus_model.py                # UNet3+ (full-scale skips + deep supervision; --arch unet3plus)
+  dl_model_factory.py                     # build_net() architecture dispatch (unet | unet3plus)
   dl_04_train.py                          # Legacy training loop (fallback/reference)
   dl_04_train_lightning.py                # Lightning training (primary)
   dl_05_evaluate.py                       # Test metrics, confusion matrix, IoU
@@ -39,7 +41,7 @@ pyproject.toml                         # Dependencies + uv config
 Run scripts in order: dl_01 -> dl_02 (imported by dl_04) -> dl_03 (imported by dl_04) -> dl_04_train_lightning -> dl_05 -> dl_06
 - **Primary training:** `dl_04_train_lightning.py` (Lightning Trainer with callbacks)
 - **Legacy training:** `dl_04_train.py` (manual loop, kept as fallback)
-- **Architecture:** U-Net with residual blocks + SE attention (`dl_03_unet_model.py`)
+- **Architecture:** selectable via `--arch` — `unet` (default, `dl_03_unet_model.py`, residual blocks + SE attention) or `unet3plus` (`dl_03_unet3plus_model.py`, full-scale skips + deep supervision). Dispatched by `dl_model_factory.build_net()`.
 
 ## Key Conventions
 - **Band handling is dynamic** — band names/indices are discovered from raster descriptions at runtime, never hardcoded
@@ -51,7 +53,9 @@ Run scripts in order: dl_01 -> dl_02 (imported by dl_04) -> dl_03 (imported by d
 - **Two classification modes:** multiclass (EMW/FSW/SSW/UPL) and binary (WET/UPL), toggled in dl_band_config.json
 
 ## Architecture Details
+- **Selection:** `--arch {unet,unet3plus}` (default `unet`) on train/eval/predict; `dl_model_factory.build_net()` is the single dispatch point. Each arch ignores the other's flags. Architecture + hyperparams are stored in the checkpoint/`.meta.json`/`training_log.json` and auto-detected on load, so eval/predict need no `--arch` for `.ckpt`/`.safetensors`.
 - **U-Net:** Residual blocks + SE attention (depth 4 local / 5 HPC, base filters 32/64). Optional ASPP module at bottleneck (`--use-aspp`) expands receptive field to ~250m+ via parallel dilated convolutions (rates 6/12/18 default; use 3/6/12 for depth=5). Off by default for backward compatibility.
+- **UNet3+** (`--arch unet3plus`): full-scale skip connections (each decoder node aggregates all encoder scales + deeper decoder nodes + bottleneck, unified to `--cat-channels` width, default 64 -> decoder nodes are `cat_channels*(depth+1)` wide). Optional `--deep-supervision` adds a loss head per decoder stage + bottleneck; the net returns a list of full-res heads in train mode and a single tensor in eval (`_shared_step` handles both). Reuses U-Net's ConvBlock/SE blocks. ~15M params at bf=32/d4 (~2x the plain U-Net); memory-heavy — prefer `16-mixed` / smaller batch on HPC.
 - Input: 31 channels (22 predictor bands; Geomorph_local one-hot expands 1 band to 10 channels)
 - Loss: Hybrid Focal + Dice with class weights (in `dl_losses.py`)
 - Optimizer: AdamW + ReduceLROnPlateau

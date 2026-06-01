@@ -1,6 +1,6 @@
 # NYS Wetlands DL Pipeline v2 — User Guide
 
-Deep learning pipeline for wetland semantic segmentation in New York State using a U-Net architecture with residual blocks and SE attention. Supports two classification modes: **multiclass** (4-class: EMW, FSW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `dl_band_config.json` — both modes use the same training patches with label remapping applied at runtime.
+Deep learning pipeline for wetland semantic segmentation in New York State. Two architectures are available via `--arch`: a **U-Net** with residual blocks and SE attention (default), and **UNet3+** with full-scale skip connections and optional deep supervision. Supports two classification modes: **multiclass** (4-class: EMW, FSW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `dl_band_config.json` — both modes use the same training patches with label remapping applied at runtime.
 
 ## Table of Contents
 
@@ -173,11 +173,13 @@ GeoTIFF Patches (19 bands: 18 predictors + 1 label)
         v
  +---------------------+
  | dl_03_unet_model     | -> U-Net architecture (residual blocks + SE attention)
+ | dl_03_unet3plus_model| -> UNet3+ (full-scale skips + deep supervision)
+ |  (selected by --arch via dl_model_factory.build_net)
  +---------------------+
         |
         v
  +---------------------------------+
- | dl_04_train_lightning            | -> best_{mode}_unet.ckpt (Lightning checkpoints)
+ | dl_04_train_lightning            | -> best_{mode}_{arch}_*.ckpt (Lightning checkpoints)
  |  (or dl_04_train.py legacy)     |    + CSV/TensorBoard logs
  +---------------------------------+
         |
@@ -197,7 +199,7 @@ GeoTIFF Patches (19 bands: 18 predictors + 1 label)
  +---------------------+
 
 Shared modules: dl_losses.py (FocalLoss, DiceLoss, HybridLoss), dl_model_utils.py (checkpoint loading),
-                dl_band_utils.py (band discovery/config)
+                dl_model_factory.py (build_net architecture dispatch), dl_band_utils.py (band discovery/config)
 ```
 
 ---
@@ -417,11 +419,16 @@ Loads a sample batch and prints tensor shapes and value ranges to verify normali
 
 ---
 
-## Step 3: Model Architecture (`dl_03_unet_model.py`)
+## Step 3: Model Architecture (`dl_03_unet_model.py`, `dl_03_unet3plus_model.py`)
+
+Two architectures are available, selected with `--arch` on the train/evaluate/predict scripts. `dl_model_factory.build_net(arch, ...)` is the single dispatch point; each architecture ignores the flags meant for the other. `--arch` defaults to `unet`, so existing workflows are unchanged.
+
+- **`unet`** (`dl_03_unet_model.py`) — the default U-Net described below.
+- **`unet3plus`** (`dl_03_unet3plus_model.py`) — UNet3+ with full-scale skip connections and optional deep supervision (see [UNet3+](#unet3) below).
+
+### U-Net Architecture
 
 U-Net encoder-decoder architecture with skip connections, residual encoder blocks, and squeeze-and-excitation (SE) channel attention in the decoder. See [UNet_Architecture_Overview.md](UNet_Architecture_Overview.md) for a detailed breakdown.
-
-### Architecture
 
 ```
 Input (18 ch) -> Residual Encoder (progressive downsampling) -> Bottleneck -> SE Decoder (upsampling + skip + attention) -> Output (4 ch)
@@ -450,6 +457,29 @@ python dl_03_unet_model.py
 ```
 
 Runs a forward pass with dummy data to verify the model builds correctly.
+
+### UNet3+
+
+UNet3+ (`--arch unet3plus`) replaces the U-Net's single same-level skip with **full-scale skip connections**: every decoder node aggregates feature maps from *all* encoder scales (downsampled) and *all* deeper decoder nodes plus the bottleneck (upsampled). Each source is unified to a common width (`--cat-channels`, default 64) before concatenation, so every decoder node is `cat_channels * (depth + 1)` wide (320 at the defaults). It reuses the same residual `ConvBlock` and `SqueezeExcitation` building blocks as the U-Net.
+
+```
+Input -> Residual Encoder -> Bottleneck
+                |  \  \  \
+                v   v  v  v   (each decoder node pulls from every scale)
+            Full-scale-skip Decoder -> Output (+ deep-supervision side heads)
+```
+
+- **Full-scale skips**: improve multi-scale boundary delineation; more memory-intensive than the plain U-Net (every decoder node concatenates `depth + 1` unified branches).
+- **Deep supervision** (`--deep-supervision`): attaches a classifier head to every decoder stage and the bottleneck. During training the model returns a list of full-resolution heads and the loss is summed over all of them (metrics use the main/finest head). In `eval()` it returns a single tensor, so evaluation and prediction are unchanged.
+- **Output contract**: single tensor in `eval()`, list of heads in `train()` when deep supervision is on. `dl_04_train_lightning.py`'s `_shared_step` handles both transparently.
+
+Parameters: ~15M at `base_filters=32`, `depth=4` (vs ~7.8M for the plain U-Net at the same settings). On HPC (`depth=5`, `base_filters=64`) expect to use `--precision 16-mixed` and/or a smaller `--batch-size` to fit memory.
+
+Test it with:
+
+```bash
+python dl_03_unet3plus_model.py
+```
 
 ---
 
@@ -484,13 +514,16 @@ python dl_04_train_lightning.py \
 | `--epochs` | 50 | Maximum training epochs |
 | `--batch-size` | 16 | Batch size |
 | `--lr` | 1e-4 | Initial learning rate |
-| `--base-filters` | 32 | U-Net base filter count |
-| `--depth` | 4 | U-Net encoder/decoder depth |
+| `--arch` | `unet` | Architecture: `unet` or `unet3plus` |
+| `--base-filters` | 32 | Base filter count |
+| `--depth` | 4 | Encoder/decoder depth |
 | `--workers` | 4 | DataLoader worker processes (use 0 on macOS if issues arise) |
 | `--seed` | None | Random seed for reproducibility |
 | `--early-stopping` | 15 | Early stopping patience (epochs without improvement) |
-| `--use-aspp` | False | Add ASPP module at U-Net bottleneck |
-| `--aspp-rates` | `6 12 18` | Dilation rates for ASPP branches (space-separated) |
+| `--use-aspp` | False | [unet] Add ASPP module at the bottleneck |
+| `--aspp-rates` | `6 12 18` | [unet] Dilation rates for ASPP branches (space-separated) |
+| `--cat-channels` | 64 | [unet3plus] Unified channels per skip branch |
+| `--deep-supervision` | False | [unet3plus] Add a loss head to every decoder stage + bottleneck |
 | `--ce-weight` | 1.0 | Weight for Focal Loss component |
 | `--dice-weight` | 1.0 | Weight for Dice Loss component |
 | `--focal-gamma` | 2.0 | Focal Loss gamma (0 = plain CE, 2 = standard focal) |
@@ -510,13 +543,15 @@ python dl_04_train_lightning.py \
 
 | File | Description |
 |------|-------------|
-| `Models/best_{mode}_unet.ckpt` | Best Lightning checkpoint (lowest validation loss) |
+| `Models/best_{mode}_{arch}_bf{bf}_d{depth}_{timestamp}.ckpt` | Best Lightning checkpoint (lowest validation loss); a matching `.safetensors` + `.meta.json` is auto-exported |
 | `Models/lightning_logs/` | CSV logs and optional TensorBoard logs |
+
+The architecture and its hyperparameters (`arch`, `cat_channels`, `deep_supervision`, etc.) are stored in the checkpoint, the `.meta.json` sidecar, and `training_log.json`, so downstream scripts reconstruct the right model automatically.
 
 ### Key Components
 
 - **`WetlandDataModule`**: Wraps `create_dataloaders()` from `dl_02_dataset.py` as a Lightning data module
-- **`WetlandSegmentationModule`**: Lightning module wrapping the U-Net backbone
+- **`WetlandSegmentationModule`**: Lightning module wrapping the segmentation backbone (U-Net or UNet3+); `_shared_step` handles both a single output tensor and the list of heads produced under deep supervision
 - **`train()`**: Entry point that wires up data, model, callbacks, and Trainer
 
 ---
@@ -570,11 +605,13 @@ python dl_05_evaluate.py \
 | `--stats-path` | `Data/Training_Data/normalization_stats.json` | Stats JSON |
 | `--output` | None (prints to console) | Optional JSON file for saving metrics |
 | `--batch-size` | 16 | Batch size for inference |
-| `--base-filters` | 32 | Must match the trained model |
-| `--depth` | 4 | Must match the trained model |
+| `--base-filters` | 32 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
+| `--depth` | 4 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
 | `--seed` | 42 | Must match training seed (same test split) |
-| `--use-aspp` | False | Must match the trained model |
-| `--aspp-rates` | `6 12 18` | Must match the trained model |
+| `--use-aspp` | False | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
+| `--aspp-rates` | `6 12 18` | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
+
+> The architecture itself (`unet` vs `unet3plus`) and its params (`cat_channels`, `deep_supervision`) are read from the checkpoint's hparams / `.meta.json` sidecar — no `--arch` flag is needed when evaluating a `.ckpt` or `.safetensors` model.
 
 ### Metrics Reported
 
@@ -613,11 +650,13 @@ python dl_06_predict.py \
 | `--stats` | `Data/Training_Data/normalization_stats.json` | Stats JSON |
 | `--patch-size` | 128 | Sliding window size (pixels) |
 | `--overlap` | 32 | Overlap between adjacent windows (reduces edge artifacts) |
-| `--base-filters` | 32 | Must match the trained model |
-| `--depth` | 4 | Must match the trained model |
+| `--base-filters` | 32 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
+| `--depth` | 4 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
 | `--probs` | False | Also save per-class probability maps |
-| `--use-aspp` | False | Must match the trained model |
-| `--aspp-rates` | `6 12 18` | Must match the trained model |
+| `--use-aspp` | False | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
+| `--aspp-rates` | `6 12 18` | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
+
+> Architecture (`unet`/`unet3plus`) and its params are read from the checkpoint, so a UNet3+ model predicts with the same command — just point `--model` at its checkpoint.
 
 ### Output Files
 
@@ -923,7 +962,8 @@ Two pipeline scripts are provided:
 | Bus error in Docker | Add `--shm-size=8g` (or `--ipc=host`) to your `docker run` command — default 64MB shared memory is too small for DataLoader workers |
 | Docker build `platform` warning on Mac | Use `docker build --platform linux/amd64` when building for HPC from Apple Silicon |
 | Output files owned by root / permission denied | Add `--user $(id -u):$(id -g)` to your `docker run` command so files are written as your HPC user |
-| `--base-filters` / `--depth` mismatch | Evaluation and prediction must use the same values as training |
+| `--base-filters` / `--depth` mismatch | Not an issue for `.ckpt`/`.safetensors` (architecture is auto-detected); only matters for legacy `.pth`, where the flags must match training |
+| UNet3+ out of memory | Lower `--batch-size`, use `--precision 16-mixed`, or reduce `--cat-channels`; full-scale skips are heavier than the plain U-Net |
 
 ---
 
@@ -940,7 +980,7 @@ NYS_Wetlands_DL/
 │   │   └── normalization_stats.json    # Generated by Step 1
 │   └── Predictions/                    # Output from Step 6
 ├── Models/
-│   ├── best_{mode}_unet.ckpt          # Best Lightning checkpoint
+│   ├── best_{mode}_{arch}_*.ckpt      # Best Lightning checkpoint (+ .safetensors/.meta.json)
 │   ├── lightning_logs/                 # Training logs (CSV/TensorBoard)
 │   ├── SHAP/                           # Per-model SHAP plots + JSON (from Step 7)
 │   └── (legacy .pth files)            # From dl_04_train.py if used
@@ -955,6 +995,8 @@ NYS_Wetlands_DL/
         ├── dl_01_compute_statistics.py     # Step 1: Stats
         ├── dl_02_dataset.py               # Step 2: Dataset + normalize_bands()
         ├── dl_03_unet_model.py            # Step 3: U-Net architecture
+        ├── dl_03_unet3plus_model.py       # Step 3: UNet3+ architecture (--arch unet3plus)
+        ├── dl_model_factory.py            # build_net() architecture dispatch
         ├── dl_04_train_lightning.py        # Step 4: Train (Lightning, primary)
         ├── dl_04_train.py                 # Step 4: Train (legacy fallback)
         ├── dl_05_evaluate.py              # Step 5: Evaluate
