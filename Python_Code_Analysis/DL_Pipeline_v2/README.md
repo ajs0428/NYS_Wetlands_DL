@@ -19,6 +19,7 @@ Deep learning pipeline for wetland semantic segmentation in New York State. Two 
 - [Step 4 (Legacy): Train](#step-4-legacy-train-dl_04_trainpy)
 - [Step 5: Evaluate](#step-5-evaluate-dl_05_evaluatepy)
 - [Step 6: Predict](#step-6-predict-dl_06_predictpy)
+- [Step 6b: Predict a HUC Without Building a Stack](#step-6b-predict-a-huc-without-building-a-stack-dl_06b_predict_hucpy)
 - [Step 7: SHAP Band Importance](#step-7-shap-band-importance-dl_07_shap_analysispy)
 - [Interactive Notebook](#interactive-notebook-wetland_pipelineipynb)
 - [Loss Function: Hybrid Focal + Dice](#loss-function-hybrid-focal--dice)
@@ -672,6 +673,78 @@ python dl_06_predict.py \
 ### How Band Matching Works
 
 The prediction script matches bands **by name**, not position. Your input raster's band descriptions must match the names the model was trained on (e.g., "DEM", "Geomorph_local", "nir_lo"). Bands can be in any order, and extra bands are ignored.
+
+---
+
+## Step 6b: Predict a HUC Without Building a Stack (`dl_06b_predict_huc.py`)
+
+`dl_06_predict.py` needs one pre-stacked multi-band GeoTIFF as input. Building those `*_stack.tif` files for every HUC duplicates a lot of data (coarse layers get resampled up to the 1 m DEM grid, so a stack is often *larger* than its sources) and means rsyncing a fresh stack for every HUC and every model run.
+
+`dl_06b_predict_huc.py` avoids that entirely. It assembles the predictor stack **in memory** from the canonical source rasters and feeds it to the same sliding-window inference loop — nothing is ever written to disk as an intermediate stack.
+
+### How it works
+
+- **`dl_huc_stack.py`** is the Python port of `R_Code_Analysis/huc_stack.R` — the single source of truth for the band recipe. `VirtualHucStack` opens the DEM as the reference grid, wraps any mismatched source (NAIP, ortho) in a `rasterio.WarpedVRT` (a virtual, on-read resample — the equivalent of `terra::resample(r, ref)`), and bakes in the same transforms: `log(flowacc)`, drop `TPI_*` and NAIP `ndvi`/`ndwi`, `_lo` suffix on ortho. Categorical bands (`Geomorph_local`) are warped nearest-neighbour so they are never interpolated.
+- The virtual stack exposes the same surface a rasterio dataset does (`.descriptions`, `.profile`, `.nodata`, `.read(indexes, window=…)`), so `predict_from_source()` reads it **window by window**. Memory stays bounded by a single tile regardless of HUC size, and band selection is by name (the same `validate_prediction_bands` contract as Step 6).
+- Coverage is wall-to-wall: tiles overlap, the final row/column is snapped to the raster edge, and overlapping predictions are blended with a Hanning weight before `argmax`. The output is one seamless classification raster the same width × height as the DEM.
+
+### Inspect the contract first (no model needed)
+
+Before predicting, confirm the source files resolve and the assembled bands match what the model expects:
+
+```bash
+python dl_huc_stack.py \
+  --huc 041402011002 --cluster 208 \
+  --data-root /scratch/NYS_Wetlands_Data \
+  --inspect
+```
+
+This prints the resolved source file per dataset and the full ordered band list. Spot-check that the 17 predictor names from your `normalization_stats.json` are present.
+
+### Usage
+
+```bash
+python dl_06b_predict_huc.py \
+  --huc 041402011002 --cluster 208 \
+  --data-root /scratch/NYS_Wetlands_Data \
+  --model ../../Models/best_binary_unet.safetensors \
+  --stats ../../Data/Training_Data/binary_normalization_stats.json \
+  --out-dir ../../Data/HUC_DL_Predictions \
+  --patch-size 128 --overlap 64 --probs
+```
+
+### Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--huc` | *(required)* | HUC id (e.g. `041402011002`) |
+| `--cluster` | *(required)* | Cluster number (e.g. `208`) |
+| `--data-root` | `$NYS_WETLANDS_DATA_ROOT` or sibling `NYS_Wetlands_Data/` | Root of the data project holding the source rasters |
+| `--model` | `Models/best_model.safetensors` | Trained model checkpoint |
+| `--stats` | mode-specific `*_normalization_stats.json` | Stats JSON (defines the predictor-name contract) |
+| `--out-dir` | `Data/HUC_DL_Predictions` | Output directory |
+| `--patch-size` / `--overlap` | 128 / 64 | Sliding-window size and overlap |
+| `--base-filters` / `--depth` | 32 / 4 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
+| `--probs` | False | Also save per-class probability maps |
+| `--use-aspp` / `--aspp-rates` | False / `6 12 18` | Auto-detected from checkpoint |
+
+Output is named `DLpred_<mode>_cluster_<cluster>_huc_<huc>.tif` under `--out-dir`.
+
+### Getting the source rasters to the GPU server
+
+The source datasets (DEM, terrain, hydro, CHM, NAIP, ortho, lidar) must be reachable at `--data-root`. Sync **just the files for the HUC(s) you're mapping** with `rsync_huc_sources.sh` (project root `Shell_Scripts/`), which mirrors the directory layout `dl_huc_stack.py` expects:
+
+```bash
+SERVER="user@hpc.example.edu:" REMOTE_ROOT="/projects/NYS_Wetlands_Data" \
+LOCAL_ROOT="/scratch/NYS_Wetlands_Data" \
+  ./rsync_huc_sources.sh 208 041402011002
+```
+
+You sync the sources **once** and reuse them for every model — there is no per-run stack to rebuild or transfer.
+
+### Band-recipe parity
+
+`dl_huc_stack.py` must stay in lock-step with `huc_stack.R`. If the R recipe changes (a new transform, drop, or rename), mirror it in the Python port. Use `--inspect` against a HUC you also have an old stack for to diff band names and confirm parity.
 
 ---
 

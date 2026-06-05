@@ -11,6 +11,7 @@ so prediction rasters can have bands in any order or extra bands.
 import json
 import numpy as np
 import rasterio
+from rasterio.windows import Window
 import torch
 import torch.nn as nn
 from pathlib import Path
@@ -41,7 +42,10 @@ def predict_raster(
     save_probabilities: bool = False
 ):
     """
-    Apply model to a full raster using sliding window.
+    Apply model to a full raster file using a sliding window.
+
+    Thin wrapper that opens the GeoTIFF and delegates to predict_from_source so
+    a file-on-disk and an in-memory VirtualHucStack share one inference loop.
 
     Args:
         model: Trained model
@@ -53,23 +57,53 @@ def predict_raster(
         overlap: Overlap between windows for smoother predictions
         save_probabilities: Whether to save per-class probability maps
     """
+    with rasterio.open(input_path) as src:
+        predict_from_source(
+            model=model,
+            src=src,
+            output_path=output_path,
+            stats=stats,
+            device=device,
+            patch_size=patch_size,
+            overlap=overlap,
+            save_probabilities=save_probabilities,
+        )
+
+
+@torch.no_grad()
+def predict_from_source(
+    model: nn.Module,
+    src,
+    output_path: Path,
+    stats: dict,
+    device: torch.device,
+    patch_size: int = 128,
+    overlap: int = 64,
+    save_probabilities: bool = False
+):
+    """
+    Apply model to any opened, dataset-like source using a sliding window.
+
+    `src` must expose the rasterio-dataset surface this loop relies on:
+        .descriptions  .profile  .nodata  .height  .width
+        .read(indexes, window=Window(...)) -> (len(indexes), h, w)
+    Both a rasterio DatasetReader and dl_huc_stack.VirtualHucStack satisfy this.
+    Predictor windows are read on demand (never the whole raster at once), so a
+    full-HUC virtual stack stays bounded by one tile of memory.
+    """
     predictor_names = stats["predictor_names"]
     label_band = stats["label_band"]
     class_names = stats["class_names"]
     num_classes = len(class_names)
 
-    with rasterio.open(input_path) as src:
-        profile = src.profile.copy()
-        height = src.height
-        width = src.width
-        nodata = src.nodata
+    profile = src.profile.copy()
+    height = src.height
+    width = src.width
+    nodata = src.nodata
 
-        # Match bands by name
-        raster_bands = list(src.descriptions)
-        band_indices = validate_prediction_bands(raster_bands, predictor_names, label_band)
-
-        # Read predictor bands in the correct order
-        data = src.read(band_indices).astype(np.float32)
+    # Match bands by name -> 1-based indices into the source, in model order.
+    raster_bands = list(src.descriptions)
+    band_indices = validate_prediction_bands(raster_bands, predictor_names, label_band)
 
     print(f"Input raster: {width} x {height} pixels")
     print(f"Matched {len(predictor_names)} predictor bands by name")
@@ -105,8 +139,11 @@ def predict_raster(
     # Process patches
     for y in tqdm(y_positions, desc="Rows"):
         for x in x_positions:
-            # Extract patch
-            patch = data[:, y:y+patch_size, x:x+patch_size]
+            # Read this window's predictor bands on demand (in model order)
+            patch = src.read(
+                band_indices,
+                window=Window(x, y, patch_size, patch_size),
+            ).astype(np.float32)
 
             # Normalize
             normalized = normalize_bands(patch, stats["normalization"], predictor_names, nodata)
