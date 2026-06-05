@@ -93,7 +93,14 @@ if __name__ == "__main__":
                         help="Root of the NYS_Wetlands_Data project "
                              "(default: $NYS_WETLANDS_DATA_ROOT or sibling project)")
     parser.add_argument("--model", type=Path, default=Path("Models/best_model.safetensors"))
-    parser.add_argument("--stats", type=Path, default=default_stats_path())
+    parser.add_argument("--stats", type=Path, default=None,
+                        help="Normalization stats JSON. Default: the active mode's "
+                             "file, with --weight-power applied "
+                             "(e.g. binary_normalization_stats_wp0.5.json).")
+    parser.add_argument("--weight-power", type=float, default=None,
+                        help="Class-weight power used when the stats were built; "
+                             "selects the matching <mode>_normalization_stats_wp<p>.json "
+                             "(e.g. 0.5 -> _wp0.5, 1 -> _wp1). Ignored if --stats is given.")
     parser.add_argument("--out-dir", type=Path, default=Path("Data/HUC_DL_Predictions"),
                         help="Directory for the output classification GeoTIFF")
     parser.add_argument("--patch-size", type=int, default=128)
@@ -113,7 +120,12 @@ if __name__ == "__main__":
     # Resolve project-relative model/stats paths against the DL project root.
     project_root = Path(__file__).parent.parent.parent
     model_path = project_root / args.model if not args.model.is_absolute() else args.model
-    stats_path = project_root / args.stats if not args.stats.is_absolute() else args.stats
+
+    # Explicit --stats wins; otherwise derive from the active mode + --weight-power
+    # (e.g. binary_normalization_stats_wp0.5.json).
+    stats_arg = args.stats if args.stats is not None else default_stats_path(
+        weight_power=args.weight_power)
+    stats_path = project_root / stats_arg if not stats_arg.is_absolute() else stats_arg
 
     main(
         huc=args.huc,

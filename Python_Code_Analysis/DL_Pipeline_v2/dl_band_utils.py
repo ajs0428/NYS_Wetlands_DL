@@ -31,22 +31,49 @@ def load_band_config(config_path: Optional[Path] = None) -> dict:
         return json.load(f)
 
 
-def default_stats_path(config_path: Optional[Path] = None) -> Path:
+def stats_filename(mode: str, weight_power: Optional[float] = None) -> str:
+    """
+    Build the normalization-stats filename for a mode and class-weight power.
+
+    Naming convention:
+        <mode>_normalization_stats.json                 (weight_power=None)
+        <mode>_normalization_stats_wp<power>.json        (weight_power set)
+
+    The power is formatted with :g so it matches the files dl_01 writes
+    (1.0 -> "wp1", 0.5 -> "wp0.5", 0.3 -> "wp0.3").
+
+    Args:
+        mode: "multiclass" or "binary".
+        weight_power: Class-weight power used by dl_01_compute_statistics.py
+                      (1/freq)**power. None selects the base (un-suffixed) file.
+
+    Returns:
+        The stats filename (no directory).
+    """
+    suffix = "" if weight_power is None else f"_wp{weight_power:g}"
+    return f"{mode}_normalization_stats{suffix}.json"
+
+
+def default_stats_path(config_path: Optional[Path] = None,
+                       weight_power: Optional[float] = None) -> Path:
     """
     Resolve the default normalization stats path for the active mode.
 
-    Stats files are now mode-specific: multiclass_normalization_stats.json
-    and binary_normalization_stats.json. This reads classification_mode from
-    dl_band_config.json and returns the matching path under Data/Training_Data.
+    Stats files are mode-specific and, optionally, weight-power-specific:
+    multiclass_normalization_stats.json, binary_normalization_stats_wp0.5.json,
+    etc. This reads classification_mode from dl_band_config.json and returns the
+    matching path under Data/Training_Data.
 
     Args:
         config_path: Path to dl_band_config.json (default: alongside module).
+        weight_power: Class-weight power; appends a "_wp<power>" suffix when set
+                      (see stats_filename). None selects the base file.
 
     Returns:
-        Path("Data/Training_Data/<mode>_normalization_stats.json").
+        Path("Data/Training_Data/<mode>_normalization_stats[_wp<power>].json").
     """
     mode = load_band_config(config_path).get("classification_mode", "multiclass")
-    return Path("Data/Training_Data") / f"{mode}_normalization_stats.json"
+    return Path("Data/Training_Data") / stats_filename(mode, weight_power)
 
 
 def discover_bands_from_raster(path: Path) -> List[str]:
