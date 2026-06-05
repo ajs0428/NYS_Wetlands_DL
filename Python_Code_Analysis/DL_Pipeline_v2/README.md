@@ -94,52 +94,52 @@ Key dependencies: PyTorch, Lightning, rasterio, NumPy, scikit-learn, matplotlib.
 | UPL | Upland | Confirmed non-wetland land (Background class) |
 | NWI | National Wetlands Inventory | USFWS dataset used as label source |
 
-### Remote Sensing Bands — Terrain
+### Remote Sensing Bands — Terrain & Landform
 
 | Acronym | Full Name | Description | In Current Patches? |
 |---------|-----------|-------------|---------------------|
 | DEM | Digital Elevation Model | Ground surface elevation (meters) | Yes |
-| CHM | Canopy Height Model | Vegetation height above ground (meters), derived from LiDAR | Yes |
-| TPI | Topographic Position Index | Relative elevation compared to surrounding area; positive = ridge, negative = valley | Yes (TPI_local) |
-| meanc | Mean Curvature | Average surface curvature (concavity/convexity) | Yes (meanc_local) |
-| planc | Plan Curvature | Curvature perpendicular to slope direction; indicates flow convergence/divergence | Yes (planc_local) |
-| profc | Profile Curvature | Curvature in the direction of slope; indicates acceleration/deceleration of flow | Yes (profc_local) |
-| dmv | Deviation from Mean Value | Local deviation of elevation from the neighborhood mean | Yes (dmv_local) |
 | slope | Slope | Surface gradient in degrees | Yes (slope_local) |
-| Geomorph | Geomorphon | Landform classification (10 categories: flat, peak, ridge, shoulder, spur, slope, hollow, footslope, valley, pit) | No (removed) |
+| Geomorph | Geomorphon | Landform classification (10 categories: flat, peak, ridge, shoulder, spur, slope, hollow, footslope, valley, pit). One-hot encoded to 10 channels. | Yes (Geomorph_local) |
+| flowacc | Flow Accumulation | Number of upslope cells draining through each cell; highlights drainage networks | Yes |
+| twi | Topographic Wetness Index | ln(flow accumulation / tan(slope)); higher = wetter, flow-converging terrain | Yes |
+| CHM | Canopy Height Model | Vegetation height above ground (meters), derived from LiDAR | Yes |
+| TPI | Topographic Position Index | Relative elevation compared to surrounding area | No (removed in a prior iteration) |
+| meanc | Mean Curvature | Average surface curvature (concavity/convexity) | No (removed) |
+| planc | Plan Curvature | Curvature perpendicular to slope direction | No (removed) |
+| profc | Profile Curvature | Curvature in the direction of slope | No (removed) |
+| dmv | Deviation from Mean Value | Local deviation of elevation from the neighborhood mean | No (removed) |
 
-### Remote Sensing Bands — Spectral Indices (Optical)
+### Remote Sensing Bands — Canopy / Vegetation Structure (LiDAR)
 
-| Acronym | Full Name | Formula Concept | What It Measures | In Current Patches? |
-|---------|-----------|-----------------|------------------|---------------------|
-| EVI | Enhanced Vegetation Index | Adjusted NIR/Red ratio | Vegetation with atmospheric correction | Yes |
-| NDYI | Normalized Difference Yellowness Index | (Green - Blue) / (Green + Blue) | Vegetation senescence / yellow coloring | Yes |
-| GDVI | Green Difference Vegetation Index | NIR - Green | Green vegetation density | Yes |
-| NDVI | Normalized Difference Vegetation Index | (NIR - Red) / (NIR + Red) | Live green vegetation vigor | No (see n_ndvi) |
-| MNDWI | Modified Normalized Difference Water Index | (Green - SWIR) / (Green + SWIR) | Surface water presence | No |
-| PSRI | Plant Senescence Reflectance Index | (Red - Green) / NIR | Leaf aging and carotenoid pigments | No |
+| Acronym | Full Name | Description | In Current Patches? |
+|---------|-----------|-------------|---------------------|
+| pct_below_1m | Returns below 1 m | Fraction of LiDAR returns below 1 m — low/ground vegetation density | Yes |
+| pct_1m_to_5m | Returns 1–5 m | Fraction of LiDAR returns between 1 m and 5 m — shrub/understory density | Yes |
+| pct_above_5m | Returns above 5 m | Fraction of LiDAR returns above 5 m — overstory/canopy density | Yes |
 
 ### Remote Sensing Bands — NAIP Imagery
 
-| Acronym | Full Name | Description | In Current Patches? |
-|---------|-----------|-------------|---------------------|
-| r | Red | NAIP red band | Yes |
-| g | Green | NAIP green band | Yes |
-| b | Blue | NAIP blue band | Yes |
-| nir | Near-Infrared | NAIP near-infrared band | Yes |
-| n_ndvi | NAIP NDVI | (nir - r) / (nir + r), derived from NAIP imagery | Yes |
-| n_ndwi | NAIP NDWI | (g - nir) / (g + nir), derived from NAIP imagery | Yes |
-
-### Remote Sensing Bands — SAR (Radar)
+NAIP is captured in two seasonal states. Both sets are 4-band (R/G/B/NIR), 0–255, on the same scale.
 
 | Acronym | Full Name | Description | In Current Patches? |
 |---------|-----------|-------------|---------------------|
-| SAR | Synthetic Aperture Radar | Active microwave sensor; penetrates clouds and captures surface structure | — |
-| VV | Vertical-Vertical Polarization | SAR backscatter with vertical transmit and vertical receive | Yes |
-| VH | Vertical-Horizontal Polarization | SAR backscatter with vertical transmit and horizontal receive; sensitive to vegetation volume | Yes |
-| DPSVI | Dual-Pol SAR Vegetation Index | Vegetation index derived from VV and VH polarizations | No |
-| RVI | Radar Vegetation Index | Ratio-based vegetation measure from SAR polarizations | No |
-| VH/VV ratio | Cross-pol Ratio | VH divided by VV; indicates depolarization from vegetation scattering | No |
+| r, g, b, nir | NAIP leaf-on | Red / Green / Blue / Near-Infrared, leaf-on (growing season) | Yes |
+| r_lo, g_lo, b_lo, nir_lo | NAIP leaf-off | Red / Green / Blue / Near-Infrared, leaf-off ortho (dormant season) | Yes |
+| n_ndvi | NAIP NDVI | (nir - r) / (nir + r), derived from NAIP imagery | No (removed) |
+| n_ndwi | NAIP NDWI | (g - nir) / (g + nir), derived from NAIP imagery | No (removed) |
+
+### Remote Sensing Bands — Removed Spectral Indices & SAR
+
+These were used in earlier iterations but are **not** in the current patches.
+
+| Acronym | Full Name | What It Measures | In Current Patches? |
+|---------|-----------|------------------|---------------------|
+| EVI | Enhanced Vegetation Index | Vegetation with atmospheric correction | No (removed) |
+| NDYI | Normalized Difference Yellowness Index | Vegetation senescence / yellow coloring | No (removed) |
+| GDVI | Green Difference Vegetation Index | Green vegetation density | No (removed) |
+| VV | SAR Vertical-Vertical Polarization | Surface/structure backscatter | No (removed) |
+| VH | SAR Vertical-Horizontal Polarization | Volume scattering, sensitive to vegetation | No (removed) |
 
 ### Machine Learning Terms
 
@@ -158,7 +158,7 @@ Key dependencies: PyTorch, Lightning, rasterio, NumPy, scikit-learn, matplotlib.
 ## Pipeline Overview
 
 ```
-GeoTIFF Patches (19 bands: 18 predictors + 1 label)
+GeoTIFF Patches (18 bands: 17 predictors + 1 label -> 26 model input channels)
         |
         v
  +---------------------+
@@ -208,32 +208,32 @@ Shared modules: dl_losses.py (FocalLoss, DiceLoss, HybridLoss), dl_model_utils.p
 
 Training patches are GeoTIFF files located in `Data/Training_Data/R_Patches/`. The current patches are 256x256 pixels, but the pipeline supports any square patch size (see [Patch Size](#patch-size) below).
 
-Each patch contains 19 bands (18 predictors + 1 label). Band names are stored in the GeoTIFF band descriptions and are discovered at runtime — no hardcoded indices.
+Each patch contains 18 bands (17 predictors + 1 label). Band names are stored in the GeoTIFF band descriptions and are discovered at runtime — no hardcoded indices. After one-hot expansion of `Geomorph_local` (1 band -> 10 channels), the model receives **26 input channels**.
 
-**Current band layout (245 patches):**
+**Current band layout (613 patches):**
 
-| Index | Band Name | Category |
-|-------|-----------|----------|
-| 0 | DEM | Terrain |
-| 1 | meanc_local | Terrain (curvature) |
-| 2 | planc_local | Terrain (curvature) |
-| 3 | profc_local | Terrain (curvature) |
-| 4 | dmv_local | Terrain |
-| 5 | slope_local | Terrain |
-| 6 | TPI_local | Terrain |
-| 7 | CHM | Vegetation structure |
-| 8 | EVI | Spectral index |
-| 9 | NDYI | Spectral index |
-| 10 | GDVI | Spectral index |
-| 11 | VV | SAR backscatter |
-| 12 | VH | SAR backscatter |
-| 13 | r | NAIP imagery |
-| 14 | g | NAIP imagery |
-| 15 | b | NAIP imagery |
-| 16 | nir | NAIP imagery |
-| 17 | n_ndvi | NAIP-derived index |
-| 18 | n_ndwi | NAIP-derived index |
-| 19 | MOD_CLASS | Label |
+| Band # | Band Name | Category |
+|--------|-----------|----------|
+| 1 | DEM | Terrain |
+| 2 | slope_local | Terrain |
+| 3 | Geomorph_local | Landform (one-hot -> 10 channels) |
+| 4 | flowacc | Terrain |
+| 5 | twi | Terrain |
+| 6 | CHM | Canopy height |
+| 7 | r | NAIP leaf-on |
+| 8 | g | NAIP leaf-on |
+| 9 | b | NAIP leaf-on |
+| 10 | nir | NAIP leaf-on |
+| 11 | r_lo | NAIP leaf-off |
+| 12 | g_lo | NAIP leaf-off |
+| 13 | b_lo | NAIP leaf-off |
+| 14 | nir_lo | NAIP leaf-off |
+| 15 | pct_below_1m | Veg structure |
+| 16 | pct_1m_to_5m | Veg structure |
+| 17 | pct_above_5m | Veg structure |
+| 18 | MOD_CLASS | Label |
+
+> **Channel count:** 17 predictor bands, but `Geomorph_local` one-hot expands 1 -> 10 channels, so `in_channels = 16 + 10 = 26`. This is the value stored in `normalization_stats.json` and read by the model.
 
 **Classes (multiclass mode):**
 
@@ -265,15 +265,19 @@ The single file to edit when changing band normalization. Located alongside the 
   },
   "default_method": "min_max",
   "band_normalization": {
-    "NDVI":  {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
-    "MNDWI": {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
+    "EVI":   {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
     "NDYI":  {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
+    "GDVI":  {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
+    "n_ndvi": {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
+    "n_ndwi": {"method": "shift_scale", "shift": 1.0, "scale": 2.0},
     "Geomorph_local": {"method": "one_hot", "num_classes": 10, "class_range": [1, 10]}
   },
   "class_names": ["EMW", "FSW", "SSW", "UPL"],
   "ignore_index": 255
 }
 ```
+
+> **Note:** The `EVI`, `NDYI`, `GDVI`, `n_ndvi`, and `n_ndwi` entries are **dead config** — those bands are no longer in the current patches, so the rules are simply ignored (listed-but-absent bands have no effect). They are kept so the spectral indices normalize correctly if re-added. The only entry that matches a current band is `Geomorph_local` (one-hot); all other current bands fall back to `min_max`.
 
 **Normalization methods:**
 
@@ -374,13 +378,13 @@ python dl_01_compute_statistics.py \
 
 ```json
 {
-  "num_patches": 245,
-  "in_channels": 18,
+  "num_patches": 613,
+  "in_channels": 26,
   "label_band": "MOD_CLASS",
-  "predictor_names": ["DEM", "meanc_local", "..."],
+  "predictor_names": ["DEM", "slope_local", "Geomorph_local", "flowacc", "twi", "..."],
   "normalization": {
     "DEM": {"method": "min_max", "min": 98.37, "max": 652.21},
-    "NDYI": {"method": "shift_scale", "shift": 1.0, "scale": 2.0}
+    "Geomorph_local": {"method": "one_hot", "num_classes": 10, "class_range": [1, 10]}
   },
   "class_counts": {"EMW": 1049074, "FSW": 2119191, "SSW": 904329, "UPL": 11852654},
   "class_weights": {"EMW": 11.3, "FSW": 5.59, "SSW": 13.11, "UPL": 1.0}
@@ -431,7 +435,7 @@ Two architectures are available, selected with `--arch` on the train/evaluate/pr
 U-Net encoder-decoder architecture with skip connections, residual encoder blocks, and squeeze-and-excitation (SE) channel attention in the decoder. See [UNet_Architecture_Overview.md](UNet_Architecture_Overview.md) for a detailed breakdown.
 
 ```
-Input (18 ch) -> Residual Encoder (progressive downsampling) -> Bottleneck -> SE Decoder (upsampling + skip + attention) -> Output (4 ch)
+Input (26 ch) -> Residual Encoder (progressive downsampling) -> Bottleneck -> SE Decoder (upsampling + skip + attention) -> Output (4 ch)
 ```
 
 - **Encoder blocks**: Double Conv-BN-ReLU with residual (shortcut) connections. A 1x1 projection handles channel mismatches. Improves gradient flow through the encoder.
@@ -667,7 +671,7 @@ python dl_06_predict.py \
 
 ### How Band Matching Works
 
-The prediction script matches bands **by name**, not position. Your input raster's band descriptions must match the names the model was trained on (e.g., "DEM", "NDVI", "VH"). Bands can be in any order, and extra bands are ignored.
+The prediction script matches bands **by name**, not position. Your input raster's band descriptions must match the names the model was trained on (e.g., "DEM", "Geomorph_local", "nir_lo"). Bands can be in any order, and extra bands are ignored.
 
 ---
 
