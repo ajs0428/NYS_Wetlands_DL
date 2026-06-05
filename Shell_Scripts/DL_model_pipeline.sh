@@ -20,10 +20,16 @@ WORKERS=6
 
 # === PATHS (relative to project root) ===
 PATCHES_DIR="Data/Training_Data/R_Patches"
-STATS_PATH="Data/Training_Data/normalization_stats.json"
 BAND_CONFIG="Python_Code_Analysis/DL_Pipeline_v2/dl_band_config.json"
 GLOBAL_STATS="Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json"
 SCRIPT_DIR="Python_Code_Analysis/DL_Pipeline_v2"
+
+# Class-weight power: dl_01 builds the stats with this power and every downstream
+# step reads the matching <mode>_normalization_stats[_wp<p>].json (empty "" = base).
+WEIGHT_POWER="0.5"
+WP_FLAG=""
+[ -n "$WEIGHT_POWER" ] && WP_FLAG="--weight-power $WEIGHT_POWER"
+STATS_PATH=$(python -c "import sys; sys.path.insert(0,'$SCRIPT_DIR'); from dl_band_utils import default_stats_path; print(default_stats_path(weight_power=${WEIGHT_POWER:-None}))")
 
 # Build optional flags
 ASPP_FLAGS=""
@@ -55,7 +61,8 @@ python $SCRIPT_DIR/dl_01_compute_statistics.py \
         --patches-dir $PATCHES_DIR \
         --output $STATS_PATH \
         --config $BAND_CONFIG \
-        --global-stats $GLOBAL_STATS
+        --global-stats $GLOBAL_STATS \
+        $WP_FLAG
 
 # Build k-fold flag
 KFOLD_FLAG=""

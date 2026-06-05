@@ -9,7 +9,8 @@ Scan all training patches to compute:
 Band names are discovered from rasterio descriptions at runtime.
 Normalization methods are read from dl_band_config.json.
 
-Outputs: Data/Training_Data/normalization_stats.json
+Outputs: Data/Training_Data/<mode>_normalization_stats[_wp<power>].json
+         (mode from dl_band_config.json; _wp suffix when --weight-power is set)
 """
 
 import json

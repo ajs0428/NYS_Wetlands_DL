@@ -13,9 +13,13 @@ CROP_SIZE=128             # center-crop to reduce memory; 0 to disable
 
 # === PATHS (relative to project root) ===
 PATCHES_DIR="Data/Training_Data/R_Patches"
-STATS_PATH="Data/Training_Data/normalization_stats.json"
 OUTPUT_DIR="Models/SHAP"
 SCRIPT_DIR="Python_Code_Analysis/DL_Pipeline_v2"
+
+# Class-weight power the stats were built with (empty "" = base, no _wp suffix).
+WEIGHT_POWER="0.5"
+# Resolve the active mode's stats file: <mode>_normalization_stats[_wp<p>].json
+STATS_PATH=$(python -c "import sys; sys.path.insert(0,'$SCRIPT_DIR'); from dl_band_utils import default_stats_path; print(default_stats_path(weight_power=${WEIGHT_POWER:-None}))")
 
 # === MODEL SELECTION ===
 # Specify one or more checkpoints. Accepts a single file, a directory (k-fold),

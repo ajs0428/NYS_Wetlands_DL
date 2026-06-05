@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dl_band_utils import default_stats_path
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 SCRIPT_DIR = Path(__file__).parent
 
@@ -60,7 +62,8 @@ def main():
     ap.add_argument("--batch-size", type=int, default=BASELINE["batch_size"])
     ap.add_argument("--base-stats", type=Path, default=None,
                     help="Base stats file passed to dl_05 for the test split "
-                         "(default: Data/Training_Data/normalization_stats.json)")
+                         "(default: the active mode's <mode>_normalization_stats.json). "
+                         "Per-arm files are derived as <stem>_wp<p>.json.")
     ap.add_argument("--skip-train", action="store_true",
                     help="Evaluate existing checkpoints only (no training)")
     ap.add_argument("--dry-run", action="store_true",
@@ -68,11 +71,16 @@ def main():
     args = ap.parse_args()
 
     py = sys.executable
-    base_stats = args.base_stats or (PROJECT_ROOT /
-                                     "Data/Training_Data/normalization_stats.json")
+    # Mode-prefixed base (e.g. binary_normalization_stats.json); per-arm files
+    # become <mode>_normalization_stats_wp<p>.json via with_name() below.
+    base_stats = args.base_stats or (PROJECT_ROOT / default_stats_path())
 
     # Step 1: generate all per-p stats files in one shot (no patch rescan).
+    # Pass the resolved base so the generated filenames (<base-stem>_wp<p>.json)
+    # match the per-arm names derived below -- no reliance on the generator's own
+    # default/legacy fallback.
     run([py, SCRIPT_DIR / "sweep_weight_power.py",
+         "--base-stats", base_stats,
          "--powers", *[f"{p:g}" for p in args.powers]], args.dry_run)
 
     results = []
