@@ -14,7 +14,7 @@ BATCH_SIZE=32
 EPOCHS=100
 SEED=420
 WORKERS=4
-PRECISION="16-mixed"        # 32-true | 16-mixed | bf16-mixed
+PRECISION="bf16-mixed"      # 32-true | 16-mixed | bf16-mixed  (bf16 preferred on Ada/A100/H100; no GradScaler)
 # UNet3+ memory hint: full-scale skips are heavier than the plain U-Net, especially
 # at DEPTH=5 / high BASE_FILTERS with DEEP_SUPERVISION=true. If you hit CUDA OOM,
 # set PRECISION="16-mixed" (or "bf16-mixed" on A100/H100) and/or lower BATCH_SIZE
