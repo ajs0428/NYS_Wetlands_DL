@@ -2,11 +2,11 @@
 set -e  # Exit on error
 
 # === CONFIGURATION ===
-ARCH="unet"                # unet | unet3plus
+ARCH="unet3plus"                # unet | unet3plus
 USE_ASPP=false             # [unet] true to enable ASPP at the bottleneck
 ASPP_RATES="6 12 18"      # [unet] dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for depth=4
 CAT_CHANNELS=64            # [unet3plus] unified channels per skip branch
-DEEP_SUPERVISION=false     # [unet3plus] true to add a loss head per decoder stage + bottleneck
+DEEP_SUPERVISION=true     # [unet3plus] true to add a loss head per decoder stage + bottleneck
 KFOLD=0                    # 0=disabled, 2+=run k-fold CV instead of single split
 BASE_FILTERS=64
 DEPTH=4
