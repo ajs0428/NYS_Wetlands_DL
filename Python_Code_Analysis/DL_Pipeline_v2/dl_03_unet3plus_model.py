@@ -32,9 +32,16 @@ class UnifyBranch(nn.Module):
     """Bring one source feature map to the target scale and a common width.
 
     Spatial resampling is done in forward() against an explicit target size
-    (robust to odd dimensions): adaptive max-pool to downsample, bilinear
-    interpolation to upsample, identity when already matched. Then a
+    (robust to odd dimensions): strided max-pool to downsample (exact
+    power-of-2 ratio) with adaptive max-pool as the odd-dimension fallback,
+    bilinear interpolation to upsample, identity when already matched. Then a
     3x3 conv-BN-ReLU projects to `cat_channels`.
+
+    Note: a plain strided ``F.max_pool2d`` is used for the common exact-ratio
+    downsample instead of ``F.adaptive_max_pool2d``. The adaptive variant's
+    CUDA backward kernel can raise "invalid configuration argument" (notably
+    under AMP / ``16-mixed``); the strided path reuses the same stable kernel
+    the encoder's ``nn.MaxPool2d`` uses.
     """
 
     def __init__(self, in_channels: int, cat_channels: int):
@@ -47,9 +54,16 @@ class UnifyBranch(nn.Module):
 
     def forward(self, x: torch.Tensor, target_size) -> torch.Tensor:
         h, w = target_size
-        if x.shape[-2] != h or x.shape[-1] != w:
-            if x.shape[-2] > h or x.shape[-1] > w:
-                x = F.adaptive_max_pool2d(x, (h, w))
+        sh, sw = x.shape[-2], x.shape[-1]
+        if sh != h or sw != w:
+            if sh > h or sw > w:
+                # Exact (power-of-2) ratio: strided max-pool, which has a stable
+                # CUDA backward kernel. adaptive_max_pool2d backward can crash
+                # with "invalid configuration argument" under AMP.
+                if sh % h == 0 and sw % w == 0:
+                    x = F.max_pool2d(x, kernel_size=(sh // h, sw // w))
+                else:
+                    x = F.adaptive_max_pool2d(x, (h, w))
             else:
                 x = F.interpolate(x, size=(h, w), mode="bilinear", align_corners=False)
         return self.conv(x)
