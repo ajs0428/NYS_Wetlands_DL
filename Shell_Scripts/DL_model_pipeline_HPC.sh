@@ -61,6 +61,7 @@ python $SCRIPT_DIR/dl_01_compute_statistics.py \
         --patches-dir $PATCHES_DIR \
         --output $STATS_PATH \
         --config $BAND_CONFIG \
+        --weight-power 0.5 \
         --global-stats $GLOBAL_STATS
 
 # Build k-fold flag
