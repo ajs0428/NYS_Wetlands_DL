@@ -31,17 +31,22 @@ from dl_03_unet_model import ConvBlock, EncoderBlock, SqueezeExcitation, get_dev
 class UnifyBranch(nn.Module):
     """Bring one source feature map to the target scale and a common width.
 
-    Spatial resampling is done in forward() against an explicit target size
-    (robust to odd dimensions): strided max-pool to downsample (exact
-    power-of-2 ratio) with adaptive max-pool as the odd-dimension fallback,
-    bilinear interpolation to upsample, identity when already matched. Then a
-    3x3 conv-BN-ReLU projects to `cat_channels`.
+    Resampling order depends on direction, and both paths are chosen to avoid
+    CUDA kernels that misbehave on large tensors:
 
-    Note: a plain strided ``F.max_pool2d`` is used for the common exact-ratio
-    downsample instead of ``F.adaptive_max_pool2d``. The adaptive variant's
-    CUDA backward kernel can raise "invalid configuration argument" (notably
-    under AMP / ``16-mixed``); the strided path reuses the same stable kernel
-    the encoder's ``nn.MaxPool2d`` uses.
+      - Downsample: strided ``F.max_pool2d`` (exact power-of-2 ratio; adaptive
+        max-pool only as the odd-dimension fallback) THEN the 3x3 conv. Plain
+        strided pooling reuses the same stable kernel the encoder's
+        ``nn.MaxPool2d`` uses.
+      - Upsample: the 3x3 conv (projecting to ``cat_channels``) runs FIRST at
+        the low source resolution, THEN ``F.interpolate`` bilinear. This keeps
+        the interpolated tensor at ``cat_channels`` width. Interpolating a wide
+        source directly to full resolution can hit an int32 index overflow: the
+        1024-channel bottleneck upsampled to 256x256 at batch 32 is
+        ``1024*256*256*32 == 2**31`` elements, one past the int32 max, which the
+        bilinear CUDA kernel reports as "invalid configuration argument".
+        Conv-first also cuts activation memory substantially.
+      - Identity when already at the target size: just the conv.
     """
 
     def __init__(self, in_channels: int, cat_channels: int):
@@ -55,17 +60,22 @@ class UnifyBranch(nn.Module):
     def forward(self, x: torch.Tensor, target_size) -> torch.Tensor:
         h, w = target_size
         sh, sw = x.shape[-2], x.shape[-1]
-        if sh != h or sw != w:
-            if sh > h or sw > w:
-                # Exact (power-of-2) ratio: strided max-pool, which has a stable
-                # CUDA backward kernel. adaptive_max_pool2d backward can crash
-                # with "invalid configuration argument" under AMP.
-                if sh % h == 0 and sw % w == 0:
-                    x = F.max_pool2d(x, kernel_size=(sh // h, sw // w))
-                else:
-                    x = F.adaptive_max_pool2d(x, (h, w))
+        if sh > h or sw > w:
+            # Downsample, then project. Exact (power-of-2) ratio -> strided
+            # max-pool (stable CUDA backward); adaptive max-pool is the
+            # odd-dimension fallback.
+            if sh % h == 0 and sw % w == 0:
+                x = F.max_pool2d(x, kernel_size=(sh // h, sw // w))
             else:
-                x = F.interpolate(x, size=(h, w), mode="bilinear", align_corners=False)
+                x = F.adaptive_max_pool2d(x, (h, w))
+            return self.conv(x)
+        if sh < h or sw < w:
+            # Project to cat_channels FIRST (at the low source resolution), then
+            # upsample, so interpolate never runs on a wide source. Avoids the
+            # int32-overflow "invalid configuration argument" crash (see class
+            # docstring) and cuts activation memory.
+            x = self.conv(x)
+            return F.interpolate(x, size=(h, w), mode="bilinear", align_corners=False)
         return self.conv(x)
 
 

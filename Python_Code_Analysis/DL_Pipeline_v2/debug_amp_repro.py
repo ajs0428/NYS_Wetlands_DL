@@ -20,6 +20,8 @@ p = argparse.ArgumentParser()
 p.add_argument("--precision", choices=["fp16", "bf16", "fp32"], default="bf16")
 p.add_argument("--op-test", action="store_true", help="run per-op isolation instead of full model")
 p.add_argument("--no-ds", action="store_true", help="disable deep supervision (full-model mode)")
+p.add_argument("--anomaly", action="store_true",
+               help="enable autograd anomaly detection: names the forward line that created the failing backward node")
 p.add_argument("--batch-size", type=int, default=32)
 args = p.parse_args()
 
