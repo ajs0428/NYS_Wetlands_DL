@@ -105,15 +105,21 @@ class WetlandPatchDataset(Dataset):
         stats_path: Path,
         augment: bool = False,
         validate_bands: bool = True,
+        patch_size: Optional[int] = None,
     ):
         """
         Args:
             patch_files: List of paths to GeoTIFF patch files
             stats_path: Path to normalization_stats.json
             augment: Whether to apply data augmentation
-            validate_bands: Check each file's band count at init (slower but
-                            catches bad patches upfront). Set False if data is
-                            known-clean or on slow network storage.
+            validate_bands: Check each file's band count AND spatial dimensions
+                            at init (slower but catches bad patches upfront).
+                            Set False if data is known-clean or on slow network
+                            storage.
+            patch_size: Expected square patch size (H == W == patch_size). If
+                        None, it is inferred as the most common size across the
+                        files. Patches whose H/W differ are skipped (a batch
+                        cannot stack mismatched tensors).
         """
         self.patch_files = patch_files
         self.augment = augment
@@ -151,20 +157,47 @@ class WetlandPatchDataset(Dataset):
         ]
         self._expected_bands = len(self.band_names)
 
-        # Filter out patches with wrong band count
+        # Filter out patches with wrong band count or spatial size.
+        # A batch's tensors are stacked, so every patch must share H x W;
+        # one odd-sized patch (e.g. 292x292 among 256x256) otherwise crashes
+        # collation with "stack expects each tensor to be equal size".
+        self.patch_size = patch_size
         if validate_bands:
-            valid_files = []
+            # First pass: read band count + dims for each file.
+            file_dims = []  # (path, count, height, width)
             for pf in self.patch_files:
                 with rasterio.open(pf) as src:
-                    if src.count >= self._expected_bands:
-                        valid_files.append(pf)
-                    else:
-                        print(f"  Skipping {pf.name}: {src.count} bands "
-                              f"(expected {self._expected_bands})")
+                    file_dims.append((pf, src.count, src.height, src.width))
+
+            # Determine the expected size: explicit arg, else the modal H x W.
+            if self.patch_size is None:
+                from collections import Counter
+                size_counts = Counter((h, w) for _, _, h, w in file_dims)
+                (exp_h, exp_w), _ = size_counts.most_common(1)[0]
+            else:
+                exp_h = exp_w = self.patch_size
+
+            valid_files = []
+            n_bad_bands = 0
+            n_bad_size = 0
+            for pf, count, h, w in file_dims:
+                if count < self._expected_bands:
+                    print(f"  Skipping {pf.name}: {count} bands "
+                          f"(expected {self._expected_bands})")
+                    n_bad_bands += 1
+                elif h != exp_h or w != exp_w:
+                    print(f"  Skipping {pf.name}: {h}x{w} "
+                          f"(expected {exp_h}x{exp_w})")
+                    n_bad_size += 1
+                else:
+                    valid_files.append(pf)
+
             if len(valid_files) < len(self.patch_files):
                 print(f"  Filtered: {len(valid_files)}/{len(self.patch_files)} "
-                      f"patches have all bands")
+                      f"patches OK ({n_bad_bands} wrong band count, "
+                      f"{n_bad_size} wrong size; expected {exp_h}x{exp_w})")
             self.patch_files = valid_files
+            self.patch_size = exp_h if exp_h == exp_w else None
 
         # Build class weight tensor
         class_weights = self.stats.get("class_weights", {})
