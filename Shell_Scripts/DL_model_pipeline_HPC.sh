@@ -46,7 +46,7 @@ fi
 # Read classification mode from band config
 CLASS_MODE=$(python -c "import json; print(json.load(open('$BAND_CONFIG'))['classification_mode'])" 2>/dev/null || echo "multiclass")
 
-STATS_PATH="Data/Training_Data/${CLASS_MODE}_normalization_stats.json"
+STATS_PATH="Data/Training_Data/${CLASS_MODE}_normalization_stats_wp0.5.json"
 
 echo "=== NYS Wetlands DL Pipeline (HPC) ==="
 echo "Classification: $CLASS_MODE"
