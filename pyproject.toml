@@ -26,6 +26,7 @@ dependencies = [
     "safetensors>=0.4",
     # Model interpretability (dl_07_shap_analysis)
     "shap>=0.46",
+    "folium>=0.20.0",
 ]
 
 [project.optional-dependencies]
