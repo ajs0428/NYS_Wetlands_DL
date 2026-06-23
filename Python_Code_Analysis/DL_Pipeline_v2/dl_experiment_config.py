@@ -18,7 +18,7 @@ configs (plan Section 1).
 
 from typing import Dict, List, Optional
 
-from dl_band_utils import load_band_config, compute_in_channels
+from dl_band_utils import load_band_config, compute_in_channels, stats_filename
 
 
 # --- Band matrix --------------------------------------------------------------
@@ -98,6 +98,25 @@ def get_config(name: str) -> dict:
         raise KeyError(f"Unknown config '{name}'. Valid: {sorted(CONFIGS)}")
 
 
+def eval_config_name(name: str) -> str:
+    """The config whose stats are used for EVALUATION of `name`.
+
+    Section 3 is non-negotiable: the test set is always field-labeled. So a
+    config trains on its own label source but is evaluated with the matching
+    field config's stats (same predictors, MOD_CLASS label). For fld configs
+    this is the config itself; for nwi/flddeg it is the fld config with the same
+    feature set (same lidar + spectral tier).
+    """
+    cfg = get_config(name)
+    return f"fld_{cfg['lidar']}_{cfg['spectral']}"
+
+
+def stats_basename(name: str, mode: str = "multiclass", weight_power: float = 0.5) -> str:
+    """Per-config stats filename, matching dl_make_config_stats's output."""
+    base = stats_filename(mode, weight_power)  # e.g. multiclass_normalization_stats_wp0.5.json
+    return base.replace("_normalization_stats", f"_normalization_stats_{name}")
+
+
 def verify_channel_matrix(band_config: Optional[dict] = None) -> None:
     """Assert every config resolves to its plan-specified channel count.
 
@@ -114,14 +133,44 @@ def verify_channel_matrix(band_config: Optional[dict] = None) -> None:
         )
 
 
-if __name__ == "__main__":
-    # Quick self-check: print the matrix and assert channel counts.
+def _emit(name: str) -> None:
+    """Print shell-sourceable vars for one config (used by run_config.sh)."""
+    cfg = get_config(name)
+    ev = eval_config_name(name)
     bc = load_band_config()
-    print(f"{'config':24s} {'label':7s} {'bands':>5s} {'channels':>8s}")
-    for name, cfg in CONFIGS.items():
-        bands = config_bands(cfg)
-        n = config_in_channels(cfg, bc)
-        flag = "OK" if n == cfg["channels"] else f"!! expected {cfg['channels']}"
-        print(f"{name:24s} {cfg['label']:7s} {len(bands):5d} {n:8d}  {flag}")
-    verify_channel_matrix(bc)
-    print("\nAll channel counts match the plan matrix.")
+    vals = {
+        "CONFIG": name,
+        "LABEL_SOURCE": cfg["label"],
+        "FEATURESET": f"{cfg['lidar']}_{cfg['spectral']}",
+        "IN_CHANNELS": config_in_channels(cfg, bc),
+        "TRAIN_STATS": stats_basename(name),
+        "EVAL_CONFIG": ev,
+        "EVAL_STATS": stats_basename(ev),
+    }
+    for k, v in vals.items():
+        print(f"{k}={v}")
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(description="Factorial experiment band matrix / config registry")
+    ap.add_argument("--emit", metavar="CONFIG",
+                    help="Print shell-sourceable vars for CONFIG (TRAIN_STATS/EVAL_STATS/...)")
+    ap.add_argument("--list", action="store_true", help="Print all config names (one per line)")
+    args = ap.parse_args()
+
+    if args.list:
+        print("\n".join(CONFIGS))
+    elif args.emit:
+        _emit(args.emit)
+    else:
+        # Self-check: print the matrix and assert channel counts.
+        bc = load_band_config()
+        print(f"{'config':24s} {'label':7s} {'eval-stats config':20s} {'bands':>5s} {'channels':>8s}")
+        for name, cfg in CONFIGS.items():
+            n = config_in_channels(cfg, bc)
+            flag = "OK" if n == cfg["channels"] else f"!! expected {cfg['channels']}"
+            print(f"{name:24s} {cfg['label']:7s} {eval_config_name(name):20s} "
+                  f"{len(config_bands(cfg)):5d} {n:8d}  {flag}")
+        verify_channel_matrix(bc)
+        print("\nAll channel counts match the plan matrix.")
