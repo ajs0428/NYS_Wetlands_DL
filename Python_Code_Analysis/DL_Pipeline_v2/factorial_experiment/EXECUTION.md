@@ -155,19 +155,81 @@ or `conda activate wetland-cnn`):
 ```bash
 PIPE=Python_Code_Analysis/DL_Pipeline_v2
 
+# 0. (Re)build the merged training patches -- ONLY when R_Patches / R_Patches_NWI
+#    changed (e.g. new patches added). Skip if R_Patches_Merged is already current.
+python $PIPE/dl_merge_nwi_labels.py --dry-run   # verify every field<->NWI pair; writes nothing
+python $PIPE/dl_merge_nwi_labels.py             # -> R_Patches_Merged (MOD_CLASS + MOD_CLASS_NWI, 19 bands)
+python $PIPE/dl_degrade_labels.py --seed 0      # adds MOD_CLASS_FLDDEG (target measured from the NWI band)
+
 # 1. Confirm the config matrix is self-consistent (channel counts match the plan)
 python $PIPE/dl_experiment_config.py            # prints the 8 configs; ends "All channel counts match"
 
-# 2. Generate the 8 per-config stats files (idempotent; skip if stats/ already full)
+# 2. Build the MASTER stats (only when the master is stale -- see below)
+python $PIPE/dl_01_compute_statistics.py \
+  --patches-dir   Data/Training_Data/R_Patches_Merged \
+  --global-stats  Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json \
+  --weight-power  0.5 \
+  --output        Data/Training_Data/multiclass_normalization_stats_wp0.5.json
+
+# 3. Derive the 8 per-config stats files from the master (no raster rescan)
 python $PIPE/dl_make_config_stats.py --all      # -> Data/Training_Data/stats/*.json
 
-# 3. Preflight — HARD GATE before any GPU time
+# 4. Preflight — HARD GATE before any GPU time
 python $PIPE/dl_preflight_check.py --require-all-labels   # expect 0 failures / 0 warnings
 ```
 
-> As of the last session all three are already satisfied: 526 merged 20-band
-> patches, 8 stats files present, preflight green. Re-run them only if the data
-> or band matrix changed.
+**Stats chain (who feeds whom).** The per-config files are pure subsets of one
+**master** stats file; the master is what carries the normalization min/max and
+the field class weights. The master in turn gets its min_max ranges from the
+**global full-raster stats** computed in the sibling project
+(`NYS_Wetlands_Data/.../DL_Extract_Normalize_Stats_FullRasters.R` via
+`dl_extract_normalize_stats.sh`, SLURM) →
+`Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json`:
+
+```
+R full-raster scan → HUC_DL_Stacks_Extracted_Values.json
+     → dl_01_compute_statistics.py --global-stats  → multiclass_normalization_stats_wp0.5.json  (master)
+          → dl_make_config_stats.py --all          → stats/..._<config>_wp0.5.json  (the 8)
+```
+
+**Data build (step 0).** The configs train from `R_Patches_Merged/` — one file
+per patch carrying all three label bands (`MOD_CLASS` field, `MOD_CLASS_NWI`,
+`MOD_CLASS_FLDDEG`). It is built from the two source patch dirs:
+
+```
+R_Patches/<name>.tif  +  R_Patches_NWI/NWI_<name>.tif
+     → dl_merge_nwi_labels.py   → R_Patches_Merged/<name>.tif  (+ MOD_CLASS_NWI, 19 bands)
+          → dl_degrade_labels.py --seed 0  → (+ MOD_CLASS_FLDDEG, 20 bands)
+```
+
+Run step 0 **whenever `R_Patches` or `R_Patches_NWI` change** (e.g. new patches
+added to both). The merge pairs by name but **geometry is the trust anchor** —
+every field↔NWI pair is CRS/transform/size/mask verified and ANY failed pair
+aborts the run before writing, so each new `R_Patches/<name>.tif` must have a
+matching `R_Patches_NWI/NWI_<name>.tif`. The merge overwrites each merged file
+with a fresh 19-band copy (dropping any old `MOD_CLASS_FLDDEG`), so degrade runs
+right after to re-add it; `--overwrite` on degrade is only needed if you
+re-degrade *without* re-merging first. **A changed patch set makes the master and
+all per-config stats stale → after step 0 you must redo steps 2–4** (the patch
+count feeds field class weights, so it is not optional).
+
+**When to run step 2 (master rebuild).** Only when the master is stale — i.e. you
+re-ran the R full-raster scan, changed the predictor band set / band scaling, or
+changed the training patches. Otherwise the existing master already has the
+global min/max baked in (its `min_max` bands read
+`"note": "Maps to [0, 1] (global raster min/max)"`), and you start at step 3.
+
+> Two gotchas on step 2 (see `dl_01_compute_statistics.py`'s docstring): pass
+> `--output` explicitly (its default is resolved before `--weight-power`, so it
+> would write the un-suffixed `multiclass_normalization_stats.json` and leave the
+> real master stale), and pass `--weight-power 0.5` (default is `1.0`). On
+> success stdout shows `Overrode min/max with global stats for: [...]`; a
+> `Warning: No global stats for min_max bands: [...]` instead means the global
+> JSON's band-name keys did not match and the override did **not** apply.
+
+> As of the last session steps 1, 3, 4 were satisfied (554 merged 20-band
+> patches, 8 stats files, preflight green) on the prior master. Re-run step 2
+> first whenever the global stats / bands / patches changed.
 
 ---
 
@@ -329,8 +391,10 @@ tearing down the reservation, then sync its outputs back with the rest.
 
 ## 9. Pre-launch checklist
 
+- [ ] `R_Patches_Merged/` current (re-merged + re-degraded if `R_Patches` / `R_Patches_NWI` changed)
 - [ ] `dl_experiment_config.py` self-check passes (channel matrix OK)
-- [ ] `Data/Training_Data/stats/` has all 8 `..._wp0.5.json` files
+- [ ] master `multiclass_normalization_stats_wp0.5.json` current (rebuilt via `dl_01 --global-stats` if the R scan / bands / patches changed)
+- [ ] `Data/Training_Data/stats/` has all 8 `..._wp0.5.json` files (re-derived from the master)
 - [ ] `dl_preflight_check.py --require-all-labels` is green (0 fail / 0 warn)
 - [ ] repo + `Data/` rsynced over ssh to `/workdir/$USER/nys_wetlands`; image loaded (`docker1 images`)
 - [ ] `run_factorial.sh` launched inside `tmux`; mount only under `/workdir/$USER`

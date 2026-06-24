@@ -11,6 +11,42 @@ Normalization methods are read from dl_band_config.json.
 
 Outputs: Data/Training_Data/<mode>_normalization_stats[_wp<power>].json
          (mode from dl_band_config.json; _wp suffix when --weight-power is set)
+
+Command-line usage
+------------------
+Paths are resolved relative to the project root (NYS_Wetlands_DL/), so this can
+be run from anywhere once the env is active (`source .venv/bin/activate` or
+`conda activate wetland-cnn`).
+
+Production master for the factorial experiment -- full 17-predictor set (26
+channels), sqrt-inverse class weights, min/max overridden by the global
+full-raster stats from R (NYS_Wetlands_Data/DL_Extract_Normalize_Stats_FullRasters.R):
+
+    python Python_Code_Analysis/DL_Pipeline_v2/dl_01_compute_statistics.py \
+      --patches-dir   Data/Training_Data/R_Patches_Merged \
+      --global-stats  Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json \
+      --weight-power  0.5 \
+      --output        Data/Training_Data/multiclass_normalization_stats_wp0.5.json
+
+Two gotchas:
+  * Pass --output explicitly. Its default (default_stats_path()) is evaluated
+    BEFORE --weight-power is parsed, so it resolves to the un-suffixed
+    multiclass_normalization_stats.json and would silently write the wrong file,
+    leaving the real _wp0.5 master stale.
+  * --weight-power defaults to 1.0 (legacy pure inverse-freq); pass 0.5 for the
+    sqrt-inverse weighting the experiment fixes across every run.
+
+Success check: stdout should show "Overrode min/max with global stats for: [...]"
+listing the min_max bands. "Warning: No global stats for min_max bands: [...]"
+instead means the band-name keys in the global JSON did not match -- the
+override did NOT apply.
+
+This master is the source the per-config stats are carved from. After (re)running
+it, re-derive the 8 per-config files and re-gate:
+    python Python_Code_Analysis/DL_Pipeline_v2/dl_make_config_stats.py --all
+    python Python_Code_Analysis/DL_Pipeline_v2/dl_preflight_check.py --require-all-labels
+
+Run `python dl_01_compute_statistics.py --help` for the full flag list.
 """
 
 import json
@@ -51,6 +87,9 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
     print(f"[dl_01] Loaded config from: {resolved_config}")
     print(f"[dl_01] config['classification_mode'] = {config.get('classification_mode')!r}")
     label_band = config["label_band"]
+    # Multi-source label patches carry extra label bands (e.g. MOD_CLASS_NWI,
+    # MOD_CLASS_FLDDEG) that must not be counted as predictors.
+    aux_label_bands = config.get("aux_label_bands", [])
     original_class_names = config["class_names"]
     ignore_index = config["ignore_index"]
     classification_mode = config.get("classification_mode", "multiclass")
@@ -65,7 +104,7 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
     # Discover band names from first patch
     band_names = discover_bands_from_raster(patch_files[0])
     expected_band_count = len(band_names)
-    predictor_names = get_predictor_band_names(band_names, label_band)
+    predictor_names = get_predictor_band_names(band_names, label_band, aux_label_bands)
 
     if label_band not in band_names:
         raise ValueError(
@@ -77,6 +116,10 @@ def compute_statistics(patches_dir: Path, output_path: Path, config_path: Path =
     print(f"Discovered {expected_band_count} bands: {band_names}")
     print(f"Predictor bands: {len(predictor_names)}")
     print(f"Label band: '{label_band}' at index {label_index}")
+    if aux_label_bands:
+        excluded = [b for b in aux_label_bands if b in band_names]
+        if excluded:
+            print(f"Excluded aux label bands from predictors: {excluded}")
 
     # Initialize tracking variables
     band_mins = {name: float('inf') for name in predictor_names}
