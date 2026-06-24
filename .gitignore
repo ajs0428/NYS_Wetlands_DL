@@ -26,6 +26,8 @@ Python_Code_Analysis/raster_footprint*
 !Python_Code_Analysis/torchgeo_testing/*.ipynb
 !Python_Code_Analysis/torchgeo_testing/*.py
 !Python_Code_Analysis/DL_Pipeline_v2/*
+!Python_Code_Analysis/DL_Pipeline_v2/factorial_experiment/
+!Python_Code_Analysis/DL_Pipeline_v2/factorial_experiment/*
 
 # Track models directory structure but not contents
 !Models/

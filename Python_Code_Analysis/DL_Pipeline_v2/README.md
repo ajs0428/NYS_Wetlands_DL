@@ -2,6 +2,8 @@
 
 Deep learning pipeline for wetland semantic segmentation in New York State. Two architectures are available via `--arch`: a **U-Net** with residual blocks and SE attention (default), and **UNet3+** with full-scale skip connections and optional deep supervision. Supports two classification modes: **multiclass** (4-class: EMW, FSW, SSW, UPL) and **binary** (WET vs UPL). The mode is controlled by a single toggle in `dl_band_config.json` — both modes use the same training patches with label remapping applied at runtime.
 
+> **Scope.** This guide covers training, evaluating, and running inference with a **single model**. The multi-config **factorial experiment** (label-provenance × below-canopy feature ablations) has its own design and run instructions in [`factorial_experiment/`](factorial_experiment/) — see [`factorial_experiment/EXECUTION.md`](factorial_experiment/EXECUTION.md). It reuses the same `dl_*` scripts but drives them through its own orchestration (`Shell_Scripts/run_*.sh`) and a different Docker mount layout; use that guide, not the [Docker / HPC Deployment](#docker--hpc-deployment) recipe below, for the experiment.
+
 ## Table of Contents
 
 - [Quick Start](#quick-start)
@@ -961,6 +963,8 @@ No changes are needed in `dl_01_compute_statistics.py`, `dl_02_dataset.py`, `dl_
 ## Docker / HPC Deployment
 
 The pipeline can be run in a Docker container for reproducible GPU training on HPC clusters. The `Dockerfile` at the project root builds an image with all dependencies pre-installed.
+
+> **This section is the single-model recipe** — one training run via the image's default pipeline `CMD`, mounting only `Data/` and `Models/`. For the **factorial experiment**, do not use this recipe: it mounts the whole repo (so edited orchestration code, per-config `stats/`, and the `results/` tree all persist on `/workdir`) and overrides the `CMD` with `run_factorial.sh`. See [`factorial_experiment/EXECUTION.md`](factorial_experiment/EXECUTION.md).
 
 ### Building the Image
 
