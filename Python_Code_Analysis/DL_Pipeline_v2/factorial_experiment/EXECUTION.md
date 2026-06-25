@@ -569,3 +569,67 @@ not feed `dl_08`); §4a/§4b pick up the new outputs automatically.
 - [ ] `run_factorial.sh` launched inside `tmux`; mount only under `/workdir/$USER`
 - [ ] `rsync_results.sh -n` dry-run round-trips before the first real pull
 - [ ] heavy jobs run by **the user** from these scripts (agent does not auto-execute)
+
+---
+
+## 10. Follow-on studies (plan Section 9)
+
+Three studies on top of the base factorial. Each reuses the idempotent
+`run_config.sh` via new env knobs (`ARCH`, `N_PATCHES`, `CELL_NAME`,
+`CAT_CHANNELS`, `DEEP_SUPERVISION`) that default to base-factorial behavior, so
+the 8×3 factorial is untouched. Pick `<config>` from `factorial_table.csv` (the
+best deployable field config, likely `fld_chmret_leafoff`). Heavy runs go on the
+GPU node inside `tmux`/`docker1` exactly like `run_factorial.sh`; aggregation is
+pure pandas on the CPU node. Validate the plan first with `DRY_RUN=1`.
+
+**Patch-count learning curve** (`results_patchcurve/<config>_n<level>/seed<k>/`):
+
+```bash
+# GPU node, in the container (18 cells: 6 levels × 3 seeds; idempotent/resumable):
+bash Shell_Scripts/run_patchcurve.sh fld_chmret_leafoff
+#   LEVELS="100 200 300 400 500 full"  SEEDS="0 1 2"   (override via env)
+# CPU node, after sync-back:
+python Python_Code_Analysis/DL_Pipeline_v2/dl_08b_aggregate_patchcurve.py \
+    --results-dir results_patchcurve
+#   -> analysis/patchcurve_long.csv, patchcurve_summary.csv, patchcurve.png
+#   x-axis = REALIZED #train patches (training_log.json data_split), not the cap.
+```
+
+**UNet3+ architecture comparison** (`results_arch/<config>_unet3plus/seed<k>/`):
+
+```bash
+# GPU node (3 cells; deep-supervision ON; bf64/d5 held = fair vs U-Net baseline):
+bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff
+#   BATCH_SIZE defaults to 8; drop to 4 on OOM. eval auto-detects arch.
+# The U-Net arm already exists in results/<config>/ (base factorial, same seeds).
+# CPU node:
+python Python_Code_Analysis/DL_Pipeline_v2/dl_08b_aggregate_patchcurve.py \
+    --arch-compare --config fld_chmret_leafoff \
+    --unet-dir results --unet3plus-dir results_arch
+#   -> analysis/arch_compare.csv  (paired-by-seed U-Net vs UNet3+ + delta)
+```
+
+**Prediction / inference maps** (per HUC: class + per-class softmax probs). Unlike
+training, this needs the **source rasters** for the target HUC on the prediction
+node — pull only the 7 per-HUC tiles (~4–5 GB/HUC), not the ~1.74 TB tree:
+
+```bash
+# 1. Sync source rasters for the HUC (FROM wherever NYS_Wetlands_Data lives):
+SERVER="$USER@$DATA_HOST:" REMOTE_ROOT=/ibstorage/anthony/NYS_Wetlands_Data \
+LOCAL_ROOT=/workdir/$USER/NYS_Wetlands_Data \
+  bash Shell_Scripts/rsync_huc_sources.sh <cluster> <huc>     # -n to preview
+
+# 2. Verify the assembled band/channel contract (no model needed):
+python Python_Code_Analysis/DL_Pipeline_v2/dl_huc_stack.py \
+    --huc <huc> --cluster <cluster> --data-root /workdir/$USER/NYS_Wetlands_Data --inspect
+
+# 3. Predict with the best checkpoint for the config (best-macro-F1 seed by default):
+DATA_ROOT=/workdir/$USER/NYS_Wetlands_Data \
+  bash Shell_Scripts/run_predict_factorial.sh fld_chmret_leafoff <cluster> <huc>
+#   -> Data/HUC_DL_Predictions/DLpred_<mode>_cluster_<C>_huc_<H>.tif  (class)
+#                              ..._probs.tif                          (per-class softmax)
+#   RESULTS_DIR defaults to Models/factorial_results (then results/). Append a seed
+#   arg to pin one; works unchanged for a UNet3+ checkpoint (arch auto-detected).
+```
+
+Start with 2–3 demo HUCs to validate before scaling up.

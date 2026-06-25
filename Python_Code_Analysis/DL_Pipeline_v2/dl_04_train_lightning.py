@@ -51,6 +51,7 @@ class WetlandDataModule(L.LightningDataModule):
         batch_size: int = 16,
         num_workers: int = 4,
         seed: int = 42,
+        n_patches: Optional[int] = None,
     ):
         super().__init__()
         self.patches_dir = patches_dir
@@ -58,6 +59,7 @@ class WetlandDataModule(L.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.seed = seed
+        self.n_patches = n_patches
         self._train_loader = None
         self._val_loader = None
         self._test_loader = None
@@ -72,6 +74,7 @@ class WetlandDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             seed=self.seed,
+            n_patches=self.n_patches,
         )
         self._train_loader = train_loader
         self._val_loader = val_loader
@@ -325,6 +328,7 @@ def train(
     arch: str = "unet",
     cat_channels: int = 64,
     deep_supervision: bool = False,
+    n_patches: Optional[int] = None,
 ):
     """
     Full training pipeline using PyTorch Lightning.
@@ -383,6 +387,7 @@ def train(
         batch_size=batch_size,
         num_workers=num_workers,
         seed=seed,
+        n_patches=n_patches,
     )
     dm.setup()
     class_weights = dm.class_weights
@@ -584,6 +589,7 @@ def train(
             "lr_patience": lr_patience,
             "precision": precision,
             "gradient_clip_val": gradient_clip_val,
+            "n_patches": n_patches,
         },
         "data_split": data_split,
         "test_metrics": {
@@ -641,6 +647,7 @@ def train_kfold(
     arch: str = "unet",
     cat_channels: int = 64,
     deep_supervision: bool = False,
+    n_patches: Optional[int] = None,
 ):
     """
     K-fold cross-validation training.
@@ -655,6 +662,10 @@ def train_kfold(
     if seed is None:
         seed = int(torch.randint(0, 2**31, (1,)).item())
         print(f"No seed specified — using random seed: {seed}")
+
+    if n_patches is not None:
+        print(f"[warn] --n-patches={n_patches} is ignored in k-fold mode "
+              f"(patch-count studies use the single-split path).")
 
     # Read configuration from stats
     with open(stats_path) as f:
@@ -1025,6 +1036,10 @@ if __name__ == "__main__":
     parser.add_argument("--kfold", type=int, default=0,
                         help="Number of cross-validation folds (0=disabled, default: 0). "
                              "When set (e.g. --kfold 5), runs k-fold CV instead of a single train/val/test split.")
+    parser.add_argument("--n-patches", type=int, default=None,
+                        help="Cap the patch pool to the first N of the seed-shuffled file list "
+                             "before the train/val/test split (learning-curve studies). "
+                             "Default: use all patches. Ignored in k-fold mode.")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -1060,6 +1075,7 @@ if __name__ == "__main__":
         arch=args.arch,
         cat_channels=args.cat_channels,
         deep_supervision=args.deep_supervision,
+        n_patches=args.n_patches,
     )
 
     if args.kfold >= 2:

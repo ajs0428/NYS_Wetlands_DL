@@ -18,6 +18,17 @@
 #
 # Knobs (env overrides): EPOCHS BATCH_SIZE BASE_FILTERS DEPTH PRECISION
 #   PATCHES_DIR RESULTS_DIR PYTHON DRY_RUN
+#
+# Follow-on-study knobs (default to base-factorial behavior when unset, so the
+# 8x3 factorial is unchanged):
+#   ARCH=unet|unet3plus      architecture (default unet)
+#   CAT_CHANNELS=64          [unet3plus] unified skip-branch channels
+#   DEEP_SUPERVISION=0|1     [unet3plus] add per-stage loss heads (default 0)
+#   N_PATCHES=<int>          cap the patch pool for learning-curve runs (default: all)
+#   CELL_NAME=<dir>          cell directory name under RESULTS_DIR (default: $CONFIG).
+#                            Stats still resolve from the real $CONFIG, so studies
+#                            can write to e.g. <config>_n200 / <config>_unet3plus
+#                            without colliding with the base results/ tree.
 set -euo pipefail
 
 CONFIG="${1:?usage: run_config.sh <config> <seed>}"
@@ -33,8 +44,10 @@ PATCHES_DIR="${PATCHES_DIR:-$DATA/R_Patches_Merged}"
 RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results}"
 PYTHON="${PYTHON:-python}"
 
-# --- Fixed experiment constants (do NOT vary across runs) ---
-ARCH="unet"
+# --- Fixed experiment constants (do NOT vary across the base factorial) ---
+# Loss/weighting stay fixed for every study. ARCH is env-overridable for the
+# architecture follow-on (default unet preserves base-factorial behavior).
+ARCH="${ARCH:-unet}"
 CE_WEIGHT="1.0"; DICE_WEIGHT="0.0"; FOCAL_GAMMA="0"   # plain weighted CE
 BASE_FILTERS="${BASE_FILTERS:-64}"
 DEPTH="${DEPTH:-5}"
@@ -42,14 +55,23 @@ EPOCHS="${EPOCHS:-50}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
 PRECISION="${PRECISION:-16-mixed}"
 
+# --- Follow-on-study knobs (default to base-factorial behavior) ---
+CAT_CHANNELS="${CAT_CHANNELS:-64}"          # [unet3plus] skip-branch channels
+DEEP_SUPERVISION="${DEEP_SUPERVISION:-0}"   # [unet3plus] per-stage loss heads
+N_PATCHES="${N_PATCHES:-}"                   # learning-curve patch cap (empty = all)
+
 # --- Resolve config -> stats files (single source of truth: dl_experiment_config) ---
 eval "$("$PYTHON" "$PIPE/dl_experiment_config.py" --emit "$CONFIG")"
 TRAIN_STATS_PATH="$STATS_DIR/$TRAIN_STATS"
 EVAL_STATS_PATH="$STATS_DIR/$EVAL_STATS"
-CELL="$RESULTS_DIR/$CONFIG/seed$SEED"
+# Cell dir name defaults to the config; studies override it (e.g. <config>_n200)
+# while stats still resolve from the real $CONFIG above.
+CELL_NAME="${CELL_NAME:-$CONFIG}"
+CELL="$RESULTS_DIR/$CELL_NAME/seed$SEED"
 
 echo "=============================================================="
-echo " cell:      $CONFIG / seed$SEED"
+echo " cell:      $CELL_NAME / seed$SEED   (config: $CONFIG)"
+echo " arch:      $ARCH   bf$BASE_FILTERS d$DEPTH${N_PATCHES:+   n_patches: $N_PATCHES}"
 echo " label src: $LABEL_SOURCE   in_channels: $IN_CHANNELS"
 echo " train stats: $TRAIN_STATS"
 echo " eval  stats: $EVAL_STATS   (eval config: $EVAL_CONFIG, field-labeled)"
@@ -76,6 +98,14 @@ else
     mkdir -p "$CELL"; LOG_TRAIN="$CELL/train.log"; LOG_EVAL="$CELL/eval.log"
 fi
 
+# --- Optional train flags (only set when a study requests them). ---
+EXTRA_TRAIN_ARGS=()
+[[ -n "$N_PATCHES" ]] && EXTRA_TRAIN_ARGS+=(--n-patches "$N_PATCHES")
+if [[ "$ARCH" == "unet3plus" ]]; then
+    EXTRA_TRAIN_ARGS+=(--cat-channels "$CAT_CHANNELS")
+    [[ "$DEEP_SUPERVISION" == "1" ]] && EXTRA_TRAIN_ARGS+=(--deep-supervision)
+fi
+
 # --- 1. Train (validation follows the training label source). ---
 run "$PYTHON" "$PIPE/dl_04_train_lightning.py" \
     --patches-dir "$PATCHES_DIR" \
@@ -86,6 +116,7 @@ run "$PYTHON" "$PIPE/dl_04_train_lightning.py" \
     --base-filters "$BASE_FILTERS" --depth "$DEPTH" \
     --arch "$ARCH" --precision "$PRECISION" \
     --ce-weight "$CE_WEIGHT" --dice-weight "$DICE_WEIGHT" --focal-gamma "$FOCAL_GAMMA" \
+    ${EXTRA_TRAIN_ARGS[@]+"${EXTRA_TRAIN_ARGS[@]}"} \
     2>&1 | tee "$LOG_TRAIN"
 
 # --- 2. Locate the best checkpoint (prefer self-describing safetensors). ---
@@ -110,13 +141,14 @@ run "$PYTHON" "$PIPE/dl_05_evaluate.py" \
 # --- 4. Confusion-matrix CSV + run manifest (Phase 2.3). ---
 if [[ "${DRY_RUN:-0}" != "1" ]]; then
     GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    CONFIG="$CONFIG" SEED="$SEED" CELL="$CELL" LABEL_SOURCE="$LABEL_SOURCE" \
+    CONFIG="$CONFIG" SEED="$SEED" CELL="$CELL" CELL_NAME="$CELL_NAME" LABEL_SOURCE="$LABEL_SOURCE" \
     IN_CHANNELS="$IN_CHANNELS" TRAIN_STATS_PATH="$TRAIN_STATS_PATH" \
     EVAL_STATS_PATH="$EVAL_STATS_PATH" EVAL_CONFIG="$EVAL_CONFIG" CKPT="$CKPT" \
     ARCH="$ARCH" BASE_FILTERS="$BASE_FILTERS" DEPTH="$DEPTH" EPOCHS="$EPOCHS" \
     BATCH_SIZE="$BATCH_SIZE" PRECISION="$PRECISION" CE_WEIGHT="$CE_WEIGHT" \
     DICE_WEIGHT="$DICE_WEIGHT" FOCAL_GAMMA="$FOCAL_GAMMA" GIT_COMMIT="$GIT_COMMIT" \
-    PATCHES_DIR="$PATCHES_DIR" \
+    PATCHES_DIR="$PATCHES_DIR" N_PATCHES="$N_PATCHES" \
+    CAT_CHANNELS="$CAT_CHANNELS" DEEP_SUPERVISION="$DEEP_SUPERVISION" \
     "$PYTHON" - <<'PY'
 import json, os
 from pathlib import Path
@@ -133,8 +165,10 @@ if cm is not None:
 
 train_stats = json.loads(Path(os.environ["TRAIN_STATS_PATH"]).read_text())
 
+n_patches_env = os.environ.get("N_PATCHES", "")
 manifest = {
     "config": os.environ["CONFIG"],
+    "cell_name": os.environ.get("CELL_NAME", os.environ["CONFIG"]),
     "seed": int(os.environ["SEED"]),
     "label_source": os.environ["LABEL_SOURCE"],
     "in_channels": int(os.environ["IN_CHANNELS"]),
@@ -148,6 +182,9 @@ manifest = {
     "arch": os.environ["ARCH"],
     "base_filters": int(os.environ["BASE_FILTERS"]),
     "depth": int(os.environ["DEPTH"]),
+    "cat_channels": int(os.environ["CAT_CHANNELS"]) if os.environ["ARCH"] == "unet3plus" else None,
+    "deep_supervision": os.environ.get("DEEP_SUPERVISION") == "1" if os.environ["ARCH"] == "unet3plus" else None,
+    "n_patches": int(n_patches_env) if n_patches_env else None,
     "epochs": int(os.environ["EPOCHS"]),
     "batch_size": int(os.environ["BATCH_SIZE"]),
     "precision": os.environ["PRECISION"],

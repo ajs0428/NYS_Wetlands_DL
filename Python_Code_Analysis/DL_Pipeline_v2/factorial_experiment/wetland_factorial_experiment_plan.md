@@ -365,6 +365,74 @@ sanity check before anything else.
 
 ---
 
+## 9. Follow-on studies (added 2026-06-25)
+
+Three studies that reuse the factorial machinery and the **best** trained config (a runtime
+parameter, chosen from `factorial_table.csv` — likely `fld_chmret_leafoff`). They do **not**
+change the 8×3 base factorial. All hold the base factorial's constants (loss, weight-power,
+splits, seeds 0/1/2) unless noted. The shared runner `run_config.sh` gained backward-compatible
+env knobs (`ARCH`, `N_PATCHES`, `CELL_NAME`, `CAT_CHANNELS`, `DEEP_SUPERVISION`) that default to
+base-factorial behavior, so existing cells are unchanged.
+
+### Phase 4 — Patch-count learning curve
+
+**Question:** how many patches do we need, and what is the accuracy-vs-data curve?
+
+- **Mechanism:** new `--n-patches` flag on `dl_04_train_lightning.py`, threaded through
+  `WetlandDataModule` → `create_dataloaders` → `create_data_splits` (`dl_02_dataset.py`). It caps
+  the **seed-shuffled** pool *before* the 70/15/15 split, so subsets are reproducible and nested
+  per seed. Ignored in k-fold mode.
+- **Levels:** {100, 200, 300, 400, 500, full}; full = no cap (re-run later to extend the curve as
+  patches are added). R=3 seeds → 18 cells.
+- **Driver:** `Shell_Scripts/run_patchcurve.sh <config>` → `results_patchcurve/<config>_n<level>/seed<k>/`.
+- **x-axis is the realized train size** (`training_log.json` → `data_split.train`), not the cap.
+- **Aggregate:** `dl_08b_aggregate_patchcurve.py --results-dir results_patchcurve` →
+  `analysis/patchcurve_long.csv`, `patchcurve_summary.csv`, `patchcurve.png`.
+
+### Phase 5 — UNet3+ architecture comparison
+
+**Question:** how much does architecture (vs U-Net) move accuracy?
+
+- **No model code needed** — UNet3+ already exists (`dl_03_unet3plus_model.py`,
+  `dl_model_factory.build_net()`), the trainer accepts `--arch unet3plus --cat-channels
+  --deep-supervision`, and eval auto-detects arch from the checkpoint.
+- **Fair comparison:** same capacity as the U-Net baseline (`bf=64`, `depth=5`); only the
+  architecture changes. **Deep supervision ON by default** (part of the UNet3+ definition here,
+  not a tested axis). Memory: `16-mixed` + reduced batch (8; drop to 4 on OOM).
+- **Driver:** `Shell_Scripts/run_arch_compare.sh <config>` → `results_arch/<config>_unet3plus/seed<k>/`.
+  The U-Net arm already exists in `results/<config>/` on the same seeds → paired comparison.
+- **Aggregate:** `dl_08b_aggregate_patchcurve.py --arch-compare --config <config> --unet-dir results
+  --unet3plus-dir results_arch` → `analysis/arch_compare.csv`.
+
+### Phase 6 — Prediction / inference maps
+
+**Question:** what do the wall-to-wall predictions look like (class + softmax probability)?
+
+- **Reuses the existing in-memory path** — `dl_06b_predict_huc.py` + `dl_huc_stack.py` assemble the
+  17-band / 26-channel predictor stack window-by-window from the canonical per-HUC source rasters
+  (no `*_stack.tif` saved). The config's `TRAIN_STATS` file *is* the band/channel contract; bands
+  match by name, so any config's predictors (all ⊆ the 17 available) work.
+- **Data transfer:** the source rasters live in `NYS_Wetlands_Data/`. Pull only the **7 per-HUC
+  tiles** (~4–5 GB/HUC) with the existing `Shell_Scripts/rsync_huc_sources.sh <cluster> <huc>` into
+  a `--data-root` tree. Start with a few demo HUCs (full source tree ≈ 1.74 TB).
+- **Verify first:** `python dl_huc_stack.py --huc <H> --cluster <C> --data-root <root> --inspect`.
+- **Predict:** `Shell_Scripts/run_predict_factorial.sh <config> <cluster> <huc> [seed]` resolves the
+  best-macro-F1 checkpoint (or the named seed) + the config's stats and runs `dl_06b_predict_huc.py
+  --probs` → `DLpred_<mode>_cluster_<C>_huc_<H>.tif` (class) + `..._probs.tif` (per-class softmax).
+  Works unchanged for a UNet3+ checkpoint (arch auto-detected).
+
+### Deliverables (Phases 4–6)
+
+| Phase | Deliverable | Touches |
+|---|---|---|
+| 4 | `--n-patches` knob | `dl_02_dataset.py`, `dl_04_train_lightning.py` |
+| 4 | Patch-curve driver + aggregation/plot | new `Shell_Scripts/run_patchcurve.sh`, new `dl_08b_aggregate_patchcurve.py` |
+| 5 | UNet3+ comparison driver | new `Shell_Scripts/run_arch_compare.sh` (+ `--arch-compare` in `dl_08b`) |
+| 4/5 | Runner env knobs (`ARCH`/`N_PATCHES`/`CELL_NAME`/`CAT_CHANNELS`/`DEEP_SUPERVISION`) + manifest fields | `Shell_Scripts/run_config.sh` |
+| 6 | Best-checkpoint prediction wrapper | new `Shell_Scripts/run_predict_factorial.sh` (reuses `rsync_huc_sources.sh`, `dl_06b_predict_huc.py`, `dl_huc_stack.py`) |
+
+---
+
 ## 8. Feasibility & HPC execution
 
 Assessment against the target setup: **non-GPU node now** for orchestration/analysis, with a

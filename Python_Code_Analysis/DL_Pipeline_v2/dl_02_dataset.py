@@ -327,6 +327,7 @@ def create_data_splits(
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
     seed: int = 42,
+    n_patches: Optional[int] = None,
 ) -> Tuple[List[Path], List[Path], List[Path]]:
     """
     Split patch files into train/val/test sets.
@@ -337,6 +338,10 @@ def create_data_splits(
         val_ratio: Fraction for validation
         test_ratio: Fraction for testing
         seed: Random seed for reproducibility
+        n_patches: If set, cap the pool to the first n_patches of the
+            seed-shuffled file list before splitting (learning-curve studies).
+            The train/val/test ratios still apply to the capped subset, and the
+            subset is reproducible for a given seed.
 
     Returns:
         train_files, val_files, test_files
@@ -352,6 +357,17 @@ def create_data_splits(
     random.seed(seed)
     shuffled = patch_files.copy()
     random.shuffle(shuffled)
+
+    # Optional patch-count cap (applied AFTER the seeded shuffle so the subset is
+    # reproducible and nested: smaller n is a prefix of larger n for a given seed).
+    if n_patches is not None:
+        if n_patches < 1:
+            raise ValueError(f"n_patches must be >= 1, got {n_patches}")
+        if n_patches < len(shuffled):
+            print(f"Capping patch pool: {len(shuffled)} -> {n_patches} (seed={seed})")
+            shuffled = shuffled[:n_patches]
+        else:
+            print(f"n_patches={n_patches} >= available ({len(shuffled)}); using all patches")
 
     n = len(shuffled)
     train_end = int(n * train_ratio)
@@ -375,6 +391,7 @@ def create_dataloaders(
     batch_size: int = 16,
     num_workers: int = 4,
     seed: int = 42,
+    n_patches: Optional[int] = None,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, torch.Tensor]:
     """
     Create train/val/test DataLoaders.
@@ -385,12 +402,14 @@ def create_dataloaders(
         batch_size: Batch size for DataLoaders
         num_workers: Number of worker processes
         seed: Random seed for data splitting
+        n_patches: Optional cap on the patch pool (learning-curve studies);
+            forwarded to create_data_splits.
 
     Returns:
         train_loader, val_loader, test_loader, class_weights
     """
     train_files, val_files, test_files = create_data_splits(
-        patches_dir, seed=seed
+        patches_dir, seed=seed, n_patches=n_patches
     )
 
     train_dataset = WetlandPatchDataset(train_files, stats_path, augment=True)
