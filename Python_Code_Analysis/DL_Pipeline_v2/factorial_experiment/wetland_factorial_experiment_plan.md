@@ -357,7 +357,7 @@ Phase 3 is a directory walk.
 | 2.2 | 8 config wrappers + `run_factorial.sh` driver | `Shell_Scripts/run_<config>.sh` |
 | 2.3 | Run manifests | runner |
 | 2.4 | Results sync-back (GPU `/workdir` → CPU node) | `Shell_Scripts/rsync_results.sh` *(drafted)* |
-| 3 | Aggregation + SHAP (SHAP GPU-side) | *pending user's added steps* |
+| 3 | Aggregation (`dl_08_aggregate_factorial.py`, CPU) + SHAP (`dl_09_shap_factorial.py`, GPU-side) | built; forest-restricted metrics deferred; awaiting user's added analyses |
 
 **First action for Claude Code:** settle Section 4 decisions, build `dl_preflight_check.py`
 and run it on the field-only configs, then implement Phase 1.1 and verify the 26-channel

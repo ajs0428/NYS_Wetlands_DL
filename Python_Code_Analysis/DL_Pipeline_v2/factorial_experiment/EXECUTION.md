@@ -114,6 +114,8 @@ comparison runs on the full feature set only — see plan §2):
 | `dl_preflight_check.py` | Phase 0 gate: same patch set, identical footprints, predictor parity, label-value sanity, channel sanity. `--require-all-labels` insists all three label bands exist. **Must be green before any GPU time.** |
 | `dl_04_train_lightning.py` | Training (called by the runner). |
 | `dl_05_evaluate.py` | Test-set metrics + confusion matrix (called by the runner; auto-detects arch from the checkpoint). |
+| `dl_08_aggregate_factorial.py` | **Phase 3 aggregation (CPU).** Walks `results/<config>/seed*/metrics.json` into the factorial table + paired-by-seed contrasts (LiDAR tiers, leaf-off main effect, LiDAR×leaf-off interaction, label gradient). Pure pandas; safe to run on a partial tree (reports coverage). |
+| `dl_09_shap_factorial.py` | **Phase 3 SHAP (GPU).** Thin wrapper over `dl_07_shap_analysis.run_shap` that walks the field-trained cells, loading each cell's checkpoint + per-config stats (correct band subset) at the cell's seed → `results/<config>/seed<k>/shap/`. Idempotent; **run inside the container before reservation teardown.** |
 
 ### 2c. Shell orchestration (`Shell_Scripts/`)
 
@@ -123,6 +125,8 @@ comparison runs on the full feature set only — see plan §2):
 | `run_<config>.sh` (8 of them) | Thin wrapper: loops one config over `SEEDS` (default `0 1 2`), deferring to `run_config.sh`. Use to run a single config's replicates. |
 | `run_factorial.sh` | **Top-level driver.** Walks every (config × seed) cell, seed-outer, calling `run_config.sh`; skip-completed makes it resumable. This is what you launch in `tmux`. |
 | `rsync_results.sh` | Pull `results/` from the GPU node's `/workdir` back to the CPU node (`--metrics-only` for fast JSON/CSV/PNG, no flag for full checkpoints). |
+| `run_aggregate.sh` | **Phase 3 aggregation.** Wraps `dl_08_aggregate_factorial.py` (CPU/pandas) → `<RESULTS_DIR>/analysis/`. Defaults `RESULTS_DIR` to `Models/factorial_results` (the synced location) if present, else `results/`. Safe on a partial tree. |
+| `run_tensorboard.sh` | Serve TensorBoard over `results/` from the host (one dashboard, every cell a run). |
 
 **Key behavior to remember:** a `nwi`/`flddeg` config *trains* on its own label
 source but is *evaluated* against **field** labels (plan §3, non-negotiable). The
@@ -354,6 +358,38 @@ ls /workdir/$USER/nys_wetlands/results/*/seed*/metrics.json | wc -l   # cells do
 tail -f /workdir/$USER/nys_wetlands/results/<config>/seed<k>/train.log
 ```
 
+**Monitor with TensorBoard** (loss/IoU curves, all cells in one dashboard).
+`dl_04_train_lightning.py` writes TensorBoard event files to
+`results/<config>/seed<k>/tb_logs/`. TensorBoard is only a *reader* of those
+files, so it runs on the **host** (outside the training container) — pointing
+`--logdir` at the `results/` root makes every (config × seed) cell appear as its
+own run, and new cells show up as the factorial reaches them.
+`Shell_Scripts/run_tensorboard.sh` wraps this (default logdir
+`/workdir/$USER/nys_wetlands/results`, default port 6006):
+
+```bash
+# On the GPU node, in a SECOND screen/tmux window (NOT inside the container):
+cd /workdir/$USER/nys_wetlands
+Shell_Scripts/run_tensorboard.sh            # USE_SCREEN=1 to self-detach into `screen -S tensorboard`
+
+# Then from your laptop, tunnel the port and open http://localhost:6006
+ssh -N -L 6006:cbsugpu10.biohpc.cornell.edu:6006 $USER@cbsulogin.biohpc.cornell.edu
+```
+
+The script needs `tensorboard` importable in *some* env on the node — no conda
+required (it's a declared project dependency). It auto-uses `tensorboard` if it's
+on PATH, else falls back to `uv run`. With **neither uv nor a project env on the
+node**, make a throwaway venv just for the reader:
+
+```bash
+python -m venv /workdir/$USER/tb_env          # module load python/3.12.7 first if needed
+source /workdir/$USER/tb_env/bin/activate
+pip install setuptools tensorboard            # setuptools is required: TensorBoard imports
+                                              # pkg_resources, which Python 3.12 venvs omit by
+                                              # default (ModuleNotFoundError without it)
+Shell_Scripts/run_tensorboard.sh
+```
+
 **Resume across reservation windows** — just rerun the same `run_factorial.sh`
 command. Each cell with a `metrics.json` + `manifest.json` is skipped; only
 unfinished cells run. Failed cells are reported in the summary and retried on the
@@ -379,13 +415,56 @@ weights, loss, arch, git commit, stats files, degrade provenance), `metrics.json
 
 ---
 
-## 8. Phase 3 — aggregation & SHAP (pending)
+## 8. Phase 3 — aggregation & SHAP
 
-Not yet built — awaiting the user's added steps (plan §3/§5 Phase 3). Drafted
-scope: walk `results/<config>/seed*/metrics.json` into the factorial table
-(pure pandas, CPU node, post-sync); compute the LiDAR-tier, leaf-off, and
-label-gradient contrasts; run SHAP **on the GPU node** (it backprops) before
-tearing down the reservation, then sync its outputs back with the rest.
+Built (`dl_08_aggregate_factorial.py`, `dl_09_shap_factorial.py`). The split
+mirrors the node split: **aggregation is CPU/pandas, SHAP is GPU** (it backprops
+through each model, so it must run inside the container before reservation
+teardown). Forest-restricted metrics (CHM-threshold mask) are **not yet built** —
+deferred; `dl_08` will pick up a `metrics_forest.json` automatically if a future
+runner writes one.
+
+**Aggregation (CPU node, after sync-back — safe to run on a partial tree):**
+
+```bash
+cd /ibstorage/anthony/NYS_Wetlands_DL
+Shell_Scripts/run_aggregate.sh                  # RESULTS_DIR defaults to Models/factorial_results
+# or call the script directly to point elsewhere:
+#   python Python_Code_Analysis/DL_Pipeline_v2/dl_08_aggregate_factorial.py --results-dir results
+# writes <results-dir>/analysis/:
+#   factorial_long.csv      per (config, seed, class) precision/recall/f1/iou
+#   factorial_summary.csv   mean & sd over seeds
+#   factorial_table.csv     headline pivot: FSW/UPL IoU+recall, macro-F1 (mean±sd)
+#   contrasts.csv           paired-by-seed effects (LiDAR tiers, leaf-off, interaction, label gradient)
+#   confusion_mean/<config>.csv   seed-mean confusion matrix (the FSW↔UPL cells)
+#   coverage.csv            which (config × seed) cells are present
+```
+
+Contrasts are **paired by seed** — the same seed gives the same split across all
+8 configs (Section 3), so per-seed differences net out split luck before the
+mean±sd. The script prints coverage (e.g. `17/24 cells`) and computes every
+contrast it has the cells for, so re-running as the factorial fills in just
+extends the table.
+
+**SHAP (GPU node, in the container, before teardown):**
+
+```bash
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app \
+  nys-wetlands-dl \
+  python Python_Code_Analysis/DL_Pipeline_v2/dl_09_shap_factorial.py
+# default scope: all FIELD configs (label==fld) × every seed dir present.
+#   --configs fld_chmret_leafoff    one config
+#   --seeds 0                        one seed
+#   --n-background / --n-test / --crop-size   memory/cost knobs
+# writes results/<config>/seed<k>/shap/{*.png, *_shap_importance.json}; idempotent.
+```
+
+`dl_09` is band-correct for free: it points `--stats-path` at each config's
+per-config stats, and `WetlandPatchDataset` subsets bands by that file's
+`predictor_names`. The SHAP outputs sync back with `rsync_results.sh` (they live
+under `results/`). Pair `contrasts.csv` (ablation = marginal contribution)
+against the SHAP importance JSON (reliance) for the feature story.
 
 ---
 
