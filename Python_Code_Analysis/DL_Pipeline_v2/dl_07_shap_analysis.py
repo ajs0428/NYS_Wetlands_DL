@@ -187,6 +187,17 @@ def run_shap(
     importance_per_class = shap_band.mean(axis=1)          # (num_classes, n_bands)
     importance_overall = importance_per_class.mean(axis=0)  # (n_bands,)
 
+    # Per-channel (MEAN) aggregation alongside the SUM above. One-hot bands
+    # (e.g. Geomorph_local -> 10 channels) accumulate a sum over all their
+    # channels, which inflates them vs single-channel bands; dividing by the
+    # channel count gives the fair per-channel view. Exact and recoverable, but
+    # we emit it directly so downstream consumers need not reconstruct it.
+    n_channels = np.array(
+        [band_channel_ranges[b][1] - band_channel_ranges[b][0] for b in predictor_names]
+    )
+    importance_overall_pc = importance_overall / n_channels            # (n_bands,)
+    importance_per_class_pc = importance_per_class / n_channels        # (num_classes, n_bands)
+
     sort_idx = np.argsort(importance_overall)[::-1]
     sorted_names = [predictor_names[i] for i in sort_idx]
 
@@ -262,6 +273,10 @@ def run_shap(
         "n_test": int(test_data.shape[0]),
         "crop_size": crop_size,
         "seed": seed,
+        "n_channels": {
+            predictor_names[i]: int(n_channels[i]) for i in range(n_bands)
+        },
+        # SUM aggregation (per-band total |SHAP|) -- the headline number.
         "importance_overall": {
             predictor_names[i]: float(importance_overall[i]) for i in range(n_bands)
         },
@@ -271,12 +286,42 @@ def run_shap(
             }
             for c in range(num_classes)
         },
+        # MEAN aggregation (per-channel = sum / n_channels) -- fair across bands
+        # with differing channel counts (one-hot vs single-channel).
+        "importance_overall_per_channel": {
+            predictor_names[i]: float(importance_overall_pc[i]) for i in range(n_bands)
+        },
+        "importance_per_class_per_channel": {
+            class_names[c]: {
+                predictor_names[i]: float(importance_per_class_pc[c, i]) for i in range(n_bands)
+            }
+            for c in range(num_classes)
+        },
         "ranking": [predictor_names[i] for i in sort_idx],
     }
     p4 = output_dir / f"{stem}_shap_importance.json"
     with open(p4, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Saved {p4}")
+
+    # Persist the spatially-averaged per-channel |SHAP| array. This is the only
+    # piece the JSON discards (it stores band-level aggregates only), and it is
+    # what enables within-band channel breakdowns (e.g. which Geomorph_local
+    # one-hot class drives the band) and any future re-aggregation WITHOUT a
+    # re-run. Already spatially reduced, so it is small.
+    channel_band = []
+    for b in predictor_names:
+        s, e = band_channel_ranges[b]
+        channel_band.extend([b] * (e - s))
+    p5 = output_dir / f"{stem}_shap_per_channel.npz"
+    np.savez_compressed(
+        p5,
+        shap_abs=shap_abs.astype(np.float32),     # (num_classes, n_test, C_input)
+        channel_band=np.array(channel_band),      # (C_input,) parent band per channel
+        predictor_names=np.array(predictor_names),
+        class_names=np.array(class_names),
+    )
+    print(f"Saved {p5}")
 
     # Console table
     print(f"\n{'Rank':<6}{'Band':<20}{'Mean |SHAP|':>14}")

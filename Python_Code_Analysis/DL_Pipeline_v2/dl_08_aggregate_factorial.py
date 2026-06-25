@@ -271,29 +271,37 @@ def compute_contrasts(long_df: pd.DataFrame) -> pd.DataFrame:
 
     df = pd.DataFrame(recs)
 
-    # 4. LiDAR x leaf-off interaction: difference of paired leaf-off deltas at
-    #    the two LiDAR extremes. Computed from the seed-mean leaf-off deltas
-    #    already in `df` (a second-order effect; sd is not propagated). Skip when
-    #    no first-order contrast exists yet (df has no columns to index on).
+    # 4. LiDAR x leaf-off interaction, computed PER SEED as a 4-cell contrast at
+    #    the LiDAR extremes (all four configs share a given seed's split, so this
+    #    is a valid paired quantity -> proper mean/sd/n, exactly like the
+    #    first-order rows):
+    #        I_s = [chmret_leafoff - chmret_leafon] - [nolidar_leafoff - nolidar_leafon]  (at seed s)
+    #    Sign: >0 the modalities are COMPLEMENTARY (leaf-off still helps once you
+    #    have LiDAR); ~0 additive/independent; <0 REDUNDANT (they capture the same
+    #    below-canopy signal, so the second adds little).
     inter = []
-    if df.empty:
-        return df
     for cls in FOCUS_CLASSES:
         for metric in CONTRAST_METRICS:
-            def leafoff_delta(lidar):
-                row = df[(df["group"] == "leafoff_main")
-                         & (df["contrast"] == f"fld_{lidar}_leafoff - fld_{lidar}_leafon")
-                         & (df["class"] == cls) & (df["metric"] == metric)]
-                return float(row["delta_mean"].iloc[0]) if not row.empty else None
-            hi, lo = leafoff_delta("chmret"), leafoff_delta("nolidar")
-            if hi is not None and lo is not None:
-                inter.append({
-                    "contrast": "(leafoff-leafon)@chmret - @nolidar",
-                    "class": cls, "metric": metric,
-                    "delta_mean": round(hi - lo, 4), "delta_sd": np.nan,
-                    "n_seeds": np.nan, "group": "interaction",
-                    "note": "LiDAR x leaf-off (do the modalities overlap?)",
-                })
+            def seed_series(cfg):
+                sub = long_df[(long_df["config"] == cfg) & (long_df["class"] == cls)]
+                return sub.set_index("seed")[metric]
+            a, b = seed_series("fld_chmret_leafoff"),  seed_series("fld_chmret_leafon")
+            c, d = seed_series("fld_nolidar_leafoff"), seed_series("fld_nolidar_leafon")
+            shared = sorted(set(a.index) & set(b.index) & set(c.index) & set(d.index))
+            if not shared:
+                continue
+            i_s = ((a.loc[shared] - b.loc[shared]) - (c.loc[shared] - d.loc[shared])).dropna()
+            if i_s.empty:
+                continue
+            inter.append({
+                "group": "interaction",
+                "contrast": "(leafoff-leafon)@chmret - @nolidar",
+                "class": cls, "metric": metric,
+                "delta_mean": round(float(i_s.mean()), 4),
+                "delta_sd": round(float(i_s.std()), 4) if len(i_s) > 1 else np.nan,
+                "n_seeds": int(len(i_s)),
+                "note": "LiDAR x leaf-off (>0 complementary, <0 redundant)",
+            })
     if inter:
         df = pd.concat([df, pd.DataFrame(inter)], ignore_index=True)
 

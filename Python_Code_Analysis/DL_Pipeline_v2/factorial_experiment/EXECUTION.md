@@ -457,7 +457,15 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 #   --configs fld_chmret_leafoff    one config
 #   --seeds 0                        one seed
 #   --n-background / --n-test / --crop-size   memory/cost knobs
-# writes results/<config>/seed<k>/shap/{*.png, *_shap_importance.json}; idempotent.
+# writes results/<config>/seed<k>/shap/ ; idempotent. Per cell:
+#   *_shap_band_importance*.png / *_shap_summary_plot.png   figures
+#   *_shap_importance.json    per-band importance, BOTH aggregations:
+#       importance_overall(_per_class)             = SUM over a band's channels
+#       importance_overall(_per_class)_per_channel = MEAN (sum / n_channels)
+#       n_channels                                 = channels per band
+#   *_shap_per_channel.npz    spatially-averaged per-channel |SHAP|
+#       (shap_abs (n_classes, n_test, C_input) + channel_band map) -- the raw
+#       array the JSON aggregates; enables the within-Geomorphon form breakdown.
 ```
 
 `dl_09` is band-correct for free: it points `--stats-path` at each config's
@@ -465,6 +473,87 @@ per-config stats, and `WetlandPatchDataset` subsets bands by that file's
 `predictor_names`. The SHAP outputs sync back with `rsync_results.sh` (they live
 under `results/`). Pair `contrasts.csv` (ablation = marginal contribution)
 against the SHAP importance JSON (reliance) for the feature story.
+
+**Why both aggregations.** A band's channels are summed back to band level, but
+the one-hot `Geomorph_local` band is 10 channels while every continuous band is 1
+— so the SUM inflates it ~10×. The per-channel MEAN (`sum / n_channels`) is the
+fair comparison; the truth sits between. `dl_10_factorial_viz.ipynb` §4a shows
+both side by side, and §4b uses the `.npz` to split Geomorphon into its 10 forms
+(is the signal concentrated in a few wet-landform forms, or smeared = artifact?).
+
+### 8.1 Re-importing to the GPU node and re-running SHAP
+
+When the GPU node was cleaned (reservation ended) but you have updated SHAP code
+or want the newer outputs (the `.npz` + per-channel JSON fields above), restage
+and re-run. **Two flags are mandatory or the run silently does nothing:**
+
+- **`--force`** — `dl_09` skips any cell that already has a `*_shap_importance.json`
+  (idempotency). Every field cell has one from the last pass, so without `--force`
+  *all* cells are skipped and no new `.npz` / per-channel fields are written.
+- **`--results-dir Models/factorial_results`** — `dl_09` defaults `--results-dir`
+  to `<repo>/results`, but the local archive keeps the trained cells in
+  `Models/factorial_results/` (that is where the original `results/` synced back
+  to). Point it there so it finds the checkpoints with the §5 whole-repo push
+  unchanged. (Alternatively restage the cells into the node's `results/`.)
+
+SHAP needs, on the node: the **updated code**, each cell's **`best_*.safetensors`
+(+ `.meta.json` sidecar)** — *not* the `.ckpt` (≈36 GB of dead weight; `run_shap`
+prefers safetensors and auto-detects arch from the sidecar) — the **per-config
+`stats/`**, and the **patches** (the SHAP background/test split). Lean push from
+the CPU node (skips the `.ckpt`, ≈13 GB instead of ≈49 GB):
+
+```bash
+# FROM the CPU node:
+cd /ibstorage/anthony/NYS_Wetlands_DL
+GPU_NODE=cbsugpu10.biohpc.cornell.edu        # your reserved node
+
+rsync -avhP --relative \
+  --exclude='*.ckpt' --exclude='__pycache__' \
+  Python_Code_Analysis/DL_Pipeline_v2 \
+  Shell_Scripts \
+  Data/Training_Data/stats \
+  Data/Training_Data/R_Patches_Merged \
+  Models/factorial_results \
+  "$USER@$GPU_NODE:/workdir/$USER/nys_wetlands/"
+```
+
+`--relative` recreates each path under the dest, so the node mirrors the local
+tree (`…/nys_wetlands/Models/factorial_results` → `/app/Models/factorial_results`
+once mounted).
+
+Run via the wrapper (`run_shap_factorial.sh` handles the two container quirks:
+writable `HOME`/`MPLCONFIGDIR`, and `pip install --user shap` if the image lacks
+it — needs node internet or shap pre-baked). 18 field cells, GPU, ~minutes each —
+use `screen`/`tmux`:
+
+```bash
+# ON the GPU node:
+screen -S shap
+cd /workdir/$USER/nys_wetlands
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app \
+  nys-wetlands-dl bash Shell_Scripts/run_shap_factorial.sh \
+    --results-dir Models/factorial_results --force
+# add --configs / --seeds to scope; default is all field configs × seeds present.
+# include nwi/flddeg only by naming them in --configs.
+```
+
+Pull back just the SHAP artifacts (not the unchanged ~11 GB of safetensors):
+
+```bash
+# FROM the CPU node:
+rsync -avhP \
+  --include='*/' \
+  --include='*_shap_importance.json' \
+  --include='*_shap_per_channel.npz' \
+  --include='*_shap_*.png' \
+  --exclude='*' \
+  "$USER@$GPU_NODE:/workdir/$USER/nys_wetlands/Models/factorial_results/" \
+  /ibstorage/anthony/NYS_Wetlands_DL/Models/factorial_results/
+```
+
+Then re-run `dl_10_factorial_viz.ipynb` — no `run_aggregate.sh` needed (SHAP does
+not feed `dl_08`); §4a/§4b pick up the new outputs automatically.
 
 ---
 
