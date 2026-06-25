@@ -524,16 +524,17 @@ once mounted).
 Run via the wrapper (`run_shap_factorial.sh` handles the two container quirks:
 writable `HOME`/`MPLCONFIGDIR`, and `pip install --user shap` if the image lacks
 it — needs node internet or shap pre-baked). 18 field cells, GPU, ~minutes each —
-use `screen`/`tmux`:
+run it under `tmux` (matching §6; `screen` works too) so an SSH drop won't kill it:
 
 ```bash
 # ON the GPU node:
-screen -S shap
+tmux new -s shap
 cd /workdir/$USER/nys_wetlands
 docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
   -v /workdir/$USER/nys_wetlands:/app \
   nys-wetlands-dl bash Shell_Scripts/run_shap_factorial.sh \
     --results-dir Models/factorial_results --force
+# Detach: Ctrl-b then d   |   reattach: tmux attach -t shap
 # add --configs / --seeds to scope; default is all field configs × seeds present.
 # include nwi/flddeg only by naming them in --configs.
 ```
