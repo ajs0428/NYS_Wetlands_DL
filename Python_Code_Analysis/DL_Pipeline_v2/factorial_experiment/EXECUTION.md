@@ -582,31 +582,114 @@ best deployable field config, likely `fld_chmret_leafoff`). Heavy runs go on the
 GPU node inside `tmux`/`docker1` exactly like `run_factorial.sh`; aggregation is
 pure pandas on the CPU node. Validate the plan first with `DRY_RUN=1`.
 
+### 10.0 Setup recap — reload the node first (same ritual as §4–§7)
+
+A follow-on study usually starts **after the base-factorial reservation ended**,
+so the GPU node's `/workdir` was wiped: the image is gone, the repo/data are gone,
+and the new results roots don't exist yet. The three study blocks below show only
+the *study-specific* command — they assume you've done these four steps first
+(this is the part that was implicit before). Skip what's already current.
+
+**1. Reload the image** (§4) — gone with the reservation:
+
+```bash
+# ON the GPU node:
+docker1 load -i /workdir/$USER/nys-wetlands-dl.tar.gz
+docker1 images | grep nys-wetlands-dl     # confirm
+```
+
+**2. Restage repo + data** from the CPU node — the lean §8.1 push is the right
+template (skips the ~36 GB of `.ckpt`; the studies need code, `stats/`, patches,
+and the trained cells). `Models/factorial_results` is only needed by the
+arch-compare baseline pairing and the predict checkpoint lookup — drop it for a
+pure patch-curve run:
+
+```bash
+# FROM the CPU node:
+cd /ibstorage/anthony/NYS_Wetlands_DL
+GPU_NODE=cbsugpu10.biohpc.cornell.edu          # your reserved node
+rsync -avhP --relative \
+  --exclude='*.ckpt' --exclude='__pycache__' \
+  Python_Code_Analysis/DL_Pipeline_v2 \
+  Shell_Scripts \
+  Data/Training_Data/stats \
+  Data/Training_Data/R_Patches_Merged \
+  Models/factorial_results \
+  "$USER@$GPU_NODE:/workdir/$USER/nys_wetlands/"
+```
+
+**3. The canonical container wrapper** — identical to §6; every "in the container"
+line in the blocks below drops into the final slot. Launch under `tmux` so it
+outlives the SSH session:
+
+```bash
+# ON the GPU node:
+tmux new -s followon
+cd /workdir/$USER/nys_wetlands
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app \
+  -e TMPDIR=/app/tmp \
+  nys-wetlands-dl \
+  bash Shell_Scripts/<study-script>.sh <args>
+# Detach: Ctrl-b then d   |   reattach: tmux attach -t followon
+```
+
+> **Predict study only:** its source rasters live at `/workdir/$USER/NYS_Wetlands_Data`,
+> **outside** the `/app` mount, so that wrapper needs a **second `-v`**
+> (`-v /workdir/$USER/NYS_Wetlands_Data:/data` + `-e DATA_ROOT=/data`). The predict
+> block below shows the full two-mount form — don't use the single-mount wrapper there.
+
+**4. Sync results back** (§7) — each study writes a **new** results root on the GPU
+node (`results_patchcurve/`, `results_arch/`). Pull each **under `Models/`** on the
+CPU node — same convention as the base factorial's `Models/factorial_results` — via
+`rsync_results.sh`'s env vars, then aggregate. The aggregation commands below point
+`--results-dir` / `--unet-dir` / `--unet3plus-dir` at those `Models/…` paths
+(`dl_08b` resolves relative paths against the repo root):
+
+```bash
+# FROM the CPU node, per study (patch-curve shown; arch study is the same shape):
+cd /ibstorage/anthony/NYS_Wetlands_DL
+SERVER="$USER@$GPU_NODE:" \
+REMOTE_RESULTS="/workdir/$USER/nys_wetlands/results_patchcurve" \
+LOCAL_DEST="/ibstorage/anthony/NYS_Wetlands_DL/Models/results_patchcurve" \
+  Shell_Scripts/rsync_results.sh --metrics-only      # -n to preview first
+#   arch study:  REMOTE_RESULTS=.../results_arch   LOCAL_DEST=.../Models/results_arch
+```
+
+> The **predict** study writes GeoTIFFs to `Data/HUC_DL_Predictions/`, not a
+> `results/` tree, so pull those with a plain rsync instead:
+> `rsync -avhP "$USER@$GPU_NODE:/workdir/$USER/nys_wetlands/Data/HUC_DL_Predictions/" Data/HUC_DL_Predictions/`
+
+---
+
 **Patch-count learning curve** (`results_patchcurve/<config>_n<level>/seed<k>/`):
 
 ```bash
-# GPU node, in the container (18 cells: 6 levels × 3 seeds; idempotent/resumable):
+# GPU node — drop into the §10.0 wrapper's final slot as <study-script> <args>
+#   (18 cells: 6 levels × 3 seeds; idempotent/resumable):
 bash Shell_Scripts/run_patchcurve.sh fld_chmret_leafoff
 #   LEVELS="100 200 300 400 500 full"  SEEDS="0 1 2"   (override via env)
-# CPU node, after sync-back:
+# CPU node, after sync-back (synced to Models/results_patchcurve per §10.0 step 4):
 python Python_Code_Analysis/DL_Pipeline_v2/dl_08b_aggregate_patchcurve.py \
-    --results-dir results_patchcurve
-#   -> analysis/patchcurve_long.csv, patchcurve_summary.csv, patchcurve.png
+    --results-dir Models/results_patchcurve
+#   -> Models/results_patchcurve/analysis/{patchcurve_long.csv,patchcurve_summary.csv,patchcurve.png}
 #   x-axis = REALIZED #train patches (training_log.json data_split), not the cap.
 ```
 
 **UNet3+ architecture comparison** (`results_arch/<config>_unet3plus/seed<k>/`):
 
 ```bash
-# GPU node (3 cells; deep-supervision ON; bf64/d5 held = fair vs U-Net baseline):
+# GPU node — in the §10.0 wrapper's final slot (3 cells; deep-supervision ON;
+#   bf64/d5 held = fair vs U-Net baseline):
 bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff
 #   BATCH_SIZE defaults to 8; drop to 4 on OOM. eval auto-detects arch.
-# The U-Net arm already exists in results/<config>/ (base factorial, same seeds).
+# The U-Net arm already exists in the base factorial — on the CPU node that is the
+# synced Models/factorial_results/<config>/ (same seeds).
 # CPU node:
 python Python_Code_Analysis/DL_Pipeline_v2/dl_08b_aggregate_patchcurve.py \
     --arch-compare --config fld_chmret_leafoff \
-    --unet-dir results --unet3plus-dir results_arch
-#   -> analysis/arch_compare.csv  (paired-by-seed U-Net vs UNet3+ + delta)
+    --unet-dir Models/factorial_results --unet3plus-dir Models/results_arch
+#   -> Models/results_arch/analysis/arch_compare.csv  (paired-by-seed U-Net vs UNet3+ + delta)
 ```
 
 **Prediction / inference maps** (per HUC: class + per-class softmax probs). Unlike
@@ -614,17 +697,29 @@ training, this needs the **source rasters** for the target HUC on the prediction
 node — pull only the 7 per-HUC tiles (~4–5 GB/HUC), not the ~1.74 TB tree:
 
 ```bash
+# Prereq: §10.0 steps 1–2 (image loaded, repo+Models/factorial_results staged).
+# This study uses a TWO-mount wrapper (source rasters live outside /app) — not the
+# single-mount §10.0 wrapper.
+
 # 1. Sync source rasters for the HUC (FROM wherever NYS_Wetlands_Data lives):
 SERVER="$USER@$DATA_HOST:" REMOTE_ROOT=/ibstorage/anthony/NYS_Wetlands_Data \
 LOCAL_ROOT=/workdir/$USER/NYS_Wetlands_Data \
   bash Shell_Scripts/rsync_huc_sources.sh <cluster> <huc>     # -n to preview
 
-# 2. Verify the assembled band/channel contract (no model needed):
-python Python_Code_Analysis/DL_Pipeline_v2/dl_huc_stack.py \
-    --huc <huc> --cluster <cluster> --data-root /workdir/$USER/NYS_Wetlands_Data --inspect
+# 2. Verify the band/channel contract — in the container, mounting the data tree at /data:
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app \
+  -v /workdir/$USER/NYS_Wetlands_Data:/data \
+  nys-wetlands-dl \
+  python Python_Code_Analysis/DL_Pipeline_v2/dl_huc_stack.py \
+    --huc <huc> --cluster <cluster> --data-root /data --inspect
 
-# 3. Predict with the best checkpoint for the config (best-macro-F1 seed by default):
-DATA_ROOT=/workdir/$USER/NYS_Wetlands_Data \
+# 3. Predict with the best checkpoint (best-macro-F1 seed by default) — same two mounts:
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app \
+  -v /workdir/$USER/NYS_Wetlands_Data:/data \
+  -e DATA_ROOT=/data \
+  nys-wetlands-dl \
   bash Shell_Scripts/run_predict_factorial.sh fld_chmret_leafoff <cluster> <huc>
 #   -> Data/HUC_DL_Predictions/DLpred_<mode>_cluster_<C>_huc_<H>.tif  (class)
 #                              ..._probs.tif                          (per-class softmax)
