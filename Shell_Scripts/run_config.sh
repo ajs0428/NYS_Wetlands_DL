@@ -17,7 +17,9 @@
 # Example: run_config.sh fld_chm_leafon 0
 #
 # Knobs (env overrides): EPOCHS BATCH_SIZE BASE_FILTERS DEPTH PRECISION
-#   PATCHES_DIR RESULTS_DIR PYTHON DRY_RUN
+#   PATCHES_DIR STATS_DIR RESULTS_DIR PYTHON DRY_RUN
+#   STATS_DIR defaults to Data/Training_Data/stats; override for a versioned
+#   (v2) run so the per-config stats live beside the versioned results/patches.
 #
 # Follow-on-study knobs (default to base-factorial behavior when unset, so the
 # 8x3 factorial is unchanged):
@@ -39,7 +41,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PIPE="$REPO_ROOT/Python_Code_Analysis/DL_Pipeline_v2"
 DATA="$REPO_ROOT/Data/Training_Data"
-STATS_DIR="$DATA/stats"
+STATS_DIR="${STATS_DIR:-$DATA/stats}"
 PATCHES_DIR="${PATCHES_DIR:-$DATA/R_Patches_Merged}"
 RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results}"
 PYTHON="${PYTHON:-python}"

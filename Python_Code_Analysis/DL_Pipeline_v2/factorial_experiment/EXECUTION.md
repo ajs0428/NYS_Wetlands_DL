@@ -728,3 +728,154 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 ```
 
 Start with 2–3 demo HUCs to validate before scaling up.
+
+---
+
+## 11. Repeating the experiment (a versioned v2 run)
+
+When the inputs change — **more training patches**, or **new predictor bands** —
+you re-run the whole grid as a *new version* (`v2`, `v3`, …). The hazard is that
+almost every output writes to a **fixed path** and would silently overwrite or
+mask v1. This section is the ritual that keeps v1 intact and reproducible while
+v2 runs alongside it.
+
+> **One convention drives the whole thing:** export `EXP_VERSION` and derive
+> every output root from it. Most roots are already env knobs, so this needs
+> almost no code change — the two exceptions are called out in §11.5.
+
+### 11.1 First: why a naïve repeat is unsafe
+
+Three classes of artifact overwrite **in place**, and `Models/`+`Data/` are
+gitignored, so a git tag preserves *code and docs* but **not** results, stats, or
+patches. The footguns:
+
+| Artifact | Fixed path | What a repeat does |
+|---|---|---|
+| Trained cells | `Models/factorial_results/<config>/seed<k>/` | Idempotent skip sees v1's `metrics.json`+`manifest.json` and **skips every cell** — v1 results silently masquerade as a fresh run. Delete to force, and v1 is destroyed. |
+| Per-config stats | `Data/Training_Data/stats/*_<config>_wp0.5.json` | `dl_make_config_stats --all` overwrites them; the master `multiclass_normalization_stats_wp0.5.json` too. v1 metrics survive, but v1 **SHAP / predict** (which reload stats) can no longer be reproduced. |
+| Merged patches | `Data/Training_Data/R_Patches_Merged/<name>.tif` | Re-merge rewrites each file. If predictors changed, the band schema changes and v1 checkpoints no longer load against these patches. |
+| HUC predictions | `Data/HUC_DL_Predictions/DLpred_<mode>_cluster_<C>_huc_<H>.tif` | Filename has no version token → a v2 prediction of the same HUC overwrites v1. |
+| Viz notebook | `dl_10_factorial_viz.ipynb` (hardcoded `Models/factorial_results` ×9, `results_arch`, `results_patchcurve`) | Re-running repoints at whatever is on disk and overwrites the rendered v1 figures. |
+
+### 11.2 Snapshot v1, then fork the namespace
+
+**Step A — freeze v1 code + docs (git):**
+
+```bash
+cd /ibstorage/anthony/NYS_Wetlands_DL
+git tag factorial-v1          # freezes dl_experiment_config.py, this EXECUTION.md, the plan, the notebook
+```
+
+**Step B — snapshot v1's gitignored artifacts (physical copies).** These are the
+only way to keep v1 SHAP/predict reproducible after the inputs change. Copy, do
+not move — v2 prep regenerates the canonical paths:
+
+```bash
+cp -a Models/factorial_results            Models/factorial_results_v1
+cp -a Data/Training_Data/stats            Data/Training_Data/stats_v1
+cp -a Data/Training_Data/multiclass_normalization_stats_wp0.5.json \
+      Data/Training_Data/multiclass_normalization_stats_wp0.5_v1.json
+cp -a Data/Training_Data/R_Patches_Merged Data/Training_Data/R_Patches_Merged_v1   # only if predictors/patches change the schema
+# follow-on roots, if present:
+cp -a Models/results_patchcurve Models/results_patchcurve_v1 2>/dev/null || true
+cp -a Models/results_arch       Models/results_arch_v1       2>/dev/null || true
+```
+
+### 11.3 The one variable and the knobs it drives
+
+Pick a version and derive every output root from it. These are the **existing**
+env knobs (no code change) — set them once per shell:
+
+```bash
+export EXP_VERSION=v2
+export RESULTS_DIR="$PWD/Models/factorial_results_${EXP_VERSION}"   # run_config/run_factorial
+export PATCHES_DIR="$PWD/Data/Training_Data/R_Patches_Merged"       # v2 schema (regenerated in §11.4)
+export OUT_DIR="$PWD/Data/HUC_DL_Predictions_${EXP_VERSION}"        # run_predict_factorial
+```
+
+| Output | Knob | Status |
+|---|---|---|
+| Trained cells | `RESULTS_DIR` | ✅ env knob today |
+| Merged patches | `PATCHES_DIR` | ✅ env knob today |
+| Master stats | `dl_01 --output` / `dl_make_config_stats --master-stats` | ✅ flags |
+| Predictions | `OUT_DIR` (predict) | ✅ env knob today |
+| Aggregation | `dl_08*.py --results-dir` | ✅ flag |
+| **Per-config stats dir** | `STATS_DIR` in `run_config.sh` | ⚠️ **hardcoded** to `Data/Training_Data/stats` (line 42) — see §11.5 |
+| **Viz notebook root** | top-of-notebook literal | ⚠️ **hardcoded** ×~17 — see §11.5 |
+
+Because the stats *dir* is fixed, the safe pattern today is **snapshot v1 stats
+(§11.2 step B), then regenerate `Data/Training_Data/stats/` for v2 in place** —
+the runner reads the canonical dir, so v2's stats simply *are* the canonical
+stats once v1 is copied aside. (§11.5 offers the one-line knob that removes even
+this.)
+
+### 11.4 Run v2
+
+The flavor of change decides how much you touch:
+
+**Flavor 1 — more patches, same bands (no schema change).** Lowest risk; **no
+code edits**. Re-run prep so the patch count re-feeds the field class weights
+(EXECUTION §3 step 0 → 4), writing the master to a v2 name:
+
+```bash
+PIPE=Python_Code_Analysis/DL_Pipeline_v2
+python $PIPE/dl_merge_nwi_labels.py && python $PIPE/dl_degrade_labels.py --seed 0   # rebuild R_Patches_Merged
+python $PIPE/dl_experiment_config.py                                                 # channel matrix self-check
+python $PIPE/dl_01_compute_statistics.py \
+  --patches-dir  Data/Training_Data/R_Patches_Merged \
+  --global-stats Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json \
+  --weight-power 0.5 \
+  --output       Data/Training_Data/multiclass_normalization_stats_wp0.5.json        # master (v1 already copied aside)
+python $PIPE/dl_make_config_stats.py --all                                           # regenerates Data/Training_Data/stats/
+python $PIPE/dl_preflight_check.py --require-all-labels                              # must be GREEN
+```
+
+**Flavor 2 — new predictor band(s) (schema change).** Invasive; edit code
+*before* prep, in one commit so the preflight stays the guardrail:
+
+1. `dl_experiment_config.py` — add the band to `BASE_BANDS` / `LIDAR_TIERS` /
+   `SPECTRAL_TIERS`, **and** update the 8 `"channels"` values, or
+   `verify_channel_matrix()` (and thus the preflight) fails.
+2. `dl_band_config.json` — add the new band's normalization rule.
+3. Rebuild the global raster scan (`HUC_DL_Stacks_Extracted_Values.json`) in the
+   sibling `NYS_Wetlands_Data` project so the new band has global min/max.
+4. Update the channel-count tables in **this file (§2a)** and the plan.
+5. Then run the Flavor-1 prep block above.
+
+> **in_channels changing means v1 checkpoints are incompatible** — no warm-start;
+> v2 is a full retrain. That is expected and is exactly why v1 was snapshotted.
+
+**Train + aggregate (both flavors), with the knobs from §11.3 exported:**
+
+```bash
+# GPU node, in the container (§6 wrapper), with RESULTS_DIR/PATCHES_DIR passed through -e:
+bash Shell_Scripts/run_factorial.sh                 # writes Models/factorial_results_v2/ (fresh dir ⇒ every cell runs)
+# CPU node, after sync-back:
+Shell_Scripts/run_aggregate.sh                      # RESULTS_DIR already points at the v2 dir
+# Predictions land in Data/HUC_DL_Predictions_v2/ via OUT_DIR.
+```
+
+The idempotent skip is now a **feature**: a fresh `RESULTS_DIR` has no
+`metrics.json`, so all 24 cells train; stop/resume still works within v2.
+
+### 11.5 The two code gaps (prepared, optional)
+
+Everything above works today. Two one-line edits would make `EXP_VERSION` fully
+knob-driven (no snapshot-then-overwrite for stats, no notebook hand-edit):
+
+- **`run_config.sh` line 42** — make the stats dir an env knob:
+  `STATS_DIR="${STATS_DIR:-$DATA/stats}"`. Then `export STATS_DIR=…/stats_v2` and
+  point `dl_make_config_stats --out-dir` at the same path; v1's `stats/` is never
+  touched.
+- **`dl_10_factorial_viz.ipynb`** — hoist the ~17 hardcoded result roots to one
+  `RESULTS_ROOT = Path("Models/factorial_results")` cell at the top, so v1 and v2
+  figures render from separate trees without clobbering each other.
+
+### 11.6 v2 pre-launch checklist
+
+- [ ] `git tag factorial-v1` created (code/docs frozen)
+- [ ] v1 artifacts copied aside (§11.2 step B): `factorial_results_v1`, `stats_v1`, master `_v1.json`, and `R_Patches_Merged_v1` if the schema changed
+- [ ] `EXP_VERSION` exported; `RESULTS_DIR` / `PATCHES_DIR` / `OUT_DIR` derived from it
+- [ ] Flavor 2 only: `dl_experiment_config.py` channels + `dl_band_config.json` + global scan + §2a tables updated **in one commit**
+- [ ] prep re-run (merge → degrade → master stats → `dl_make_config_stats --all` → preflight GREEN)
+- [ ] `DRY_RUN=1 RESULTS_DIR=… bash Shell_Scripts/run_factorial.sh` confirms cells target the v2 dir before any GPU time

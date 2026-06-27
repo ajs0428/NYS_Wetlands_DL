@@ -3,11 +3,11 @@ set -euo pipefail
 
 # rsync_huc_sources.sh
 #
-# Sync the predictor SOURCE rasters for ONE HUC (one cluster + huc id) from the
-# server where they live to a local data-root, mirroring the directory layout
-# that dl_huc_stack.py / dl_06b_predict_huc.py expect. This lets you run mapped
-# predictions from in-memory stacks (no *_stack.tif) without copying hundreds of
-# GB -- you pull only the handful of files for the HUC you are mapping.
+# Sync the predictor SOURCE rasters for ONE OR MORE HUCs (each a cluster + huc
+# id) from the server where they live to a local data-root, mirroring the
+# directory layout that dl_huc_stack.py / dl_06b_predict_huc.py expect. This
+# lets you run mapped predictions from in-memory stacks (no *_stack.tif) without
+# copying hundreds of GB -- you pull only the handful of files per HUC.
 #
 # Source directories and the per-dataset file-selection rules mirror
 # R_Code_Analysis/huc_stack.R (huc_source_dirs + huc_source_paths/match_one):
@@ -18,14 +18,24 @@ set -euo pipefail
 # Usage:
 #   SERVER="user@hpc.example.edu:" REMOTE_ROOT="/projects/NYS_Wetlands_Data" \
 #   LOCAL_ROOT="/scratch/NYS_Wetlands_Data" \
-#     ./rsync_huc_sources.sh <CLUSTER> <HUC> [-n|--dry-run]
+#     ./rsync_huc_sources.sh [-n|--dry-run] <PAIRS...>
 #
-# Example:
+# A PAIR ties one cluster to one huc id; pass as many as you like. Three forms,
+# freely mixable:
+#   1. Legacy two positional args (one pair):   208 041402011002
+#   2. Inline colon pairs (any number):         208:041402011002 209:030102040506
+#   3. A manifest file:                         --pairs hucs.txt
+#      (one pair per line, separated by space/comma/colon; '#' comments and
+#       blank lines ignored, e.g.  "208 041402011002"  or  "208,041402011002")
+#
+# Examples:
 #   SERVER="ajs@greene.hpc.nyu.edu:" REMOTE_ROOT="/scratch/ajs/NYS_Wetlands_Data" \
 #   LOCAL_ROOT="/data/NYS_Wetlands_Data" \
-#     ./rsync_huc_sources.sh 208 041402011002
+#     ./rsync_huc_sources.sh 208 041402011002                       # one HUC
+#     ./rsync_huc_sources.sh 208:041402011002 209:030102040506      # several
+#     ./rsync_huc_sources.sh --pairs hucs.txt                       # from file
 #
-# Then predict:
+# Then predict (per huc/cluster):
 #   python dl_06b_predict_huc.py --huc 041402011002 --cluster 208 \
 #       --data-root "$LOCAL_ROOT" --model Models/<model>.safetensors
 
@@ -42,24 +52,78 @@ RSYNC_OPTS="${RSYNC_OPTS:--avz --progress}"
 
 # === ARGS ===
 DRY_RUN=0
-POSARGS=()
-for a in "$@"; do
-    case "$a" in
+PAIRS=()        # each element is "CLUSTER HUC"
+BAREARGS=()     # positional tokens without a ':' (legacy CLUSTER HUC form)
+PAIRS_FILE=""
+
+# Append "CLUSTER HUC" to PAIRS, validating both fields are non-empty.
+add_pair() {
+    local cl="$1" hc="$2"
+    if [ -z "$cl" ] || [ -z "$hc" ]; then
+        echo "ERROR: malformed pair (cluster='$cl' huc='$hc')" >&2
+        exit 1
+    fi
+    PAIRS+=("$cl $hc")
+}
+
+# Read pairs from a manifest file: one pair per line, fields split on any of
+# space / comma / colon; '#' comments and blank lines ignored.
+read_pairs_file() {
+    local file="$1" line cl hc
+    [ -f "$file" ] || { echo "ERROR: --pairs file not found: $file" >&2; exit 1; }
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%%#*}"                      # strip trailing comment
+        line="$(echo "$line" | tr ',:' '  ')"   # commas/colons -> spaces
+        # shellcheck disable=SC2086
+        set -- $line                            # word-split on whitespace
+        [ "$#" -eq 0 ] && continue              # blank/comment-only line
+        if [ "$#" -ne 2 ]; then
+            echo "ERROR: bad line in $file (expected 'cluster huc'): $line" >&2
+            exit 1
+        fi
+        add_pair "$1" "$2"
+    done < "$file"
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
         -n|--dry-run) DRY_RUN=1 ;;
         -h|--help)
             grep -E '^#( |$)' "$0" | sed -E 's/^# ?//'
             exit 0 ;;
-        *) POSARGS+=("$a") ;;
+        --pairs)
+            shift
+            [ "$#" -ge 1 ] || { echo "ERROR: --pairs needs a file argument" >&2; exit 1; }
+            PAIRS_FILE="$1" ;;
+        --pairs=*) PAIRS_FILE="${1#*=}" ;;
+        *:*)  # inline cluster:huc pair
+            add_pair "${1%%:*}" "${1#*:}" ;;
+        *)    BAREARGS+=("$1") ;;
     esac
+    shift
 done
 
-if [ "${#POSARGS[@]}" -lt 2 ]; then
-    echo "Usage: $(basename "$0") <CLUSTER> <HUC> [-n|--dry-run]" >&2
+[ -n "$PAIRS_FILE" ] && read_pairs_file "$PAIRS_FILE"
+
+# Bare positional tokens are taken pairwise (cluster huc cluster huc ...), which
+# preserves the original two-arg invocation.
+if [ "${#BAREARGS[@]}" -gt 0 ]; then
+    if [ $(( ${#BAREARGS[@]} % 2 )) -ne 0 ]; then
+        echo "ERROR: positional args must come in CLUSTER HUC pairs (got ${#BAREARGS[@]})" >&2
+        exit 1
+    fi
+    i=0
+    while [ "$i" -lt "${#BAREARGS[@]}" ]; do
+        add_pair "${BAREARGS[$i]}" "${BAREARGS[$((i + 1))]}"
+        i=$((i + 2))
+    done
+fi
+
+if [ "${#PAIRS[@]}" -eq 0 ]; then
+    echo "Usage: $(basename "$0") [-n|--dry-run] <CLUSTER HUC | cluster:huc ... | --pairs FILE>" >&2
     echo "  (set SERVER, REMOTE_ROOT, LOCAL_ROOT via environment)" >&2
     exit 1
 fi
-CLUSTER="${POSARGS[0]}"
-HUC="${POSARGS[1]}"
 
 # ssh host = SERVER without the trailing colon; empty means local listing.
 SSH_HOST="${SERVER%:}"
@@ -104,74 +168,103 @@ keep_file() {
     return 0
 }
 
-echo "=============================================================="
-echo " Syncing HUC source rasters"
-echo "   cluster:     $CLUSTER"
-echo "   huc:         $HUC"
-echo "   from:        ${SERVER:-<local>}${REMOTE_ROOT}"
-echo "   to:          $LOCAL_ROOT"
-[ "$DRY_RUN" -eq 1 ] && echo "   mode:        DRY RUN (listing only)"
-echo "=============================================================="
+# Sync the sources for ONE pair. Sets the globals CLUSTER/HUC (read by
+# keep_file), then lists + transfers matches. Returns 1 if nothing matched so
+# the caller can record the failure and move on to the next HUC.
+sync_pair() {
+    CLUSTER="$1"        # global: consumed by keep_file
+    HUC="$2"            # global: consumed by keep_file
+    local matched=() missing=() key sub remote_dir listing found path fname rel dest
 
-MATCHED=()      # relative paths (under the data root) to transfer
-MISSING=()      # dataset keys with no match
+    echo "=============================================================="
+    echo " Syncing HUC source rasters"
+    echo "   cluster:     $CLUSTER"
+    echo "   huc:         $HUC"
+    echo "   from:        ${SERVER:-<local>}${REMOTE_ROOT}"
+    echo "   to:          $LOCAL_ROOT"
+    [ "$DRY_RUN" -eq 1 ] && echo "   mode:        DRY RUN (listing only)"
+    echo "=============================================================="
 
-for key in $KEYS; do
-    sub="$(subdir_for "$key")"
-    remote_dir="$REMOTE_ROOT/$sub"
+    for key in $KEYS; do
+        sub="$(subdir_for "$key")"
+        remote_dir="$REMOTE_ROOT/$sub"
 
-    # List candidate .tif filenames in this dataset dir (names only, cheap).
-    listing="$(run_remote "find '$remote_dir' -maxdepth 1 -type f -name '*.tif' 2>/dev/null" || true)"
+        # List candidate .tif filenames in this dataset dir (names only, cheap).
+        listing="$(run_remote "find '$remote_dir' -maxdepth 1 -type f -name '*.tif' 2>/dev/null" || true)"
 
-    found=0
-    if [ -n "$listing" ]; then
-        while IFS= read -r path; do
-            [ -n "$path" ] || continue
-            fname="$(basename "$path")"
-            if keep_file "$key" "$fname"; then
-                MATCHED+=("$sub/$fname")
-                found=$((found + 1))
-                echo "  [$key] $fname"
-            fi
-        done <<< "$listing"
+        found=0
+        if [ -n "$listing" ]; then
+            while IFS= read -r path; do
+                [ -n "$path" ] || continue
+                fname="$(basename "$path")"
+                if keep_file "$key" "$fname"; then
+                    matched+=("$sub/$fname")
+                    found=$((found + 1))
+                    echo "  [$key] $fname"
+                fi
+            done <<< "$listing"
+        fi
+
+        if [ "$found" -eq 0 ]; then
+            missing+=("$key")
+            echo "  [$key] <no match>"
+        fi
+    done
+
+    echo "--------------------------------------------------------------"
+    echo "Matched ${#matched[@]} file(s) across $(echo $KEYS | wc -w | tr -d ' ') datasets."
+
+    if [ "${#missing[@]}" -ne 0 ]; then
+        echo "WARNING: no source found for: ${missing[*]}"
+        echo "         dl_huc_stack.py requires every dataset -- prediction will fail"
+        echo "         for this HUC until these are present."
     fi
 
-    if [ "$found" -eq 0 ]; then
-        MISSING+=("$key")
-        echo "  [$key] <no match>"
+    if [ "${#matched[@]}" -eq 0 ]; then
+        echo "Nothing to transfer for cluster=$CLUSTER huc=$HUC. Check CLUSTER/HUC and REMOTE_ROOT." >&2
+        return 1
+    fi
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "Dry run -- no files transferred for this HUC."
+        return 0
+    fi
+
+    echo "Transferring..."
+    for rel in "${matched[@]}"; do
+        dest="$LOCAL_ROOT/$rel"
+        mkdir -p "$(dirname "$dest")"
+        # shellcheck disable=SC2086
+        rsync $RSYNC_OPTS "${SERVER}${REMOTE_ROOT}/$rel" "$dest"
+    done
+    GRAND_TOTAL=$((GRAND_TOTAL + ${#matched[@]}))
+
+    echo "Done. ${#matched[@]} file(s) synced for cluster=$CLUSTER huc=$HUC"
+    echo "  predict: python dl_06b_predict_huc.py --huc $HUC --cluster $CLUSTER \\"
+    echo "             --data-root \"$LOCAL_ROOT\" --model Models/<model>.safetensors"
+    return 0
+}
+
+# === DRIVE OVER ALL PAIRS ===
+echo "Processing ${#PAIRS[@]} HUC pair(s)."
+GRAND_TOTAL=0
+FAILED=()
+for pair in "${PAIRS[@]}"; do
+    # shellcheck disable=SC2086
+    set -- $pair                       # split "CLUSTER HUC"
+    if ! sync_pair "$1" "$2"; then
+        FAILED+=("$1:$2")
     fi
 done
 
-echo "--------------------------------------------------------------"
-echo "Matched ${#MATCHED[@]} file(s) across $(echo $KEYS | wc -w | tr -d ' ') datasets."
-
-if [ "${#MISSING[@]}" -ne 0 ]; then
-    echo "WARNING: no source found for: ${MISSING[*]}"
-    echo "         dl_huc_stack.py requires every dataset -- prediction will fail"
-    echo "         for this HUC until these are present."
+echo "=============================================================="
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo "Dry run complete over ${#PAIRS[@]} pair(s) -- no files transferred."
+else
+    echo "Done. $GRAND_TOTAL file(s) synced to $LOCAL_ROOT across ${#PAIRS[@]} pair(s)."
 fi
-
-if [ "${#MATCHED[@]}" -eq 0 ]; then
-    echo "Nothing to transfer. Check CLUSTER/HUC and REMOTE_ROOT." >&2
+if [ "${#FAILED[@]}" -ne 0 ]; then
+    echo "WARNING: no files matched for ${#FAILED[@]} pair(s): ${FAILED[*]}" >&2
     exit 1
 fi
-
-if [ "$DRY_RUN" -eq 1 ]; then
-    echo "Dry run -- no files transferred."
-    exit 0
-fi
-
-echo "Transferring..."
-for rel in "${MATCHED[@]}"; do
-    dest="$LOCAL_ROOT/$rel"
-    mkdir -p "$(dirname "$dest")"
-    # shellcheck disable=SC2086
-    rsync $RSYNC_OPTS "${SERVER}${REMOTE_ROOT}/$rel" "$dest"
-done
-
-echo "=============================================================="
-echo "Done. ${#MATCHED[@]} file(s) synced to $LOCAL_ROOT"
-echo "Predict with:"
-echo "  python dl_06b_predict_huc.py --huc $HUC --cluster $CLUSTER \\"
-echo "      --data-root \"$LOCAL_ROOT\" --model Models/<model>.safetensors"
 echo "=============================================================="
