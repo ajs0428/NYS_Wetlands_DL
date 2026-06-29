@@ -35,7 +35,7 @@ Python_Code_Analysis/DL_Pipeline_v2/   # Main pipeline (production)
   dl_08_aggregate_factorial.py            # Factorial: Phase-3 aggregation (CPU/pandas)
   dl_08b_aggregate_patchcurve.py          # Follow-on: patch-curve + --arch-compare aggregation (CPU)
   dl_09_shap_factorial.py                 # Factorial: per-cell SHAP (GPU, in-container)
-  dl_10_factorial_viz.ipynb               # Lightweight figures §1-§7 (CSV/JSON only; git-syncable; wetland-cnn kernel)
+  dl_10_factorial_viz.ipynb               # Lightweight figures §1-§7 (CSV/JSON only; git-syncable; wetland-cnn or uv kernel)
   dl_10b_huc_inference_viz.ipynb          # Data-heavy §8: HUC prevalence from prediction GeoTIFFs (rsync rasters separately)
   dl_huc_stack.py                         # Follow-on: build per-HUC inference stack
   factorial_experiment/EXECUTION.md       # Factorial: full operational walkthrough (read this)
@@ -216,7 +216,7 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) -v /workdir/$
   nys-wetlands-dl bash Shell_Scripts/run_shap_factorial.sh --results-dir Models/factorial_results --force
 #   --force is REQUIRED on a re-run (else every cell with an existing *_shap_importance.json is skipped).
 ```
-Then `dl_10_factorial_viz.ipynb` renders the figures (run with the `wetland-cnn` kernel — `.venv` lacks matplotlib/rasterio/seaborn).
+Then `dl_10_factorial_viz.ipynb` renders the figures (runs under either the conda `wetland-cnn` kernel or the uv `nys-wetlands-dl (uv)` kernel — the uv `.venv` now has seaborn/ipykernel via `uv sync --extra notebooks`).
 
 ### Follow-on studies (EXECUTION §10)
 Same node ritual: reload image, restage (lean push), run in container under `tmux`, sync back **under `Models/`**, aggregate on CPU. Each writes a **new results root**, so the base factorial is untouched.
