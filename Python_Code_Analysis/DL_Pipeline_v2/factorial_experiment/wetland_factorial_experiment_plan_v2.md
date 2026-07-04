@@ -1,7 +1,7 @@
-# Wetland DL Factorial Experiment — Claude Code Implementation Plan
+# Wetland DL Factorial Experiment v2 — Claude Code Implementation Plan
 
-**Purpose.** Implement and orchestrate a factorial experiment on the NYS Wetlands DL
-pipeline (v2) to answer two coupled questions:
+**Purpose.** Implement and orchestrate version 2 of the factorial experiment on the NYS Wetlands DL
+pipeline (v2). The overall goal is to improve upon the first version with binary classification modeling and more NWI patches. This version will investigate questions:
 
 1. **Label provenance** — how much does training-label quality (NWI vs. field-verified)
    affect binary and multiclass wetland mapping accuracy and skill. Is any gap driven by *quantity* (fewer
@@ -9,18 +9,16 @@ pipeline (v2) to answer two coupled questions:
    mapping skill as the field-verified? Similary, does a hybrid NWI + field verified acheive improved mapping
    skill and accuracy?
 2. **Below-canopy feature contribution** — which LiDAR-derived features and which
-   seasonal imagery resolve the forested-wetland (FSW) vs. upland (UPL) confusion that
-   above-canopy leaf-on spectral data cannot. Do LiDAR-derived features and seasonal imagery 
-   improve binary classification wetland maps?
+   seasonal imagery resolve wetland classification into Forested (FSW), Shrub-Scrub (SSW), and Emergent (EMW) 
+3. **Binary vs. Multiclass wetland classification** If we repeat the factorial experiement but with labels only 
+   containing binary wetland vs. upland classes (FSW, EMW, SSW combined into WET), do we see differences 
+   in model mapping skill and the use of input predictor features differently? 
 
-The unifying thesis: **LiDAR structure and leaf-off spectra are two below-canopy sensing
-modalities that resolve the FSW/UPL confusion.** Clean field-verified labels make that
-diagnosis trustworthy in a way NWI-trained studies cannot claim.
+Thesis: **LiDAR structure and leaf-off spectra are two below-canopy sensing modalities that resolve wetland vs. uplands in a binary classification model and wetland class confusion in the multiclass classification model** Clean field-verified labels make that diagnosis trustworthy in a way NWI-trained studies cannot claim.
 
 This document is the build brief. It is intentionally implementation-facing: it specifies
 the experiment matrix, the pipeline mechanisms to add, the shell orchestration, and the
-output layout. The three Section 4 decisions are now **settled** (4.1 multi-band labels,
-4.2 NWI non-wetland→UPL, 4.3 repeated seeds R=3), so Phase 1 code is unblocked.
+output layout. 
 
 ---
 
@@ -30,7 +28,8 @@ The pipeline lives in `Python_Code_Analysis/DL_Pipeline_v2/`. Key facts that con
 this work:
 
 - **Bands are discovered at runtime** from GeoTIFF band descriptions — there are no
-  hardcoded band indices. Band names drive everything via `dl_band_utils.py`.
+  hardcoded band indices. Band names drive everything via `dl_band_utils.py`. Binary labels
+  are determined using the configuration stated in `dl_band_config.json`: multiclass vs. binary.
 - `Geomorph_local` is **one-hot expanded** 1 band → 10 channels. Channel counts must
   account for this.
 - The stats JSON (from `dl_01_compute_statistics.py`) is the single source of truth for
@@ -68,7 +67,6 @@ Terrain + leaf-on NAIP: `DEM`, `slope_local`, `Geomorph_local`, `flowacc`, `twi`
 ### Two experimental axes (field-verified labels only)
 - **LiDAR tier (3 levels):**
   - `nolidar` — base only
-  - `chm` — base + `CHM` (widely available, cheap)
   - `chmret` — base + `CHM` + `pct_below_1m` + `pct_1m_to_5m` + `pct_above_5m`
 - **Leaf-off (2 levels):**
   - `leafon` — base only
@@ -76,10 +74,11 @@ Terrain + leaf-on NAIP: `DEM`, `slope_local`, `Geomorph_local`, `flowacc`, `twi`
 
 ### Factorial cells (3 × 2, field-verified labels)
 
+This changes from the first version by grouping the CHM with the rest of the lidar returns. 
+
 | LiDAR ↓ \ Spectral → | leaf-on | leaf-on + leaf-off |
 |---|---|---|
 | **no LiDAR** | `fld_nolidar_leafon` | `fld_nolidar_leafoff` |
-| **CHM only** | `fld_chm_leafon` | `fld_chm_leafoff` |
 | **CHM + returns** | `fld_chmret_leafon` | `fld_chmret_leafoff` *(= full feature set)* |
 
 ### Label block (full feature set only — scope control)
@@ -102,14 +101,12 @@ Terrain + leaf-on NAIP: `DEM`, `slope_local`, `Geomorph_local`, `flowacc`, `twi`
 |---|---|---|---|---|
 | 1 | `fld_nolidar_leafon`        | —              | —    | 18 |
 | 2 | `fld_nolidar_leafoff`       | —              | 4    | 22 |
-| 3 | `fld_chm_leafon`            | CHM            | —    | 19 |
-| 4 | `fld_chm_leafoff`           | CHM            | 4    | 23 |
-| 5 | `fld_chmret_leafon`         | CHM + 3 returns| —    | 22 |
-| 6 | `fld_chmret_leafoff`        | CHM + 3 returns| 4    | 26 |
-| 7 | `nwi_chmret_leafoff`        | CHM + 3 returns| 4    | 26 |
-| 8 | `nwiextra_chmret_leafoff`   | CHM + 3 returns| 4    | 26 |
-| 9 | `nwifield_chmret_leafoff`   | CHM + 3 returns| 4    | 26 |
-| 10 | `flddeg_chmret_leafoff`     | CHM + 3 returns| 4    | 26 |
+| 3 | `fld_chmret_leafon`         | CHM + 3 returns| —    | 22 |
+| 4 | `fld_chmret_leafoff`        | CHM + 3 returns| 4    | 26 |
+| 5 | `nwi_chmret_leafoff`        | CHM + 3 returns| 4    | 26 |
+| 6 | `nwiextra_chmret_leafoff`   | CHM + 3 returns| 4    | 26 |
+| 7 | `nwifield_chmret_leafoff`   | CHM + 3 returns| 4    | 26 |
+| 8 | `flddeg_chmret_leafoff`     | CHM + 3 returns| 4    | 26 |
 
 > Config 6 = 26 channels, matching the pipeline's documented full-feature count (17
 > predictors → 26 channels after `Geomorph_local` one-hot 1→10) — use this as a sanity check
@@ -138,9 +135,6 @@ Terrain + leaf-on NAIP: `DEM`, `slope_local`, `Geomorph_local`, `flowacc`, `twi`
 - **Metrics:** per-class IoU, per-class recall/precision, macro-F1, and the **full
   confusion matrix** (needed for the UPL↔FSW cells). Overall accuracy is reported but
   never used as the headline (it tracks UPL prevalence).
-- **Forest-restricted metrics:** additionally compute IoU/recall on forested pixels only
-  (or an FSW/UPL boundary buffer) — this is where the below-canopy effect concentrates and
-  a global metric dilutes it.
 
 ---
 
@@ -148,16 +142,16 @@ Terrain + leaf-on NAIP: `DEM`, `slope_local`, `Geomorph_local`, `flowacc`, `twi`
 
 These must be settled before mechanism code is written. Each changes the implementation.
 
-### 4.1 Label storage — **DECIDED: multi-band labels in each patch**
-Each patch gains label bands `MOD_CLASS_FLD`, `MOD_CLASS_NWI`, `MOD_CLASS_FLDDEG` alongside
-the 17 predictors — one file, one grid, footprint alignment provable by construction. The
-current single `MOD_CLASS` band **is** the field label, so `MOD_CLASS_FLD` is a copy/rename
-of it; `MOD_CLASS_NWI` comes from Phase 0 NWI rasterization (non-wetland→UPL per 4.2);
-`MOD_CLASS_FLDDEG` is written by `dl_degrade_labels.py` (Phase 1.3) from the field band. The
-Phase 1.2 toggle selects the active label band **by name**, exactly like predictor discovery.
-*Rejected:* separate directories per label source (alignment would have to be re-proven every
-run). The preflight (Phase 0) still verifies all label bands share the field band's grid and
-255 mask.
+### 4.1 Label storage — 
+**Previous version of experiment had multi-band labels in each patch.** 
+
+> Each patch gains label bands `MOD_CLASS_FLD`, `MOD_CLASS_NWI`, `MOD_CLASS_FLDDEG` alongside the 17 predictors — one file, one grid, footprint alignment provable by construction. The current single `MOD_CLASS` band **is** the field label, so `MOD_CLASS_FLD` is a copy/rename of it; `MOD_CLASS_NWI` comes from Phase 0 NWI rasterization (non-wetland→UPL per 4.2); `MOD_CLASS_FLDDEG` is written by `dl_degrade_labels.py` (Phase 1.3) from the field band. The Phase 1.2 toggle selects the active label band **by name**, exactly like predictor discovery. *Rejected:* separate directories per label source (alignment would have to be re-proven every run). The preflight (Phase 0) still verifies all label bands share the field band's grid and 255 mask.
+
+New v2 plan has separate directories per label source because the number of NWI patches will vary in the experiement. The setup directories will be: 
+
+- `R_Patches/` - Holds field-verified patches 
+- `R_Patches_NWI/` - Holds NWI patches, the same number as the field-verified in `R_Patches/`
+- `R_Patches_NWIextra` - Holds NWI patches, roughly 2x the field-verified in `R_Patches` 
 
 ### 4.2 NWI "non-wetland" semantics — **DECIDED: confirmed UPL**
 A pixel with no NWI wetland polygon is labeled **confirmed UPL (class 3)**, not
@@ -179,33 +173,32 @@ This is baked into:
 > *Robustness check (optional, later):* an `ignore_index`-for-NWI-omissions variant can be
 > run as a sensitivity analysis, but the **confirmed-UPL** version is the headline.
 
-### 4.3 Replication strategy — **DECIDED: repeated fixed-split seeds, start R=3**
-The outer loop is `for seed in 0,1,2` over a fixed 70/15/15 split: 8 configs × 3 seeds =
-**24 runs** (≈ one A6000 reservation, ~8–24 GPU-h). The **same seed yields the same
+### 4.3 Replication strategy — **DECIDED: repeated fixed-split seeds, start R=5**
+The outer loop is `for seed in 0,1,2,3,4` over a fixed 70/15/15 split: 8 configs × 3 seeds =
+**40 runs** (≈ one A6000 reservation, ~8–24 GPU-h). The **same seed yields the same
 train/val/test partition across all 8 configs** (via `create_data_splits(seed)`), so
-differences are attributable to inputs/labels, not split luck; the test partition is always
-field-labeled. Extend to R=5 (seeds 3–4, 40 runs) only if cross-seed variance warrants. The
-runner is idempotent (§2.2a), so extending R just adds new `seed<k>/` cells. 5-fold CV was
-considered but deferred to keep the first pass inside one reservation.
+differences are attributable to inputs/labels, not split luck; the test partition is always field-labeled. The runner is idempotent (§2.2a), so extending R just adds new `seed<k>/` cells. 5-fold CV was considered but deferred to keep the first pass inside one reservation.
 
 ---
+
+# Anthony Ended edits here 
+
 
 ## 5. Implementation phases
 
 ### Phase 0 — Data prerequisites & preflight checks (verify before coding)
 
-The label-provenance axis only means something if **NWI and field labels are judged on the
-exact same pixels** — same patch list, same footprints, same predictors, differing *only* in
-the label band. The most likely silent failure in this whole experiment is a footprint or
-patch-set mismatch that turns a label comparison into an apples-to-oranges artifact. Build a
-single **preflight script** (`dl_preflight_check.py`, a Phase-0 deliverable) that hard-fails
-before any GPU time is spent. It must assert:
+The label-provenance axis only means something if **NWI and field labels are judged on the exact same pixels** — same patch list, same footprints, same predictors, differing *only* in the label band. The most likely silent failure in this whole experiment is a footprint or patch-set mismatch that turns a label comparison into an apples-to-oranges artifact. 
+
+**The exception in v2 is that we will double the NWI patches using a separate director `R_Patches_NWIextra` to examine if mapping skill improves to the level of the field-verified trained model.**
+
+Build a single **preflight script** (`dl_preflight_check.py`, a Phase-0 deliverable) that hard-fails before any GPU time is spent. It must assert:
 
 - [ ] **Same patch set.** Every patch filename that exists for one label source exists for
-      all of them (no NWI-only or field-only patches). Report and fail on set differences.
+      all of them (no NWI-only or field-only patches). Report and fail on set differences. **This needs to change in v2**
 - [ ] **Identical footprints per patch.** For each patch, the field and NWI label rasters
       share CRS, transform, width, height, and nodata — i.e. the same grid, pixel-for-pixel
-      (per Decision 4.1; trivially satisfied if labels are bands in one file, but *verify*).
+      (per Decision 4.1; trivially satisfied if labels are bands in one file, but *verify*). **This needs to change in v2**
 - [ ] **Predictor parity.** All 17 predictor bands present and named exactly as the pipeline
       expects, identical across label sources. Authoritative set = `predictor_names` in
       `multiclass_normalization_stats_wp0.5.json`: `DEM, slope_local, Geomorph_local, flowacc,
@@ -221,14 +214,6 @@ before any GPU time is spent. It must assert:
       The test partition must be field-labeled for every config (Section 3, non-negotiable).
 - [ ] **Channel sanity.** `compute_in_channels` for `fld_chmret_leafoff` resolves to **26**,
       matching the master stats file byte-for-byte on the predictor side.
-
-> **Current status (2026-06-21):** the 491-patch set carries all 17 predictors *including the
-> 4 leaf-off bands* and a single `MOD_CLASS` (field) label — so the feature-ablation axis
-> (configs 1–6) is data-ready, but **no NWI label band exists yet.** Generating NWI labels
-> over the identical footprints (Decision 4.1 + 4.2) is the one hard data prerequisite, and it
-> gates configs 7–8 only. `dl_preflight_check.py` should run clean on the field-only configs
-> today and be re-run the moment NWI labels are added.
-
 - [ ] Generate NWI labels with the **decided 4.2 semantics — non-wetland → UPL (3)**, no-data
       → 255, ignore mask identical to the field band; then re-run the preflight check until it
       is green for all label sources.
