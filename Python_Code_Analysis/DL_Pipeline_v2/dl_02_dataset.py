@@ -14,7 +14,7 @@ import rasterio
 import torch
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Callable
 import random
 
 
@@ -106,6 +106,7 @@ class WetlandPatchDataset(Dataset):
         augment: bool = False,
         validate_bands: bool = True,
         patch_size: Optional[int] = None,
+        label_transform: Optional[Callable[[np.ndarray], np.ndarray]] = None,
     ):
         """
         Args:
@@ -120,9 +121,15 @@ class WetlandPatchDataset(Dataset):
                         None, it is inferred as the most common size across the
                         files. Patches whose H/W differ are skipped (a batch
                         cannot stack mismatched tensors).
+            label_transform: Optional callable applied to the label array AFTER
+                        nodata masking and the (binary) remap, e.g. the factorial
+                        v2 `flddeg` seeded wetland->UPL degrade. Receives and
+                        returns an int64 (H, W) array; ignore_index pixels must be
+                        preserved. Applied to train/val datasets only (never test).
         """
         self.patch_files = patch_files
         self.augment = augment
+        self.label_transform = label_transform
 
         # Load normalization statistics
         with open(stats_path) as f:
@@ -241,6 +248,10 @@ class WetlandPatchDataset(Dataset):
         # Apply label remap (e.g., multiclass -> binary)
         if self._remap_lut is not None:
             labels = self._remap_lut[labels]
+
+        # Optional label transform (e.g., factorial-v2 flddeg degrade); train/val only
+        if self.label_transform is not None:
+            labels = self.label_transform(labels)
 
         # Normalize predictors and one-hot encode categorical bands
         normalized = self._normalize_predictors(predictors, nodata)
@@ -449,6 +460,88 @@ def create_dataloaders(
     class_weights = train_dataset.get_class_weights()
 
     return train_loader, val_loader, test_loader, class_weights
+
+
+def create_dataloaders_from_pools(
+    config: str,
+    seed: int,
+    stats_dir: Path,
+    mode: str = "multiclass",
+    batch_size: int = 16,
+    num_workers: int = 4,
+    weight_power: float = 0.5,
+    leakage_guard: Optional[str] = None,
+    data_root: Optional[Path] = None,
+    validate_bands: bool = True,
+    label_transform: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+) -> Tuple[DataLoader, DataLoader, DataLoader, torch.Tensor]:
+    """Factorial-v2 dataloaders: resolve a config's field-anchored pools, then build
+    train/val/test loaders with the correct per-config, per-mode stats files.
+
+    The (train, val, test) FILE lists come from ``dl_patch_pools.resolve_pools`` --
+    test is always field (``R_Patches`` at the seed's held-out footprints), train/val
+    from the config's label directory(ies) under the leakage guard. Classification
+    ``mode`` is carried entirely by the stats file (its ``label_remap`` /
+    ``class_names`` / ``class_weights``), so:
+
+      * train + val use the config's own **TRAIN_STATS** (its label source's class
+        weights drive the loss);
+      * test uses the matching field config's **EVAL_STATS** -- same predictors and
+        normalization (identical values; predictors are label-source-invariant), so
+        the field test set is scored under the field config's stats per plan Sec. 3.
+
+    ``flddeg`` needs the seeded degrade (``dl_degrade_labels.py``); until a
+    ``label_transform`` is supplied this raises rather than silently training on
+    undegraded field labels.
+
+    Returns: train_loader, val_loader, test_loader, class_weights (from TRAIN_STATS).
+    """
+    import dl_experiment_config as X
+    import dl_patch_pools as P
+
+    if leakage_guard is None:
+        leakage_guard = X.LEAKAGE_GUARD
+    if data_root is None:
+        data_root = P.DEFAULT_DATA_ROOT
+    stats_dir = Path(stats_dir)
+
+    if X.config_pool_rule(config) == "degrade" and label_transform is None:
+        # flddeg: auto-build the seeded wetland->UPL degrade (train/val only). Its
+        # flip probability is measured from the field/NWI dirs, so it needs no
+        # pre-materialized labels; test stays undegraded (built without it below).
+        from dl_degrade_labels import make_degrader
+        label_transform = make_degrader(mode, seed, data_root=data_root)
+
+    train_files, val_files, test_files = P.resolve_pools(
+        config, seed, leakage_guard=leakage_guard, data_root=data_root
+    )
+
+    train_stats = stats_dir / X.stats_basename(config, mode=mode, weight_power=weight_power)
+    eval_stats = stats_dir / X.stats_basename(X.eval_config_name(config), mode=mode, weight_power=weight_power)
+    for p in (train_stats, eval_stats):
+        if not p.exists():
+            raise FileNotFoundError(f"stats file not found: {p} (run dl_make_config_stats.py --all --mode {mode})")
+
+    train_dataset = WetlandPatchDataset(train_files, train_stats, augment=True,
+                                        validate_bands=validate_bands, label_transform=label_transform)
+    val_dataset = WetlandPatchDataset(val_files, train_stats, augment=False,
+                                      validate_bands=validate_bands, label_transform=label_transform)
+    test_dataset = WetlandPatchDataset(test_files, eval_stats, augment=False,
+                                       validate_bands=validate_bands)  # test never degraded
+
+    persist = num_workers > 0
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
+                              pin_memory=True, persistent_workers=persist, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+                            pin_memory=True, persistent_workers=persist)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+                             pin_memory=True, persistent_workers=persist)
+
+    print(f"[pools] {config} seed{seed} mode={mode} guard={leakage_guard}: "
+          f"train={len(train_dataset)} val={len(val_dataset)} test={len(test_dataset)} "
+          f"| train_stats={train_stats.name} eval_stats={eval_stats.name}")
+
+    return train_loader, val_loader, test_loader, train_dataset.get_class_weights()
 
 
 def create_kfold_splits(

@@ -2,8 +2,9 @@
 
 **Purpose.** Implement and orchestrate version 2 of the factorial experiment on the NYS Wetlands DL
 pipeline. v2 improves on v1 in three ways: it adds a **binary (WET/UPL) classification mode as a full
-axis** run alongside multiclass, it adds **more NWI training patches** (a paired set plus a ~2× "extra"
-set) to test whether label *quantity* can close the NWI-vs-field gap, and it **regroups the LiDAR axis**
+axis** run alongside multiclass, it adds **more NWI training patches** (the paired set plus an
+equal-size "extra" set at new locations → 2× combined) to test whether label *quantity* can close the
+NWI-vs-field gap, and it **regroups the LiDAR axis**
 (CHM folded in with the return fractions). It investigates:
 
 1. **Label provenance** — how much does training-label quality (NWI vs. field-verified) affect binary
@@ -28,7 +29,8 @@ the shell orchestration, and the output layout.
 - **LiDAR axis dropped to two tiers:** `{nolidar, chmret}` — the CHM-only tier is gone (Decision, §2).
 - **Label sources are separate directories, not label bands in one file** (Decision 4.1). This
   reintroduces the cross-source alignment hazard v1 dodged, so the split logic and preflight are
-  redesigned around a **location key** and a **field-anchored split** (Decisions 4.5–4.6).
+  redesigned around **directory-aware keys** (filename pairing for field↔NWI, HUC12 geography for the
+  `NWIextra` leakage guard) and a **field-anchored split** (Decisions 4.5–4.6).
 - **Two new label configs:** `nwiextra` (~2× NWI patches, extra locations in the same HUC12s) and
   `nwifield` (field ∪ non-overlapping NWI).
 
@@ -95,7 +97,7 @@ CHM is grouped with the return fractions (this is the v1→v2 change): the LiDAR
 |---|---|---|---|
 | `fld_chmret_leafoff` | Field (shared from factorial) | `R_Patches/` | Gold-standard baseline |
 | `nwi_chmret_leafoff` | NWI, paired to field locations | `R_Patches_NWI/` | Operational stale-label baseline |
-| `nwiextra_chmret_leafoff` | NWI, ~2× (paired + extra same-HUC12 locations) | `R_Patches_NWIextra/` | Quantity test: can more NWI reach field skill? |
+| `nwiextra_chmret_leafoff` | NWI, ~2× (1378 = paired ∪ extra same-HUC12 locations) | `R_Patches_NWI/` ∪ `R_Patches_NWIextra/` | Quantity test: can more NWI reach field skill? |
 | `nwifield_chmret_leafoff` | Field ∪ non-overlapping NWI | `R_Patches/` + `R_Patches_NWIextra/` | Hybrid: does adding NWI to field help? |
 | `flddeg_chmret_leafoff` | Field, degraded to NWI wetland prevalence | `R_Patches/` + code | Quantity-vs-correctness control |
 
@@ -158,23 +160,31 @@ its own results subtree.
 
 ## 4. Decisions (all settled)
 
-### 4.1 Label storage — **DECIDED: separate directories, aligned by a location key**
+### 4.1 Label storage — **DECIDED: separate directories, directory-aware keys**
 v1 stored multiple label bands (`MOD_CLASS_FLD/_NWI/_FLDDEG`) in one merged patch file, so alignment
-was free. **v2 uses one directory per label source** because the NWI patch *count* varies (the `extra`
-set has ~2× as many patches, at new locations), which a single fixed-grid file cannot express:
+was free. **v2 uses one directory per label source** because the NWI patch *count* varies (the quantity
+test needs ~2× as many patches, at new locations), which a single fixed-grid file cannot express. As
+built (verified on disk 2026-07-06, 689 patches each):
 
 - `R_Patches/` — field-verified patches (label band `MOD_CLASS` = the field label).
-- `R_Patches_NWI/` — NWI patches at the **same locations** as `R_Patches` (paired; `MOD_CLASS` = NWI
-  label per the 4.2 semantics).
-- `R_Patches_NWIextra/` — NWI patches: the paired set **plus** additional patches at **new locations
-  within the same HUC12 watersheds** (~2× total).
+- `R_Patches_NWI/` — NWI patches at the **same locations** as `R_Patches` (paired 1:1; `MOD_CLASS` = NWI
+  label per the 4.2 semantics). Filename = `"NWI_"` + the field basename.
+- `R_Patches_NWIextra/` — NWI patches at **new locations within the same HUC12 watersheds**,
+  **geographically disjoint** from field/NWI (0 patch-window overlap; nearest ≥ 258 m). This directory
+  holds the *extra* locations only; the **~2× quantity pool is `R_Patches_NWI ∪ R_Patches_NWIextra`
+  (1378 distinct footprints)**, assembled at config time (`nwiextra` patch_dirs), not stored redundantly.
 
-Separate directories reintroduce the alignment hazard v1 avoided. The safeguard is a **location key**:
-the patch filename encodes `..._cluster_<C>_huc_<H>_patch_<N>_256m.tif`, so
-`(cluster, huc, patch, dims)` — equivalently, the filename with its source prefix stripped — uniquely
-identifies a footprint. **Same key across directories ⇒ same ground, pixel-for-pixel** (the preflight
-*verifies* this; §5 Phase 0). This key is what lets the field test set be applied to NWI-trained models
-and what proves the paired `nwi`-vs-`fld` contrast is clean.
+Separate directories reintroduce the alignment hazard v1 avoided. Two **directory-aware** relations
+replace the (broken) filename-substring key — see the 4.5 keying note for why `cluster_..._patch_N` is
+*not* a valid identity:
+
+- **Filename pairing (field↔NWI):** `nwi_field_twin()` strips exactly one leading `"NWI_"`, recovering
+  the field basename (verified 1:1 over 689, incl. the 252 NWI-sourced field patches whose twin is
+  double-prefixed `NWI_NWI_…`). **Paired twin ⇒ same ground, pixel-for-pixel** (preflight verifies; §5
+  Phase 0). This is what lets the field test set judge NWI-trained models and proves the `nwi`-vs-`fld`
+  contrast is clean.
+- **HUC12 geography (`NWIextra`):** `huc12_of()` — `NWIextra` shares no footprint with field, so its
+  leakage guard is watershed-level, never filename-based.
 
 `flddeg` is **not** a directory: it is a seeded in-memory relabel of `R_Patches` field labels on the
 train/val partition (Phase 1.3), so its footprints and test set are trivially field-aligned.
@@ -212,30 +222,51 @@ The single most likely silent failure in v2 is a test patch leaking into a train
 separate directories. The rule:
 
 1. Compute the split **once on `R_Patches` (field)** with `create_data_splits(seed)` →
-   `train_fld` / `val_fld` / `test_fld` **sets of location keys**.
+   `train_fld` / `val_fld` / `test_fld` **sets of field basenames** (`field_key()` = the raw
+   `R_Patches` basename; each of the 689 is unique — see the keying note below).
 2. **`test_fld` is the test set for every config and both modes** — always drawn from `R_Patches`
    (field labels, undegraded).
-3. Each config's **train/val pools are drawn from its own label directory but filtered to exclude every
-   `test_fld` location key** (and, for degrade, only the train/val partition is relabeled).
-4. **Hard preflight assertion:** no `test_fld` key appears in any config's train or val pool.
+3. Each config's **train/val pools are drawn from its own label directory and filtered clear of the
+   `test_fld` footprints** using the *source-appropriate* key (below): paired filenames for
+   `fld`/`nwi`/`flddeg`, HUC12 geography for `nwiextra`/`nwifield`. For degrade, only the train/val
+   partition is relabeled.
+4. **Hard preflight assertion:** no `test_fld` footprint reaches any config's train or val pool under
+   its guard.
 
-> **Spatial-leakage note (open sub-decision, flagged not blocked).** `R_Patches_NWIextra` adds patches
-> in the **same HUC12s** as field test patches, so patch-level holdout can place a training patch
-> spatially adjacent to a test patch (autocorrelation leakage). Default v2 uses **patch-level** holdout
-> (matches v1, keeps `nwi`-vs-`fld` paired). A **HUC12-level** holdout (hold entire test HUC12s out of
-> every training pool) is the stricter alternative; run it as a robustness variant if the `nwiextra`
-> gain looks too good. Record which regime was used in the manifest.
+> **Keying note (corrected 2026-07-06, was the v1→v2 keying bug).** Do **not** key patches by the
+> `cluster_..._patch_N` substring: it drops the source-dataset prefix (`ADK_WCT_AJS_`, `gps_jc_`,
+> `NWI_RSM_`, `NEW_AJS_`, …), which is identity-bearing — every source restarts `patch_N` inside a
+> cluster+HUC. On the real data that substring is neither unique within `R_Patches` (56 collisions)
+> nor comparable across directories (594 *spurious* field↔`NWIextra` "matches"). Two distinct relations
+> replace it (`dl_experiment_config.py`): **filename pairing** for field↔NWI — `R_Patches_NWI` is
+> exactly `"NWI_"` + the field basename, so `nwi_field_twin()` strips exactly one leading `NWI_`
+> (verified 1:1 over all 689, including the 252 NWI-sourced field patches whose twin is double-prefixed
+> `NWI_NWI_…`); and **HUC12 geography** for the `NWIextra` leakage guard via `huc12_of()`.
+
+> **Spatial-leakage sub-decision — DECIDED (2026-07-06): run both, HUC12 is the headline.**
+> `R_Patches_NWIextra` is geographically **distinct** from field (0 patch-window overlap; nearest field
+> patch ≥ 258 m > the 256 m patch width, so hard/pixel leakage is already zero) yet shares **all 29
+> HUC12s**, so a training patch can sit in the *same watershed* as a test patch (soft autocorrelation
+> leakage). `LEAKAGE_GUARD` (in `dl_experiment_config.py`, `--leakage-guard` override) selects the
+> regime: **`huc12`** (default, headline) drops every `NWIextra` patch sharing a HUC12 with a `test_fld`
+> patch — the conservative, reviewer-proof number; **`coord`** (sensitivity run) drops only `NWIextra`
+> patches whose 256 m window overlaps a `test_fld` patch (currently none, so it keeps ~all extra data).
+> Agreement between the two shows the `nwiextra` quantity gain is real, not autocorrelation. The regime
+> is recorded in every manifest.
 
 ### 4.6 `nwiextra` and `nwifield` pool construction — **DECIDED**
-Both resolve through the location key against the field split (4.5); test is always `R_Patches[test_fld]`.
+Test is always `R_Patches[test_fld]`. Because `NWIextra` is a **new-ground, independent-namespace**
+directory (never a filename match to field — see the 4.5 keying note), its pools are filtered by the
+**HUC12 leakage guard**, not by filename subtraction:
 
-- **`nwiextra`** — train/val pool = **all** `R_Patches_NWIextra` keys **not** in `test_fld`, split into
-  train/val by seed (~82/18 of the non-test pool, mirroring 70/15 of the whole). Isolates the effect of
-  NWI *quantity* at fixed correctness.
-- **`nwifield`** — train/val pool = field-labeled `R_Patches[train_fld ∪ val_fld]` **∪** NWI-labeled
-  `R_Patches_NWIextra` keys that have **no field patch** and are not in `test_fld`. Non-overlapping by
-  construction (field label wins wherever a field patch exists). Isolates whether adding NWI *coverage*
-  to a field core helps.
+- **`nwiextra`** — train/val pool = **`R_Patches_NWI ∪ R_Patches_NWIextra`** (1378 footprints, ~2× the
+  689-patch `nwi` pool) with every HUC12 holding a `test_fld` patch dropped under `LEAKAGE_GUARD`, split
+  into train/val by seed (~82/18 of the surviving pool, mirroring 70/15 of the whole). Contrast against
+  `nwi` (same labels, 1× count) isolates the effect of NWI *quantity* at fixed correctness.
+- **`nwifield`** — train/val pool = field-labeled `R_Patches[train_fld ∪ val_fld]` **∪** the
+  `nwiextra` pool above (same HUC12 guard). The union is disjoint by construction — `NWIextra`
+  footprints never coincide with field ones (≥ 258 m apart), so there is no label conflict to arbitrate.
+  Isolates whether adding NWI *coverage* to a field core helps.
 
 ---
 
@@ -247,12 +278,14 @@ The label-provenance axis only means something if NWI and field labels are judge
 field pixels**. Build/extend `dl_preflight_check.py` to hard-fail before GPU time. v2 assertions
 (rewritten for separate directories):
 
-- [ ] **Location-key parity (paired sources).** Every key in `R_Patches` exists in `R_Patches_NWI`, and
-      `R_Patches_NWIextra` ⊇ `R_Patches_NWI` keys. Report and fail on differences. `R_Patches_NWIextra`
-      *may* add keys (the "extra" locations); those extra keys must all fall in HUC12s present in
-      `R_Patches`.
-- [ ] **Identical footprints per shared key.** For each key present in two directories, the field and
-      NWI rasters share CRS, transform, width, height, and nodata — same grid, pixel-for-pixel.
+- [ ] **Field↔NWI pairing parity (paired sources).** `{nwi_field_twin(f) : f ∈ R_Patches_NWI}` equals
+      `{field_key(f) : f ∈ R_Patches}` exactly (verified 1:1 over 689). Report and fail on any asymmetry.
+      Do **not** compare `R_Patches_NWIextra` by filename — it is an independent `patch_N` namespace;
+      instead assert `{huc12_of(f) : f ∈ R_Patches_NWIextra} ⊆ {huc12_of(f) : f ∈ R_Patches}` (all extra
+      ground lies in field HUC12s — verified: 29/29 shared, 0 extra-only).
+- [ ] **Identical footprints per paired twin.** For each field↔NWI twin, the two rasters share CRS,
+      transform, width, height, and nodata — same grid, pixel-for-pixel. (`NWIextra` has no field twin
+      by design — 0 shared centroids — so it is exempt from this pixel-parity check.)
 - [ ] **Predictor parity.** All 17 predictor bands present and named exactly as the pipeline expects,
       identical across directories. Authoritative set = `predictor_names` in
       `multiclass_normalization_stats_wp0.5.json`: `DEM, slope_local, Geomorph_local, flowacc, twi, CHM,
@@ -261,10 +294,11 @@ field pixels**. Build/extend `dl_preflight_check.py` to hard-fail before GPU tim
 - [ ] **Label-value sanity.** Every label band contains only `{0,1,2,3,255}`; flag stray values and
       report per-directory class prevalence so the `flddeg` degradation target (NWI wetland prevalence)
       is *measured*, not assumed. In `binary` mode, assert the remap yields only `{0,1,255}`.
-- [ ] **NWI ignore-mask match.** For each paired key, the NWI 255 mask equals the field 255 mask.
+- [ ] **NWI ignore-mask match.** For each paired twin, the NWI 255 mask equals the field 255 mask.
 - [ ] **Field-anchored split alignment.** For a given seed, `test_fld` is identical across all configs
-      and both modes, and **no `test_fld` key appears in any config's resolved train/val pool** (the
-      4.5 leakage guard — the headline gate).
+      and both modes, and **no `test_fld` footprint reaches any config's resolved train/val pool** under
+      its guard — filename identity for `fld`/`nwi`/`flddeg`, and no `test_fld` HUC12 in the
+      `nwiextra`/`nwifield` pool under `LEAKAGE_GUARD` (the 4.5 leakage guard — the headline gate).
 - [ ] **Channel sanity, per mode.** `config_in_channels("fld_chmret_leafoff")` resolves to **26** for
       both the multiclass and binary masters (predictors are mode-invariant).
 - [ ] **NWI labels generated** with 4.2 semantics (non-wetland→3, no-data→255) before the check can go
@@ -279,8 +313,10 @@ with one-hot expansion via `compute_in_channels` (`dl_band_utils.py`). Unit chec
 
 **1.2 Directory-based label source + field-anchored split.** This replaces v1's label-band toggle. Add
 a **`dl_patch_pools.py`** (or extend `create_data_splits`) that, given `(config, seed, mode)`, returns
-`train/val/test` file lists per Decisions 4.5–4.6: field split computed on `R_Patches`, train/val pulled
-from the config's label directory filtered by location key, **test always `R_Patches[test_fld]`**. A
+`train/val/test` file lists per Decisions 4.5–4.6: field split computed on `R_Patches` (by `field_key`),
+train/val pulled from the config's label directory(ies) filtered by the source-appropriate guard
+(filename pairing for `fld`/`nwi`/`flddeg`, `LEAKAGE_GUARD` HUC12 geography for `nwiextra`/`nwifield`),
+**test always `R_Patches[test_fld]`**. A
 config→directory(+rule) registry lives in `dl_experiment_config.py` (extends `CONFIGS`), so the datamodule
 never hardcodes a path. The loss mask is `ignore_index=255` for all sources (no per-source remap, per 4.2).
 
@@ -375,7 +411,7 @@ is a directory walk.
 
 | Phase | Deliverable | Touches |
 |---|---|---|
-| 0 | Preflight rewrite: location-key parity, footprint match, predictor parity, label values, NWI mask, **field-anchored split + leakage guard**, per-mode 26-ch sanity | `dl_preflight_check.py` |
+| 0 | Preflight rewrite: field↔NWI pairing parity + `NWIextra` HUC12⊆field, footprint match, predictor parity, label values, NWI mask, **field-anchored split + leakage guard**, per-mode 26-ch sanity | `dl_preflight_check.py` |
 | 1.1 | Band-subset selection + channel recompute | `dl_experiment_config.py`, `dl_band_utils.py` |
 | 1.2 | **Directory-based label source + field-anchored, leakage-safe split** | new `dl_patch_pools.py`, `dl_02_dataset.py`, `dl_experiment_config.py` (config→dir registry) |
 | 1.3 | Seeded degradation (train/val only) | new `dl_degrade_labels.py` |
@@ -439,7 +475,7 @@ grid before the other so a partial run still yields a complete multiclass factor
   SHAP is GPU-side before teardown.
 
 ### 8.6 Feasibility checklist
-- [ ] `R_Patches_NWI` + `R_Patches_NWIextra` generated (4.2 semantics), location keys aligned
+- [ ] `R_Patches_NWI` + `R_Patches_NWIextra` generated (4.2 semantics); field↔NWI pairing verified 1:1, `NWIextra` HUC12s ⊆ field
 - [ ] `binary_*` stats masters built; both masters pass the 26-ch sanity
 - [ ] Preflight GREEN for all 8 configs, both modes (esp. the leakage guard)
 - [ ] Repo + 3 patch dirs rsynced to `/workdir/$USER`; image loaded via `docker1`
@@ -492,8 +528,9 @@ no mechanism code is changed yet.**
 - `LABEL_SOURCE_ALIASES` becomes vestigial (band-based); replace its role with the directory registry.
 
 ### 10.2 Split/data layer
-- **New `dl_patch_pools.py`**: `resolve_pools(config, seed) -> (train_files, val_files, test_files)`
-  implementing Decisions 4.5–4.6 with the location-key filter. Single place the leakage guard lives;
+- **New `dl_patch_pools.py`**: `resolve_pools(config, seed, leakage_guard=LEAKAGE_GUARD) -> (train_files,
+  val_files, test_files)` implementing Decisions 4.5–4.6 with the directory-aware guards (`field_key` /
+  `nwi_field_twin` filename pairing + `huc12_of` HUC12 holdout). Single place the leakage guard lives;
   the preflight imports it so preflight and training agree by construction.
 - **`dl_02_dataset.py`**: `create_data_splits` / `create_dataloaders` accept explicit file lists (from
   `resolve_pools`) instead of globbing one `patches_dir`; keep the current single-dir path as the
@@ -571,8 +608,13 @@ guide should be a new doc or a §11.7 added post-implementation).
 ---
 
 ## 12. Open items before build (not blocking config setup)
-- [ ] Confirm `R_Patches_NWIextra` naming reuses the location key exactly (source-prefix aside) so the
-      preflight can align it — currently only `R_Patches` + `R_Patches_NWI` exist on disk.
-- [ ] Sub-decision 4.5: patch-level (default) vs HUC12-level holdout for the `nwiextra`/`nwifield`
-      spatial-leakage risk — decide before the first `nwiextra` run (record in manifest either way).
+- [x] **All three patch dirs verified on disk (2026-07-06, 689 each).** Uniform 18-band schema (17
+      predictors + `MOD_CLASS`); channel matrix passes; field↔NWI paired 1:1; `NWIextra` = 689 new
+      locations (0 field overlap, all 29 HUC12s ⊆ field). Superseded the location-key scheme with
+      directory-aware keys (`field_key`/`nwi_field_twin`/`huc12_of`) after finding the `cluster_..._patch_N`
+      substring collides 56× within `R_Patches` and spuriously "matches" 594 `NWIextra` patches.
+- [x] **`nwiextra` = 2× pool DECIDED (2026-07-06):** trains on `R_Patches_NWI ∪ R_Patches_NWIextra`
+      (1378), not `NWIextra` alone (689 = 1×). Config updated.
+- [x] **Sub-decision 4.5 DECIDED (2026-07-06):** run both regimes, **HUC12 holdout is the headline**
+      (`LEAKAGE_GUARD="huc12"`), `coord` as a sensitivity run; recorded in every manifest.
 - [ ] Phase 3 analysis scope (mode comparison + label-gradient contrasts) — user to expand before build.

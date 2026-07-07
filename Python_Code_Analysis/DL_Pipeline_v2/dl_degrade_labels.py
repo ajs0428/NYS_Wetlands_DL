@@ -1,187 +1,228 @@
 """
-dl_degrade_labels.py  (Phase 1.3)
+dl_degrade_labels.py  (factorial v2, plan Phase 1.3)
 
-Build the `flddeg` label: the quantity-vs-correctness control. It takes the
-field label and randomly remaps field WETLAND pixels -> UPL until the global
-wetland prevalence drops to the NWI source's prevalence -- so flddeg has NWI's
-*amount* of wetland but field's *correctness* on the wetland pixels it keeps. If
-flddeg (NWI quantity, right pixels) beats nwi (NWI quantity, wrong pixels), the
-NWI gap is about correctness, not quantity.
+The `flddeg` label degrade: a seeded routine that randomly remaps field *wetland*
+pixels -> UPL until the wetland prevalence matches NWI's measured prevalence,
+applied to the TRAIN/VAL partition only (the test set is always undegraded field).
+This isolates label *correctness/prevalence* from label *quantity* -- `flddeg`
+trains on the same field footprints as `fld` but with NWI-like wetland prevalence.
 
-The remap is GLOBAL and seeded: every field wetland pixel across all patches is
-pooled, and exactly the number needed to hit the target prevalence is flipped,
-chosen by a single seeded RNG. UPL and ignore (NaN) pixels are never touched;
-flipped pixels become UPL (correctness of the survivors is preserved). The result
-is written as a MOD_CLASS_FLDDEG band beside MOD_CLASS / MOD_CLASS_NWI in each
-merged patch, and the seed + achieved prevalence are recorded in a manifest.
+v2 note: unlike the v1 tool (which MATERIALIZED a MOD_CLASS_FLDDEG band into the
+merged patch dir), plan Decision 4.1 makes flddeg an IN-MEMORY relabel -- there is
+no flddeg directory. This module provides the `label_transform` that
+WetlandPatchDataset applies at load time (train/val only);
+create_dataloaders_from_pools auto-builds one for the flddeg config.
 
-Target prevalence is MEASURED from the MOD_CLASS_NWI band in the same patches --
-not hardcoded -- so it tracks whatever NWI labels are present.
+Design points:
+  * Direction: degrade only makes sense when field wetland prevalence EXCEEDS
+    NWI's (NWI omits wetlands). flip_prob = 1 - nwi_wet/field_wet, clamped at 0.
+    If NWI >= field (no omission signal), flip_prob is 0 and flddeg collapses to
+    fld -- make_degrader warns loudly rather than fabricating a degrade.
+  * Prevalence is measured DIRECTLY from the patch directories (modal 256x256, the
+    same patches training sees), so it is robust to stale stats files.
+  * Mode-aware: applied AFTER the dataset's binary remap, so it degrades in the
+    live label space -- multiclass wetland ids {0,1,2}->3, binary {0}->1. The flip
+    probability is identical in both modes (binary WET == the 3 multiclass wetland
+    classes over the same pixels).
+  * Deterministic per patch: the RNG is seeded from (base_seed, label bytes), so a
+    given patch degrades identically every epoch and reproducibly across runs, and
+    the achieved prevalence is stable. Record base_seed + flip_prob in the manifest.
 
 Usage:
-    python dl_degrade_labels.py --dry-run        # report target + flip count
-    python dl_degrade_labels.py --seed 0         # write MOD_CLASS_FLDDEG
+    python dl_degrade_labels.py --mode multiclass --seed 0     # measure + dry-run
 """
 
 import argparse
-import json
-import shutil
-import sys
+import hashlib
 from pathlib import Path
+from typing import Dict, Sequence, Tuple
 
 import numpy as np
 import rasterio
-from tqdm import tqdm
-
-from dl_band_utils import load_band_config
-
-FIELD_BAND = "MOD_CLASS"
-NWI_BAND = "MOD_CLASS_NWI"
-FLDDEG_BAND = "MOD_CLASS_FLDDEG"
-_SHOW_BARS = sys.stderr.isatty()
 
 
-def class_indices(band_config: dict):
-    """(wetland class indices, UPL index) from the configured class names."""
-    names = band_config["class_names"]
-    upl = names.index("UPL")
-    wet = [i for i in range(len(names)) if i != upl]
-    return wet, upl
+# --- prevalence & flip probability -------------------------------------------
+
+def measure_wetland_fraction(
+    patch_dir: Path, label_band: str = "MOD_CLASS",
+    wetland_ids: Sequence[int] = (0, 1, 2), patch_size: int = 256,
+) -> Tuple[float, int, int, int]:
+    """Aggregate wetland pixel fraction over a directory's modal-size patches.
+
+    Off-size patches are skipped to match the training dataset's modal-size filter,
+    so the measured prevalence reflects what actually trains. Returns
+    (wetland_fraction, wetland_px, labeled_px, n_patches_used).
+    """
+    files = sorted(Path(patch_dir).glob("*.tif"))
+    wet = lab = used = 0
+    for f in files:
+        with rasterio.open(f) as s:
+            if s.height != patch_size or s.width != patch_size:
+                continue
+            idx = list(s.descriptions).index(label_band) + 1
+            a = s.read(idx)
+        v = a[~np.isnan(a)].astype(np.int64)
+        lab += int(v.size)
+        wet += int(np.isin(v, wetland_ids).sum())
+        used += 1
+    if lab == 0:
+        raise ValueError(f"no labeled pixels found under {patch_dir}")
+    return wet / lab, wet, lab, used
 
 
-def read_label(path: Path, band: str) -> np.ndarray:
-    with rasterio.open(path) as s:
-        idx = list(s.descriptions).index(band) + 1
-        return s.read(idx)
+def flip_prob(field_wet: float, nwi_wet: float) -> float:
+    """P(flip a field wetland pixel -> UPL) to bring field prevalence down to NWI's.
+
+    Clamped to [0, 1]; 0 when NWI wetland prevalence >= field's (no omission to
+    emulate). Derivation: after flipping wetland at prob p, wetland fraction =
+    field_wet*(1-p); set equal to nwi_wet -> p = 1 - nwi_wet/field_wet.
+    """
+    if field_wet <= 0:
+        raise ValueError("field wetland fraction must be > 0")
+    return float(min(1.0, max(0.0, 1.0 - nwi_wet / field_wet)))
 
 
-def main():
-    root = Path(__file__).resolve().parents[2]
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--patches-dir", type=Path,
-                   default=root / "Data/Training_Data/R_Patches_Merged")
-    p.add_argument("--seed", type=int, default=0, help="RNG seed for the global flip")
-    p.add_argument("--config-json", type=Path, default=None)
-    p.add_argument("--overwrite", action="store_true",
-                   help="Rewrite MOD_CLASS_FLDDEG if it already exists")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Compute target/flip count and write nothing")
-    args = p.parse_args()
+# --- the transform -----------------------------------------------------------
 
-    band_config = load_band_config(args.config_json)
-    wet_classes, upl = class_indices(band_config)
-    wet_set = set(wet_classes)
+class LabelDegrader:
+    """Deterministic per-patch wetland->UPL relabel (the flddeg `label_transform`).
 
-    patches = sorted(args.patches_dir.glob("*.tif"))
-    if not patches:
-        print(f"No patches in {args.patches_dir}"); return 1
+    __call__(labels) flips each wetland pixel to UPL independently with probability
+    `p`, preserving ignore_index and non-wetland pixels. The RNG is seeded from a
+    hash of (base_seed, label bytes), so the same patch yields the same degrade on
+    every epoch and every run at a given seed. Operates in whatever label space it
+    is handed (multiclass or post-binary-remap) via `wetland_ids`/`upl_id`.
+    """
 
-    # --- Pass 1: pool field wetland pixels, measure target from NWI. ---
-    print(f"[1/2] Scanning {len(patches)} patches (field wetland pool + NWI target)")
-    field_wet = field_labeled = nwi_wet = nwi_labeled = 0
-    per_patch_wet = []  # wetland pixel count per patch, in file order
-    for pf in tqdm(patches, desc="    scanning", disable=not _SHOW_BARS):
-        with rasterio.open(pf) as s:
-            descs = list(s.descriptions)
-            if FLDDEG_BAND in descs and not args.overwrite and not args.dry_run:
-                print(f"\n  [stop] {pf.name} already has {FLDDEG_BAND}; use --overwrite.")
-                return 1
-            fld = s.read(descs.index(FIELD_BAND) + 1)
-            nwi = s.read(descs.index(NWI_BAND) + 1)
-        fld_valid = ~np.isnan(fld)
-        nwi_valid = ~np.isnan(nwi)
-        fld_i = fld[fld_valid].astype(np.int64)
-        nwi_i = nwi[nwi_valid].astype(np.int64)
-        w = int(np.isin(fld_i, wet_classes).sum())
-        per_patch_wet.append(w)
-        field_wet += w
-        field_labeled += int(fld_valid.sum())
-        nwi_wet += int(np.isin(nwi_i, wet_classes).sum())
-        nwi_labeled += int(nwi_valid.sum())
+    def __init__(self, p: float, wetland_ids: Sequence[int], upl_id: int,
+                 ignore_index: int = 255, base_seed: int = 0):
+        self.p = float(p)
+        self.wetland_ids = tuple(int(i) for i in wetland_ids)
+        self.upl_id = int(upl_id)
+        self.ignore_index = int(ignore_index)
+        self.base_seed = int(base_seed)
 
-    field_prev = field_wet / field_labeled
-    target_prev = nwi_wet / nwi_labeled
-    target_wet = round(target_prev * field_labeled)
-    n_flip = field_wet - target_wet
+    def _rng(self, labels: np.ndarray) -> np.random.Generator:
+        h = hashlib.blake2b(
+            np.ascontiguousarray(labels).tobytes(),
+            digest_size=8,
+            key=int(self.base_seed).to_bytes(8, "little", signed=False),
+        ).digest()
+        return np.random.default_rng(int.from_bytes(h, "little"))
 
-    print(f"\n  field wetland prevalence: {field_prev:.4f} ({field_wet:,}/{field_labeled:,})")
-    print(f"  NWI    wetland prevalence: {target_prev:.4f} (target)")
-    print(f"  flip {n_flip:,} of {field_wet:,} field wetland pixels -> UPL "
-          f"(achieved prevalence {(field_wet - max(n_flip,0)) / field_labeled:.4f})")
-    if n_flip <= 0:
-        print("  [note] field is already at or below NWI prevalence; nothing to flip "
-              "(flddeg would equal field).")
-    if args.dry_run:
-        print("\n--dry-run: no files written.")
-        return 0
+    def __call__(self, labels: np.ndarray) -> np.ndarray:
+        if self.p <= 0.0:
+            return labels
+        wet = np.isin(labels, self.wetland_ids)
+        n = int(wet.sum())
+        if n == 0:
+            return labels
+        flip = self._rng(labels).random(n) < self.p
+        out = labels.copy()
+        rows, cols = np.where(wet)
+        out[rows[flip], cols[flip]] = self.upl_id
+        return out
 
-    # --- Global seeded selection of which pooled wetland pixels to flip. ---
-    rng = np.random.default_rng(args.seed)
-    r = rng.random(field_wet)
-    selected = np.zeros(field_wet, dtype=bool)
-    if n_flip > 0:
-        # the n_flip pixels with the smallest random keys
-        selected[np.argpartition(r, n_flip - 1)[:n_flip]] = True
 
-    # --- Pass 2: write MOD_CLASS_FLDDEG per patch from its segment of the pool. ---
-    print(f"\n[2/2] Writing {FLDDEG_BAND} (seed={args.seed})")
-    offset = 0
-    flipped_total = 0
-    for pf, w in tqdm(list(zip(patches, per_patch_wet)), desc="    writing",
-                      disable=not _SHOW_BARS):
-        with rasterio.open(pf) as s:
-            data = s.read()
-            descs = list(s.descriptions)
-            profile = s.profile.copy()
-        fld = data[descs.index(FIELD_BAND)]
-        flddeg = fld.copy()
-        wet_mask = np.isin(np.where(np.isnan(fld), -1, fld).astype(np.int64), wet_classes)
-        wet_flat = np.flatnonzero(wet_mask.ravel())          # raster-scan order
-        assert len(wet_flat) == w, f"{pf.name}: wetland count drift"
-        seg = selected[offset:offset + w]
-        offset += w
-        flip_flat = wet_flat[seg]
-        if flip_flat.size:
-            flat = flddeg.ravel()
-            flat[flip_flat] = upl
-            flddeg = flat.reshape(flddeg.shape)
-            flipped_total += int(flip_flat.size)
+# --- mode helpers & factory --------------------------------------------------
 
-        # Rewrite patch: existing bands + MOD_CLASS_FLDDEG (or overwrite the band).
-        if FLDDEG_BAND in descs:
-            out_data = data.copy()
-            out_data[descs.index(FLDDEG_BAND)] = flddeg
-            out_descs = descs
-        else:
-            out_data = np.concatenate([data, flddeg[None]], axis=0)
-            out_descs = descs + [FLDDEG_BAND]
-        profile.update(count=out_data.shape[0])
-        tmp = pf.with_suffix(".tif.tmp")
-        with rasterio.open(tmp, "w", **profile) as dst:
-            dst.write(out_data)
-            for i, d in enumerate(out_descs):
-                dst.set_band_description(i + 1, d)
-        shutil.move(str(tmp), str(pf))
+def ids_for_mode(mode: str) -> Tuple[Tuple[int, ...], int]:
+    """(wetland_ids, upl_id) in the live label space for a classification mode.
 
-    achieved = (field_wet - flipped_total) / field_labeled
-    manifest = {
-        "patches_dir": str(args.patches_dir), "seed": args.seed,
-        "field_prevalence": round(field_prev, 6),
-        "target_prevalence_nwi": round(target_prev, 6),
-        "achieved_prevalence": round(achieved, 6),
-        "field_wetland_px": field_wet, "flipped_px": flipped_total,
-        "labeled_px": field_labeled, "added_band": FLDDEG_BAND,
-        "upl_index": upl, "wetland_indices": sorted(wet_set),
-    }
-    (args.patches_dir / "degrade_manifest.json").write_text(json.dumps(manifest, indent=2))
-    print(f"\nDone. Flipped {flipped_total:,} px -> achieved prevalence {achieved:.4f} "
-          f"(target {target_prev:.4f}).")
-    print(f"Manifest: {args.patches_dir / 'degrade_manifest.json'}")
-    print("Next: re-run dl_make_config_stats.py --all (builds flddeg weights) and "
-          "dl_preflight_check.py --require-all-labels.")
-    return 0
+    Matches the stats class_names order: multiclass [EMW,FSW,SSW,UPL] -> {0,1,2}->3;
+    binary [WET,UPL] (after the dataset remap) -> {0}->1.
+    """
+    if mode == "binary":
+        return (0,), 1
+    if mode == "multiclass":
+        return (0, 1, 2), 3
+    raise ValueError(f"unknown mode {mode!r}")
 
+
+def make_degrader(
+    mode: str, seed: int, data_root=None,
+    field_dir: str = "R_Patches", nwi_dir: str = "R_Patches_NWI",
+    ignore_index: int = 255, patch_size: int = 256, verbose: bool = True,
+) -> LabelDegrader:
+    """Build the flddeg degrader for a mode+seed, measuring prevalence from disk.
+
+    Wetland prevalence is measured in MULTICLASS terms (EMW+FSW+SSW) for both field
+    and NWI -- identical to the binary WET fraction over the same pixels -- so the
+    flip probability is mode-independent; only the flipped label ids differ.
+    """
+    import dl_patch_pools as P
+    root = Path(data_root or P.DEFAULT_DATA_ROOT)
+    wet_ids, upl = ids_for_mode(mode)
+
+    field_wet, _, _, nf = measure_wetland_fraction(root / field_dir, patch_size=patch_size)
+    nwi_wet, _, _, nn = measure_wetland_fraction(root / nwi_dir, patch_size=patch_size)
+    p = flip_prob(field_wet, nwi_wet)
+    if verbose:
+        print(f"[degrade] mode={mode} seed={seed} | field_wet={field_wet:.4f} "
+              f"({nf} patches) nwi_wet={nwi_wet:.4f} ({nn}) -> flip_prob={p:.4f} "
+              f"(achieved wetland ~{field_wet * (1 - p):.4f})")
+        if p == 0.0:
+            print("[degrade][WARN] NWI wetland prevalence >= field's: no omission to "
+                  "emulate, flip_prob=0 -> flddeg is identical to fld. Check the data "
+                  "or drop the flddeg config.")
+    return LabelDegrader(p, wet_ids, upl, ignore_index=ignore_index, base_seed=seed)
+
+
+def degraded_class_counts(
+    field_counts: Dict[int, int], p: float,
+    wetland_ids: Sequence[int], upl_id: int,
+) -> Dict[int, int]:
+    """Expected class counts after degrade (for building flddeg's stats/weights).
+
+    Analytic: each wetland class keeps a (1-p) share; the removed wetland pixels
+    accrue to UPL. Seed-independent in expectation, so one stats file serves all
+    seeds. Returns integer-rounded counts.
+    """
+    out = dict(field_counts)
+    moved = 0.0
+    for w in wetland_ids:
+        c = field_counts.get(w, 0)
+        out[w] = int(round(c * (1.0 - p)))
+        moved += c * p
+    out[upl_id] = int(round(field_counts.get(upl_id, 0) + moved))
+    return out
+
+
+# --- CLI (inspection / dry-run) ----------------------------------------------
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import dl_patch_pools as P
+    ap = argparse.ArgumentParser(description="Inspect / dry-run the flddeg label degrade")
+    ap.add_argument("--mode", choices=["multiclass", "binary"], default="multiclass")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--data-root", default=str(P.DEFAULT_DATA_ROOT))
+    ap.add_argument("--sample", type=int, default=40,
+                    help="patches to dry-run the achieved prevalence on (default 40)")
+    args = ap.parse_args()
+
+    root = Path(args.data_root)
+    deg = make_degrader(args.mode, args.seed, data_root=root)
+
+    # Dry-run: apply to a sample of field patches, report achieved wetland fraction.
+    wet_ids, upl = ids_for_mode(args.mode)
+    remap_binary = args.mode == "binary"
+    files = sorted((root / "R_Patches").glob("*.tif"))[: args.sample]
+    before = after = lab = 0
+    for f in files:
+        with rasterio.open(f) as s:
+            if s.height != 256 or s.width != 256:
+                continue
+            idx = list(s.descriptions).index("MOD_CLASS") + 1
+            a = s.read(idx)
+        y = np.where(np.isnan(a), 255, a).astype(np.int64)
+        if remap_binary:
+            y = np.where(np.isin(y, [0, 1, 2]), 0, np.where(y == 3, 1, y))
+        v = y[y != 255]
+        lab += int(v.size)
+        before += int(np.isin(v, wet_ids).sum())
+        yd = deg(y)
+        vd = yd[yd != 255]
+        after += int(np.isin(vd, wet_ids).sum())
+    if lab:
+        print(f"[dry-run] {len(files)} field patches: wetland {before / lab:.4f} -> "
+              f"{after / lab:.4f} after degrade (flip_prob={deg.p:.4f})")

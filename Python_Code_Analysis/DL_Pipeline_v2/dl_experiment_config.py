@@ -65,32 +65,63 @@ LABEL_SOURCE_ALIASES: Dict[str, List[str]] = {
 # --- v2 data-source registry (plan §10.1) -------------------------------------
 # Which patch directory(ies) supply TRAIN/VAL for each label source, and the
 # pool rule that resolves them against the field-anchored split (plan 4.5-4.6).
-# The TEST set is ALWAYS FIELD_TEST_DIR at the seed's test_fld keys, regardless
+# The TEST set is ALWAYS FIELD_TEST_DIR at the seed's test_fld patches, regardless
 # of source, so every config is judged on the same gold-standard field pixels.
 # Directory names are relative to Data/Training_Data/. Consumed by the Phase 1.2
 # resolver (dl_patch_pools.py) and the Phase 2 runner via `--emit`.
 #
+# Two DIFFERENT identity relations are in play (see the keying helpers below);
+# conflating them was the v1->v2 keying bug. A naive "cluster_..._patch_N" key
+# collides 56x WITHIN R_Patches and spuriously "matches" 594 geographically
+# distinct NWIextra patches to field, because each source dataset numbers patch_N
+# in its own namespace:
+#   * field<->NWI PAIRING  uses field_key()/nwi_field_twin() -- R_Patches_NWI is
+#     exactly "NWI_" + the field basename (a verified 1:1 footprint pairing).
+#     NOTE 252 field patches are themselves NWI-sourced and start with "NWI_", so
+#     their twin is DOUBLE-prefixed ("NWI_NWI_AJS_..."); the mapping strips
+#     exactly ONE leading "NWI_" from an NWI-DIR file and never touches field
+#     basenames -- hence the pairing is directory-aware, not a blind strip.
+#   * NWIextra LEAKAGE      uses huc12_of() -- NWIextra is NEW ground (0 patch
+#     overlap with field, nearest >=258 m) but shares all 29 HUC12s, so the
+#     guard is geographic (HUC12 by default), never filename-based.
+#
 #   pool_rule semantics (implemented in dl_patch_pools.py):
-#     anchored      train/val = <dir>[train_fld / val_fld keys]              (fld_*)
-#     paired        train/val = R_Patches_NWI[train_fld / val_fld keys]      (nwi)
-#     extra_pool    train/val = R_Patches_NWIextra[keys not in test_fld],
-#                               seed-split                                   (nwiextra)
+#     anchored      train/val = R_Patches[train_fld / val_fld basenames]     (fld_*)
+#     paired        train/val = R_Patches_NWI paired via field_pair_key to
+#                               train_fld / val_fld                          (nwi)
+#     extra_pool    train/val = (R_Patches_NWI U R_Patches_NWIextra) minus
+#                               LEAKAGE_GUARD (HUC12s holding a test_fld patch),
+#                               seed-split -> ~2x NWI quantity test          (nwiextra)
 #     hybrid_union  train/val = R_Patches[train/val_fld] (field labels)
-#                               U R_Patches_NWIextra[extra keys, not test]   (nwifield)
+#                               U R_Patches_NWIextra minus LEAKAGE_GUARD     (nwifield)
 #     degrade       train/val = R_Patches[train/val_fld] with seeded
 #                               wetland->UPL relabel                         (flddeg)
 FIELD_TEST_DIR: str = "R_Patches"
 
+# Geographic guard keeping the NWIextra train pool clear of the field TEST set
+# (plan Decision 4.5, resolved: run both, HUC12 as the headline). "huc12" = drop
+# any extra patch sharing a HUC12 with a test_fld patch (conservative; guards
+# spatial autocorrelation). "coord" = drop only extra patches whose 256 m window
+# overlaps a test_fld patch (currently none -> keeps ~all extra; sensitivity
+# run). dl_patch_pools.py honors this default; a --leakage-guard CLI overrides.
+LEAKAGE_GUARD: str = "huc12"
+
 LABEL_SOURCES: Dict[str, dict] = {
     "fld":      {"patch_dirs": ["R_Patches"],                        "pool_rule": "anchored"},
     "nwi":      {"patch_dirs": ["R_Patches_NWI"],                    "pool_rule": "paired"},
-    "nwiextra": {"patch_dirs": ["R_Patches_NWIextra"],               "pool_rule": "extra_pool"},
+    "nwiextra": {"patch_dirs": ["R_Patches_NWI", "R_Patches_NWIextra"], "pool_rule": "extra_pool"},
     "nwifield": {"patch_dirs": ["R_Patches", "R_Patches_NWIextra"],  "pool_rule": "hybrid_union"},
     "flddeg":   {"patch_dirs": ["R_Patches"],                        "pool_rule": "degrade"},
 }
 
-# Directory-independent patch identity: the filename from "cluster_" onward.
-_LOCATION_KEY_RE = re.compile(r"cluster_.*$")
+# --- Patch identity helpers (v2) ----------------------------------------------
+# Do NOT key patches by the "cluster_..._patch_N" substring: it drops the source
+# prefix (ADK_WCT_AJS_, gps_jc_, NWI_RSM_, NEW_AJS_, ...), which is identity-
+# bearing -- every source restarts patch_N within a cluster+HUC, so the substring
+# is neither unique within a directory (56 collisions in R_Patches) nor
+# geographically meaningful across directories (594 false field<->NWIextra hits).
+_NWI_PREFIX_RE = re.compile(r"^NWI_")
+_HUC12_RE = re.compile(r"huc_(\d+)")
 
 
 # --- The 8 configurations (plan Section 2) ------------------------------------
@@ -126,20 +157,42 @@ def resolve_label_band(present_bands, source: str) -> Optional[str]:
     return None
 
 
-def location_key(path: str) -> str:
-    """Directory-independent patch identity: the filename from 'cluster_' onward.
+def field_key(path: str) -> str:
+    """Field-space identity of a R_Patches patch: its basename, unchanged.
 
-    Field and NWI copies of the same footprint differ only by a leading source
-    prefix -- e.g. 'NWI_ADK_WCT_AJS_cluster_11_..._patch_10_256m.tif' vs
-    'ADK_WCT_AJS_cluster_11_..._patch_10_256m.tif' -- so the substring from
-    'cluster_' to the end uniquely keys a ground footprint across directories
-    (plan Decision 4.1 / 4.5). Raises if the naming convention is not met.
+    This anchors the field split (each of the 689 field basenames is unique) and
+    is the target that nwi_field_twin() maps R_Patches_NWI patches onto. Do NOT
+    apply this to R_Patches_NWI files -- 252 field patches are NWI-sourced and
+    legitimately start with "NWI_", so field identity is the raw basename, never
+    a prefix-stripped one.
     """
-    name = os.path.basename(path)
-    m = _LOCATION_KEY_RE.search(name)
+    return os.path.basename(path)
+
+
+def nwi_field_twin(path: str) -> str:
+    """Map an R_Patches_NWI file to the field basename it pairs with.
+
+    R_Patches_NWI names are exactly "NWI_" + the field basename (verified 1:1),
+    so stripping exactly ONE leading "NWI_" recovers the field twin -- including
+    the double-prefixed "NWI_NWI_..." twins of the 252 NWI-sourced field patches.
+    Only valid on R_Patches_NWI files; for R_Patches use field_key(), and for
+    R_Patches_NWIextra (independent patch_N namespace) use huc12_of().
+    """
+    return _NWI_PREFIX_RE.sub("", os.path.basename(path), count=1)
+
+
+def huc12_of(path: str) -> str:
+    """The 12-digit HUC code in a patch filename (e.g. '042900030101').
+
+    Geographic key for the NWIextra leakage guard (LEAKAGE_GUARD='huc12'):
+    NWIextra patches are new footprints but share HUC12s with field, so the guard
+    drops any extra patch whose HUC12 holds a field test patch. Raises if the
+    filename carries no 'huc_<digits>' token.
+    """
+    m = _HUC12_RE.search(os.path.basename(path))
     if not m:
-        raise ValueError(f"no 'cluster_...' location key in filename: {name!r}")
-    return m.group(0)
+        raise ValueError(f"no 'huc_<digits>' token in filename: {os.path.basename(path)!r}")
+    return m.group(1)
 
 
 def config_label_source(name: str) -> str:

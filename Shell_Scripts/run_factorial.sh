@@ -1,53 +1,61 @@
 #!/usr/bin/env bash
-# run_factorial.sh -- drive the whole factorial: every (config x seed) cell.
+# run_factorial.sh -- drive the whole factorial-v2 grid: every (mode x seed x config).
 #
-# Phase 2.2 driver. Walks a fixed order (seed outer, config inner -- per Decision
-# 4.3, so after seed 0 every config has one replicate -> a full factorial cell
-# early) and calls run_config.sh, whose skip-completed guard no-ops finished
-# cells. Safe to stop (end of a BioHPC reservation) and rerun later; it resumes.
+# Phase 2.2 driver. Walks mode outer, seed middle, config inner: within a mode,
+# after seed 0 every config has one replicate -> a full single-mode factorial
+# early (Decision 4.3). Calls run_config.sh, whose skip-completed guard no-ops
+# finished cells, so it is safe to stop (end of a BioHPC reservation) and rerun.
 #
-# Long job (8-40 GPU-h): launch inside screen/tmux on the GPU node so an SSH
-# disconnect does not kill it (AGENTS.md Long-Running Jobs).
+# v2 default is BOTH classification modes (8 configs x 2 modes x 3 seeds = 48
+# cells). Set MODES="multiclass" to run one mode.
 #
-# Usage:    run_factorial.sh
-# Knobs:    SEEDS="0 1 2"   CONFIGS="<subset>"   plus all run_config.sh knobs
-#           DRY_RUN=1 to print the plan without training.
+# Long job: launch inside screen/tmux on the GPU node so an SSH disconnect does
+# not kill it.
+#
+# Usage:  run_factorial.sh
+# Knobs:  MODES="multiclass binary"  SEEDS="0 1 2"  CONFIGS="<subset>"
+#         LEAKAGE_GUARD=huc12  plus all run_config.sh knobs.  DRY_RUN=1 to plan.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PYTHON="${PYTHON:-python}"
 
+MODES="${MODES:-multiclass binary}"
 SEEDS="${SEEDS:-0 1 2}"
 CONFIGS="${CONFIGS:-$("$PYTHON" "$REPO_ROOT/Python_Code_Analysis/DL_Pipeline_v2/dl_experiment_config.py" --list)}"
 
-# --list is newline-separated; env overrides are space-separated. Normalize both
-# to whitespace-split arrays (a here-string read stops at the first newline).
-read -ra SEED_ARR <<< "${SEEDS//$'\n'/ }"
+# Normalize newline/space-separated lists to arrays.
+read -ra MODE_ARR   <<< "${MODES//$'\n'/ }"
+read -ra SEED_ARR   <<< "${SEEDS//$'\n'/ }"
 read -ra CONFIG_ARR <<< "${CONFIGS//$'\n'/ }"
-total=$(( ${#SEED_ARR[@]} * ${#CONFIG_ARR[@]} ))
+total=$(( ${#MODE_ARR[@]} * ${#SEED_ARR[@]} * ${#CONFIG_ARR[@]} ))
 
-echo "Factorial: ${#CONFIG_ARR[@]} configs x ${#SEED_ARR[@]} seeds = $total cells"
+echo "Factorial v2: ${#MODE_ARR[@]} modes x ${#SEED_ARR[@]} seeds x ${#CONFIG_ARR[@]} configs = $total cells"
+echo "modes:   ${MODE_ARR[*]}"
 echo "seeds:   ${SEED_ARR[*]}"
 echo "configs: ${CONFIG_ARR[*]}"
+echo "guard:   ${LEAKAGE_GUARD:-huc12}"
 echo
 
 done_n=0; failed=()
-for seed in "${SEED_ARR[@]}"; do
-    for config in "${CONFIG_ARR[@]}"; do
-        done_n=$((done_n + 1))
-        echo "#### [$done_n/$total] $config / seed$seed ####"
-        if "$SCRIPT_DIR/run_config.sh" "$config" "$seed"; then
-            :
-        else
-            echo "[FAIL] $config / seed$seed (continuing)"
-            failed+=("$config/seed$seed")
-        fi
+for mode in "${MODE_ARR[@]}"; do
+    for seed in "${SEED_ARR[@]}"; do
+        for config in "${CONFIG_ARR[@]}"; do
+            done_n=$((done_n + 1))
+            echo "#### [$done_n/$total] $mode / $config / seed$seed ####"
+            if MODE="$mode" "$SCRIPT_DIR/run_config.sh" "$config" "$seed"; then
+                :
+            else
+                echo "[FAIL] $mode / $config / seed$seed (continuing)"
+                failed+=("$mode/$config/seed$seed")
+            fi
+        done
     done
 done
 
 echo
-echo "================ factorial summary ================"
+echo "================ factorial v2 summary ================"
 echo "cells attempted: $total"
 if (( ${#failed[@]} )); then
     echo "FAILED (${#failed[@]}): ${failed[*]}"

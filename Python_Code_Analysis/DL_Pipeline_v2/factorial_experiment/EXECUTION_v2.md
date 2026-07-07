@@ -9,10 +9,11 @@ The operational runbook for **version 2**. Design/rationale lives in
 > for v2**. Use this file for v2. To run anything v1, check the tag out in a
 > worktree (`git worktree add ../wetlands-v1 factorial-v1`).
 
-> **⏳ Build status.** Several steps below depend on v2 mechanism code that is not
-> built yet — each is tagged **⏳ pending (§N)** and cross-referenced to the plan
-> phase. Steps with no tag work today. §2 is the live checklist. **No experiment
-> is run until the user launches it** — Claude prepares scripts only.
+> **✅ Build status.** All v2 mechanism code is built and verified: preflight
+> GREEN (0 warnings, 692-patch set), 48-cell dry-run confirmed. The only
+> remaining **⏳** tags mark **post-training analysis** (mode-aware aggregation +
+> viz-notebook root hoist), which doesn't block launch. **No experiment is run
+> until the user launches it** — Claude prepares scripts only.
 
 ---
 
@@ -24,9 +25,9 @@ cd /ibstorage/anthony/NYS_Wetlands_DL
 export EXP_VERSION=v2
 PIPE=Python_Code_Analysis/DL_Pipeline_v2
 python $PIPE/dl_experiment_config.py                      # sanity: 8-config channel matrix ✅ works
-python $PIPE/dl_make_config_stats.py --all --mode multiclass   # ⏳ pending (§1.4): per-config stats
-python $PIPE/dl_make_config_stats.py --all --mode binary       # ⏳ pending (§1.4)
-python $PIPE/dl_preflight_check.py --require-all-labels         # ⏳ pending (§0 rewrite): must be GREEN
+python $PIPE/dl_make_config_stats.py --all --mode multiclass   # ✅ done: per-config stats
+python $PIPE/dl_make_config_stats.py --all --mode binary       # ✅ done
+python $PIPE/dl_preflight_check.py                              # ✅ GREEN (v2 flags: --modes/--seeds/--sample; v1's --require-all-labels is gone)
 
 # --- stage repo + THREE patch dirs onto the GPU node's /workdir ----------
 rsync -av --exclude '.git' --exclude '.venv' \
@@ -42,7 +43,7 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
   -e EXP_VERSION=v2 \
   -e RESULTS_DIR=/app/Models/factorial_results_v2 \
   nys-wetlands-dl \
-  bash Shell_Scripts/run_factorial.sh          # ⏳ pending (§2): walks (mode × config × seed)
+  bash Shell_Scripts/run_factorial.sh          # ✅ built, dry-run verified: walks (mode × config × seed)
 # Ctrl-b then d to detach; tmux attach -t factorial_v2 to return
 
 # --- pull results back to /ibstorage (mode-tokened tree) -----------------
@@ -83,18 +84,19 @@ these on the user's go; the user runs them.
 
 | Piece | State | Plan ref |
 |---|---|---|
-| `dl_experiment_config.py` — v2 matrix, dir registry, `location_key`, `--emit --mode` | ✅ done | §10.1 |
-| `R_Patches`, `R_Patches_NWI` (554 each, paired, `MOD_CLASS`) | ✅ on disk | 4.1 |
-| `R_Patches_NWIextra` (~2×, extra same-HUC12 locations) | ⏳ user building | 4.1/8.1 |
-| `dl_patch_pools.py` — field-anchored split + leakage guard | ⏳ to build | 1.2 / 4.5–4.6 |
-| `dl_02_dataset.py` — accept explicit file lists + `mode` | ⏳ to build | 1.2 |
-| `dl_degrade_labels.py` — seeded train/val-only degrade | ⏳ to build | 1.3 |
-| `dl_make_config_stats.py --mode` + `binary` master | ⏳ to build | 1.4 |
-| `dl_preflight_check.py` — rewrite for separate dirs + leakage gate | ⏳ to build | §0 |
-| `run_config.sh` — `MODE` + `STATS_DIR` knobs, mode-tokened `RESULTS_DIR`, resolve `PATCH_DIRS`/`POOL_RULE` | ⏳ to build | 2.1 |
-| `run_factorial.sh` — outer `MODE` loop | ⏳ to build | 2.2 |
-| wrappers: drop `run_fld_chm_*.sh`; add `run_nwiextra_*.sh`, `run_nwifield_*.sh` | ⏳ to build | 10.4 |
-| §11.5 gaps promoted to required: `STATS_DIR` knob, viz-notebook root hoist | ⏳ to build | §11 |
+| `dl_experiment_config.py` — v2 matrix, dir registry, dir-aware keys (`field_key`/`nwi_field_twin`/`huc12_of`), `LEAKAGE_GUARD`, `--emit --mode` | ✅ done | §10.1 |
+| `R_Patches`, `R_Patches_NWI` (692 each, paired 1:1, `MOD_CLASS`) | ✅ on disk, verified | 4.1 |
+| `R_Patches_NWIextra` (689 new locations; ∪ NWI = 1381 ≈ 2×) | ✅ on disk, verified | 4.1/8.1 |
+| `dl_patch_pools.py` — field-anchored split + dir-aware leakage guard (HUC12 default) | ✅ done, validated | 1.2 / 4.5–4.6 |
+| `dl_02_dataset.py` — `create_dataloaders_from_pools()` (resolve_pools + per-config/mode stats) + `label_transform` hook | ✅ done | 1.2 |
+| `dl_04_train_lightning.py` — `WetlandPoolsDataModule` + `--config/--mode/--stats-dir/--leakage-guard` (legacy path intact) | ✅ done | 1.2/2.1 |
+| `dl_degrade_labels.py` — seeded in-memory train/val degrade (`LabelDegrader` + `make_degrader`), auto-wired into pools for `flddeg` | ✅ done, validated | 1.3 |
+| `dl_make_config_stats.py --mode` — all-8 per-config stats both modes incl flddeg; **normalization from the multiclass master for both modes**, **all weights recomputed from disk** (fixes stale field weights + drops the stale binary master) | ✅ done, 16 files built | 1.4 |
+| `dl_preflight_check.py` — v2 rewrite: dir presence, off-size flag, predictor parity, field↔NWI pairing+footprint identity, label values/prevalence, 255-mask, split+leakage gate, channels+stats presence | ✅ done, GREEN (0 warnings on the final 692-patch set) | §0 |
+| `run_config.sh` — `MODE`/`LEAKAGE_GUARD`/`STATS_DIR`/`DATA_ROOT` knobs, mode-tokened `RESULTS_DIR/<mode>/<config>/seed<k>`, v2 trainer CLI, metrics/manifest from the trainer's field-test journal (no separate dl_05) | ✅ done, dry-run verified | 2.1 |
+| `run_factorial.sh` — outer `MODE` loop (2×3×8 = 48 cells, resumable) | ✅ done, dry-run verified | 2.2 |
+| wrappers: dropped `run_fld_chm_*.sh`; added `run_nwiextra_*.sh`/`run_nwifield_*.sh`; all 8 loop modes×seeds | ✅ done | 10.4 |
+| §11.5 gaps promoted to required: `STATS_DIR` knob (✅ in `run_config.sh`); viz-notebook root hoist + mode-aware `dl_08` aggregation | ⏳ post-training | §11 |
 
 ---
 
@@ -133,29 +135,32 @@ PIPE=Python_Code_Analysis/DL_Pipeline_v2
 # 1. Channel matrix self-check (source of truth)                     ✅ works today
 python $PIPE/dl_experiment_config.py
 
-# 2. Build the TWO masters (only when a master is stale) — per mode   ⏳ §1.4
+# 2. Rebuild the master (only when the R scan / bands / patches changed)  ✅ done
 python $PIPE/dl_01_compute_statistics.py \
   --patches-dir  Data/Training_Data/R_Patches \
   --global-stats Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json \
   --weight-power 0.5 \
   --output       Data/Training_Data/multiclass_normalization_stats_wp0.5.json
-#   ...and a binary master (predictors identical; class_names/weights differ).
+#   ONE master only: dl_make_config_stats derives BOTH modes' normalization from
+#   the multiclass master (binary class weights are recomputed from disk).
 
-# 3. Derive per-config stats from the masters, per mode              ⏳ §1.4
+# 3. Derive per-config stats from the master, per mode               ✅ done (16 files)
 python $PIPE/dl_make_config_stats.py --all --mode multiclass
 python $PIPE/dl_make_config_stats.py --all --mode binary
 
-# 4. Preflight — HARD GATE before any GPU time                       ⏳ §0 rewrite
-python $PIPE/dl_preflight_check.py --require-all-labels
+# 4. Preflight — HARD GATE before any GPU time                       ✅ GREEN
+python $PIPE/dl_preflight_check.py
+#   (v1's --require-all-labels flag no longer exists; v2 flags: --modes/--seeds/
+#    --sample/--leakage-guard/--data-root/--stats-dir)
 #   v2 asserts: location-key parity (R_Patches ↔ R_Patches_NWI; NWIextra ⊇ NWI),
 #   footprint match per shared key, predictor parity, label values {0,1,2,3,255}
 #   (binary remap → {0,1,255}), NWI 255-mask == field mask, and the HEADLINE gate:
 #   no test_fld key in any config's train/val pool. Must be GREEN for all 8 × 2.
 ```
 
-> Rebuild the masters only when the R scan / bands / patches changed. Adding
-> `R_Patches_NWIextra` changes the NWI/nwiextra/nwifield **class weights** (more
-> wetland pixels), so regenerate their per-config stats when it lands.
+> Rebuild the master only when the R scan / bands / patches changed — then rerun
+> steps 3–4. (Done 2026-07 over the final 692-patch set; `R_Patches_NWIextra`'s
+> extra wetland pixels are already folded into the per-config class weights.)
 
 ---
 
@@ -186,7 +191,7 @@ Build/load the image exactly as v1 (`EXECUTION.md` §4): `docker1 load -i …`.
 
 ---
 
-## 6. Launch (inside `tmux`, via `docker1`)   ⏳ §2
+## 6. Launch (inside `tmux`, via `docker1`)   ✅ ready
 
 ```bash
 tmux new -s factorial_v2
@@ -260,7 +265,7 @@ mode axis), which supersedes v1 `EXECUTION.md` §11.4's merge-based prep:
 1. `git tag factorial-v1` + snapshot v1 artifacts — **done** (plan §11 Steps A/B).
 2. `export EXP_VERSION=v2`; derive `RESULTS_DIR=Models/factorial_results_v2`,
    `OUT_DIR=Data/HUC_DL_Predictions_v2`.
-3. Land the §10 code (this file's ⏳ items) in one commit so the preflight stays
+3. Land the §10 code (✅ built; commit pending) in one commit so the preflight stays
    the guardrail.
 4. Prep (§4) → preflight GREEN for 8 × 2 → `DRY_RUN=1` confirm → user runs (§6).
 

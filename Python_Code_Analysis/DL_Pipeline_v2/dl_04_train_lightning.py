@@ -23,7 +23,10 @@ import pandas as pd
 from pathlib import Path
 from typing import Optional
 
-from dl_02_dataset import create_dataloaders, create_kfold_splits, create_fold_dataloaders
+from dl_02_dataset import (
+    create_dataloaders, create_kfold_splits, create_fold_dataloaders,
+    create_dataloaders_from_pools,
+)
 from dl_model_factory import build_net, ARCHITECTURES
 from dl_band_utils import default_stats_path
 from dl_losses import HybridLoss
@@ -80,6 +83,66 @@ class WetlandDataModule(L.LightningDataModule):
         self._val_loader = val_loader
         self._test_loader = test_loader
         self.class_weights = class_weights
+
+    def train_dataloader(self):
+        return self._train_loader
+
+    def val_dataloader(self):
+        return self._val_loader
+
+    def test_dataloader(self):
+        return self._test_loader
+
+
+class WetlandPoolsDataModule(L.LightningDataModule):
+    """Factorial-v2 DataModule: resolves a config's field-anchored pools via
+    create_dataloaders_from_pools (test always field; train/val per the config's
+    label directory + leakage guard). Mode/normalization/weights come from the
+    per-config, per-mode stats files, so no patches_dir or n_patches here."""
+
+    def __init__(
+        self,
+        config: str,
+        seed: int,
+        stats_dir: Path,
+        mode: str = "multiclass",
+        batch_size: int = 16,
+        num_workers: int = 4,
+        weight_power: float = 0.5,
+        leakage_guard: Optional[str] = None,
+        data_root: Optional[Path] = None,
+        label_transform=None,
+    ):
+        super().__init__()
+        self.config = config
+        self.seed = seed
+        self.stats_dir = stats_dir
+        self.mode = mode
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.weight_power = weight_power
+        self.leakage_guard = leakage_guard
+        self.data_root = data_root
+        self.label_transform = label_transform
+        self._train_loader = None
+        self._val_loader = None
+        self._test_loader = None
+        self.class_weights = None
+
+    def setup(self, stage=None):
+        if self._train_loader is not None:
+            return
+        (self._train_loader, self._val_loader, self._test_loader,
+         self.class_weights) = create_dataloaders_from_pools(
+            self.config, self.seed, self.stats_dir,
+            mode=self.mode,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            weight_power=self.weight_power,
+            leakage_guard=self.leakage_guard,
+            data_root=self.data_root,
+            label_transform=self.label_transform,
+        )
 
     def train_dataloader(self):
         return self._train_loader
@@ -329,6 +392,13 @@ def train(
     cat_channels: int = 64,
     deep_supervision: bool = False,
     n_patches: Optional[int] = None,
+    # Factorial v2: when `config` is set, data comes from the field-anchored pools
+    # (WetlandPoolsDataModule) instead of a single patches_dir. stats_path must be
+    # the config's TRAIN_STATS (architecture/mode are read from it).
+    config: Optional[str] = None,
+    stats_dir: Optional[Path] = None,
+    leakage_guard: Optional[str] = None,
+    data_root: Optional[Path] = None,
 ):
     """
     Full training pipeline using PyTorch Lightning.
@@ -381,14 +451,26 @@ def train(
     print(f"Precision: {precision}")
     print(f"{'='*60}\n")
 
-    # Data
-    dm = WetlandDataModule(
-        patches_dir, stats_path,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        seed=seed,
-        n_patches=n_patches,
-    )
+    # Data — factorial-v2 pools when a config is given, else the legacy single dir.
+    if config is not None:
+        if n_patches is not None:
+            print(f"[warn] --n-patches={n_patches} ignored in factorial-v2 pools mode "
+                  f"(pools are resolved from the config).")
+        print(f"Factorial v2: config={config}, seed={seed}, mode={mode}, "
+              f"leakage_guard={leakage_guard or 'default(huc12)'}")
+        dm = WetlandPoolsDataModule(
+            config=config, seed=seed, stats_dir=stats_dir, mode=mode,
+            batch_size=batch_size, num_workers=num_workers,
+            leakage_guard=leakage_guard, data_root=data_root,
+        )
+    else:
+        dm = WetlandDataModule(
+            patches_dir, stats_path,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            seed=seed,
+            n_patches=n_patches,
+        )
     dm.setup()
     class_weights = dm.class_weights
     print(f"Class weights: {class_weights.tolist()}")
@@ -590,6 +672,10 @@ def train(
             "precision": precision,
             "gradient_clip_val": gradient_clip_val,
             "n_patches": n_patches,
+            # Factorial v2 provenance (None for legacy single-dir runs)
+            "factorial_config": config,
+            "classification_mode": mode,
+            "leakage_guard": (leakage_guard or "huc12") if config is not None else None,
         },
         "data_split": data_split,
         "test_metrics": {
@@ -1040,6 +1126,19 @@ if __name__ == "__main__":
                         help="Cap the patch pool to the first N of the seed-shuffled file list "
                              "before the train/val/test split (learning-curve studies). "
                              "Default: use all patches. Ignored in k-fold mode.")
+    # ── Factorial v2 pools mode ──
+    parser.add_argument("--config", type=str, default=None,
+                        help="Factorial-v2 config name; switches data to the field-anchored pools "
+                             "(dl_patch_pools). Overrides --patches-dir/--stats-path/--n-patches/--kfold.")
+    parser.add_argument("--mode", type=str, default="multiclass", choices=["multiclass", "binary"],
+                        help="[--config] Classification mode (selects the per-config stats file)")
+    parser.add_argument("--stats-dir", type=Path, default=Path("Data/Training_Data/stats"),
+                        help="[--config] Directory of per-config stats files")
+    parser.add_argument("--leakage-guard", type=str, default=None, choices=["huc12", "coord"],
+                        help="[--config] Leakage regime (default: dl_experiment_config.LEAKAGE_GUARD)")
+    parser.add_argument("--data-root", type=Path, default=None,
+                        help="[--config] Dir holding the v2 patch directories "
+                             "(default: repo Data/Training_Data)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -1078,7 +1177,25 @@ if __name__ == "__main__":
         n_patches=args.n_patches,
     )
 
-    if args.kfold >= 2:
+    if args.config:
+        # Factorial v2: resolve the config's TRAIN_STATS and hand off to the pools path.
+        import dl_experiment_config as X
+        stats_dir = project_root / args.stats_dir if not args.stats_dir.is_absolute() else args.stats_dir
+        train_stats = stats_dir / X.stats_basename(args.config, mode=args.mode)
+        data_root = None
+        if args.data_root is not None:
+            data_root = (project_root / args.data_root
+                         if not args.data_root.is_absolute() else args.data_root)
+        v2_kwargs = dict(shared_kwargs)
+        v2_kwargs.update(
+            stats_path=train_stats,
+            config=args.config,
+            stats_dir=stats_dir,
+            leakage_guard=args.leakage_guard,
+            data_root=data_root,
+        )
+        train(**v2_kwargs)
+    elif args.kfold >= 2:
         train_kfold(n_folds=args.kfold, **shared_kwargs)
     else:
         train(**shared_kwargs)
