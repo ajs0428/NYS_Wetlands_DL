@@ -16,13 +16,21 @@
 #        python dl_huc_stack.py --huc <huc> --cluster <cluster> \
 #          --data-root <root> --inspect
 #
-# Checkpoint selection: with [seed] given, uses results/<config>/seed<seed>;
-# otherwise picks the seed with the highest macro_f1 from metrics.json.
+# Checkpoint selection: with [seed] given, uses <results>/<config>/seed<seed>;
+# otherwise picks the seed with the highest macro_f1 from metrics.json (reads
+# both the v2 nested test_metrics schema and the flat v1 one).
+#
+# v2: cells live under Models/factorial_results_v2/<MODE>/<config>/seed<k> and
+# predictions land in Data/HUC_DL_Predictions_v2 as DLpred_<mode>_cluster_..._huc_....tif
+# (dl_06b names by the stats' classification_mode and asserts it matches the model).
 #
 # Usage:    run_predict_factorial.sh <config> <cluster> <huc> [seed]
 # Example:  DATA_ROOT=/scratch/NYS_Wetlands_Data \
 #             run_predict_factorial.sh fld_chmret_leafoff 208 041402011002
-# Knobs (env): RESULTS_DIR (default Models/factorial_results, then results/)
+#           MODE=binary run_predict_factorial.sh fld_chmret_leafoff 208 041402011002
+# Knobs (env): MODE(multiclass|binary)
+#              RESULTS_DIR (default Models/factorial_results_v2/<MODE>, falling
+#                back to the v1 Models/factorial_results, then results/)
 #              DATA_ROOT / NYS_WETLANDS_DATA_ROOT  OUT_DIR  PATCH_SIZE  OVERLAP
 #              PYTHON  DRY_RUN
 set -euo pipefail
@@ -37,13 +45,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PIPE="$REPO_ROOT/Python_Code_Analysis/DL_Pipeline_v2"
 STATS_DIR="$REPO_ROOT/Data/Training_Data/stats"
 PYTHON="${PYTHON:-python}"
-OUT_DIR="${OUT_DIR:-$REPO_ROOT/Data/HUC_DL_Predictions}"
+MODE="${MODE:-multiclass}"
+OUT_DIR="${OUT_DIR:-$REPO_ROOT/Data/HUC_DL_Predictions_v2}"
 PATCH_SIZE="${PATCH_SIZE:-128}"
 OVERLAP="${OVERLAP:-64}"
 
-# Where the trained cells live (synced results first, then the live run tree).
+# Where the trained cells live: v2 mode-tokened tree first, then v1 fallbacks.
 if [[ -n "${RESULTS_DIR:-}" ]]; then
-    : # honor explicit override
+    : # honor explicit override (point it at the tree holding <config>/seed<k>)
+elif [[ -d "$REPO_ROOT/Models/factorial_results_v2/$MODE/$CONFIG" ]]; then
+    RESULTS_DIR="$REPO_ROOT/Models/factorial_results_v2/$MODE"
 elif [[ -d "$REPO_ROOT/Models/factorial_results/$CONFIG" ]]; then
     RESULTS_DIR="$REPO_ROOT/Models/factorial_results"
 else
@@ -54,7 +65,7 @@ DATA_ROOT="${DATA_ROOT:-${NYS_WETLANDS_DATA_ROOT:-}}"
 [[ -n "$DATA_ROOT" ]] || { echo "[error] set DATA_ROOT (or NYS_WETLANDS_DATA_ROOT) to the synced source tree"; exit 1; }
 
 # --- Resolve the config's TRAIN_STATS (predictor/channel contract). ---
-eval "$("$PYTHON" "$PIPE/dl_experiment_config.py" --emit "$CONFIG")"
+eval "$("$PYTHON" "$PIPE/dl_experiment_config.py" --emit "$CONFIG" --mode "$MODE")"
 STATS_PATH="$STATS_DIR/$TRAIN_STATS"
 [[ -f "$STATS_PATH" ]] || { echo "[error] missing stats: $STATS_PATH"; exit 1; }
 
@@ -69,11 +80,14 @@ for cell in sorted(root.glob("seed*")):
     m = cell / "metrics.json"
     if not m.exists():
         continue
-    f1 = json.loads(m.read_text()).get("macro_f1", -1.0)
-    if f1 > best_f1:
+    metrics = json.loads(m.read_text())
+    # v2 nests scores under test_metrics; v1 (dl_05) is flat.
+    sc = metrics.get("test_metrics") or metrics
+    f1 = sc.get("macro_f1")
+    if f1 is not None and f1 > best_f1:
         best_f1, best_seed = f1, cell.name.replace("seed", "")
 if best_seed is None:
-    sys.exit("no metrics.json under " + str(root))
+    sys.exit("no usable metrics.json (with macro_f1) under " + str(root))
 print(best_seed)
 PY
 )"
@@ -96,7 +110,7 @@ PY
 )
 
 echo "=============================================================="
-echo " predict:   $CONFIG  seed$SEED   (arch: $MARCH, auto-detected from checkpoint)"
+echo " predict:   $CONFIG  seed$SEED  mode=$MODE   (arch: $MARCH, auto-detected from checkpoint)"
 echo " huc:       cluster $CLUSTER / huc $HUC"
 echo " model:     $CKPT  (bf$BF d$DEPTH)"
 echo " stats:     $TRAIN_STATS"

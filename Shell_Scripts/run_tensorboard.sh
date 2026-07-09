@@ -49,6 +49,9 @@ else
     echo "  - activate the project env:  source .venv/bin/activate, or"
     echo "  - install uv so 'uv run' can sync the project env, or"
     echo "  - make a throwaway venv:  python -m venv tb_env && tb_env/bin/pip install tensorboard"
+    echo "    (RHEL gotcha: if it then dies with 'Duplicate plugins for name projector',"
+    echo "     run 'rm tb_env/lib64' -- the lib64->lib symlink makes importlib.metadata"
+    echo "     see every package twice. Packages physically live in lib/.)"
     exit 1
 fi
 

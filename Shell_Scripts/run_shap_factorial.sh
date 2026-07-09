@@ -13,11 +13,15 @@
 #      mounted volume, where it persists across the container's --rm.
 #
 # Any args are passed straight through to dl_09 (e.g. --configs / --seeds).
+# v2: dl_09 resolves each cell's pools split (dl_patch_pools), covers ALL configs
+# by default (incl. the label-source cells), and takes --mode for the binary tree.
 #
-# Invoke from the GPU node (one short, paste-safe line):
+# Invoke from the GPU node (one short, paste-safe line; once per mode):
 #   docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 #     -v /workdir/$USER/nys_wetlands:/app \
-#     nys-wetlands-dl bash Shell_Scripts/run_shap_factorial.sh
+#     nys-wetlands-dl bash Shell_Scripts/run_shap_factorial.sh \
+#     --results-dir Models/factorial_results_v2/multiclass
+#   ... run_shap_factorial.sh --results-dir Models/factorial_results_v2/binary --mode binary
 #
 # Subset example:
 #   ... bash Shell_Scripts/run_shap_factorial.sh --configs fld_chmret_leafoff --seeds 0
@@ -45,7 +49,7 @@ fi
 
 echo "=============================================================="
 echo " SHAP (factorial)   HOME=$HOME"
-echo " args: ${*:-<defaults: all field configs, every seed present>}"
+echo " args: ${*:-<defaults: all configs, every seed present>}"
 echo "=============================================================="
 
 exec "$PYTHON" "$PIPE/dl_09_shap_factorial.py" "$@"

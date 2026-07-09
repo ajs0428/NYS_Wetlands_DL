@@ -98,7 +98,9 @@ class WetlandPoolsDataModule(L.LightningDataModule):
     """Factorial-v2 DataModule: resolves a config's field-anchored pools via
     create_dataloaders_from_pools (test always field; train/val per the config's
     label directory + leakage guard). Mode/normalization/weights come from the
-    per-config, per-mode stats files, so no patches_dir or n_patches here."""
+    per-config, per-mode stats files, so no patches_dir here. ``n_patches``
+    (learning-curve studies) caps the TRAIN pool only -- val/test stay full so
+    the curve isolates training-data volume."""
 
     def __init__(
         self,
@@ -112,6 +114,7 @@ class WetlandPoolsDataModule(L.LightningDataModule):
         leakage_guard: Optional[str] = None,
         data_root: Optional[Path] = None,
         label_transform=None,
+        n_patches: Optional[int] = None,
     ):
         super().__init__()
         self.config = config
@@ -124,6 +127,7 @@ class WetlandPoolsDataModule(L.LightningDataModule):
         self.leakage_guard = leakage_guard
         self.data_root = data_root
         self.label_transform = label_transform
+        self.n_patches = n_patches
         self._train_loader = None
         self._val_loader = None
         self._test_loader = None
@@ -142,6 +146,7 @@ class WetlandPoolsDataModule(L.LightningDataModule):
             leakage_guard=self.leakage_guard,
             data_root=self.data_root,
             label_transform=self.label_transform,
+            n_patches=self.n_patches,
         )
 
     def train_dataloader(self):
@@ -453,15 +458,14 @@ def train(
 
     # Data — factorial-v2 pools when a config is given, else the legacy single dir.
     if config is not None:
-        if n_patches is not None:
-            print(f"[warn] --n-patches={n_patches} ignored in factorial-v2 pools mode "
-                  f"(pools are resolved from the config).")
         print(f"Factorial v2: config={config}, seed={seed}, mode={mode}, "
-              f"leakage_guard={leakage_guard or 'default(huc12)'}")
+              f"leakage_guard={leakage_guard or 'default(huc12)'}"
+              + (f", n_patches={n_patches} (train pool cap)" if n_patches is not None else ""))
         dm = WetlandPoolsDataModule(
             config=config, seed=seed, stats_dir=stats_dir, mode=mode,
             batch_size=batch_size, num_workers=num_workers,
             leakage_guard=leakage_guard, data_root=data_root,
+            n_patches=n_patches,
         )
     else:
         dm = WetlandDataModule(
@@ -1123,13 +1127,14 @@ if __name__ == "__main__":
                         help="Number of cross-validation folds (0=disabled, default: 0). "
                              "When set (e.g. --kfold 5), runs k-fold CV instead of a single train/val/test split.")
     parser.add_argument("--n-patches", type=int, default=None,
-                        help="Cap the patch pool to the first N of the seed-shuffled file list "
-                             "before the train/val/test split (learning-curve studies). "
-                             "Default: use all patches. Ignored in k-fold mode.")
+                        help="Learning-curve cap. Legacy single-dir mode: first N of the "
+                             "seed-shuffled file list before the train/val/test split. "
+                             "Factorial-v2 pools mode (--config): caps the TRAIN pool only "
+                             "(val/test stay full). Default: use all patches. Ignored in k-fold mode.")
     # ── Factorial v2 pools mode ──
     parser.add_argument("--config", type=str, default=None,
                         help="Factorial-v2 config name; switches data to the field-anchored pools "
-                             "(dl_patch_pools). Overrides --patches-dir/--stats-path/--n-patches/--kfold.")
+                             "(dl_patch_pools). Overrides --patches-dir/--stats-path/--kfold.")
     parser.add_argument("--mode", type=str, default="multiclass", choices=["multiclass", "binary"],
                         help="[--config] Classification mode (selects the per-config stats file)")
     parser.add_argument("--stats-dir", type=Path, default=Path("Data/Training_Data/stats"),

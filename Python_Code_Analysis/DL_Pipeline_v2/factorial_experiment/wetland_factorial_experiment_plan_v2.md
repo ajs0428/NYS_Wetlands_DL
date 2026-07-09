@@ -23,6 +23,12 @@ field-verified labels make that diagnosis trustworthy in a way NWI-trained studi
 This document is the build brief: it specifies the experiment matrix, the pipeline mechanisms to add,
 the shell orchestration, and the output layout.
 
+> **Status (2026-07-09).** The build is done and the grid has run: all mechanism code shipped,
+> preflight GREEN, and the full **R=5 → 80-cell** base grid trained in both modes, with SHAP and the
+> patch-curve / UNet3+ follow-ons complete and HUC inference maps generating. The only open work is the
+> CPU-side aggregation/viz layer — see `EXECUTION_v2.md` §12 for the live punch list. This plan is now
+> the **design of record**; the operational runbook and current status live in `EXECUTION_v2.md` §0.
+
 ### What changed from v1 (at a glance)
 - **Classification mode is now an axis:** every config runs in **both** `multiclass` and `binary`
   (Decision 4.4). Run count doubles; results and stats are separated by a mode token.
@@ -365,16 +371,20 @@ resolved patch directory + pool rule, **leakage regime** (patch-level vs HUC12-l
 rule, seed, loss params, `weight_power` (0.5) + resolved class weights, stats filename, architecture,
 git commit, and (flddeg) degradation seed + achieved prevalence. Every result self-describing.
 
-### Phase 3 — Aggregation & SHAP *(placeholder — user to expand)*
+### Phase 3 — Aggregation & SHAP *(SHAP done; aggregation/viz in progress)*
 
-Draft scope only — **hold for the user's additional steps before building:**
+**Status (2026-07-09):** SHAP is complete (80/80 cells, both modes). Aggregation
+and viz still need the schema/mode fixes tracked as the punch list in
+`EXECUTION_v2.md` §12 — that section, not this one, is the live to-do. Scope:
 - Aggregate `results/<mode>/<config>/seed<k>/metrics.json` into per-mode factorial tables (mean ± sd,
   paired across seeds), plus a **mode-comparison** table (binary vs multiclass on the shared configs).
+  Reader must unwrap the **v2 nested `test_metrics` schema** (see §12 gotcha); `dl_08` still assumes flat.
 - Headline contrasts: LiDAR (`nolidar→chmret`), leaf-off main effect, LiDAR×leaf-off interaction, and
   the **label gradient** (`nwi` → `nwiextra` → `nwifield` → `flddeg` → `fld`) — the quantity-vs-
   correctness curve.
 - SHAP on the field-trained models (both modes), one-hot bands aggregated back to band level. **GPU-side**
-  (it backprops); aggregation is pure pandas, **CPU-side** after sync-back.
+  (it backprops, ✅ done); aggregation is pure pandas, **CPU-side** after sync-back.
+- The cross-mode comparison table is the one piece still **awaiting the user's analysis spec**.
 
 ---
 
@@ -438,9 +448,9 @@ single-GPU serialization, not compute.**
 ### 8.1 Data readiness — the real gate
 - **Feature-ablation axis (configs 1–4, field labels): ready** once the field patches carry the 17
   predictors. Needs Phase 1.1 + 1.4 only.
-- **Label-provenance block (configs 5–8): blocked on the NWI directories.** `R_Patches_NWI` exists;
-  `R_Patches_NWIextra` is still being built (paired + same-HUC12 extras). Preflight cannot go green for
-  5–8 until both exist with 4.2 semantics. **Track NWI-directory generation as the gating task.**
+- **Label-provenance block (configs 5–8): ready (was the gating task).** `R_Patches_NWI` (692) and
+  `R_Patches_NWIextra` (689 new same-HUC12 locations) are both built with 4.2 semantics and pass
+  preflight; all 8 configs trained in both modes.
 - **Binary mode:** no new data — flows from the existing `binary_mapping`. Needs the `binary_*` stats
   masters (Phase 1.4).
 
@@ -474,16 +484,16 @@ grid before the other so a partial run still yields a complete multiclass factor
   Supports `--dry-run` / `--metrics-only` / per-config filtering. Aggregation is CPU-side post-sync;
   SHAP is GPU-side before teardown.
 
-### 8.6 Feasibility checklist
-- [ ] `R_Patches_NWI` + `R_Patches_NWIextra` generated (4.2 semantics); field↔NWI pairing verified 1:1, `NWIextra` HUC12s ⊆ field
-- [ ] `binary_*` stats masters built; both masters pass the 26-ch sanity
-- [ ] Preflight GREEN for all 8 configs, both modes (esp. the leakage guard)
-- [ ] Repo + 3 patch dirs rsynced to `/workdir/$USER`; image loaded via `docker1`
-- [ ] `run_factorial.sh` launched in `screen`/`tmux`; resumable across windows
-- [ ] R chosen (start R=3); identical field split verified across configs/modes by the preflight
-- [ ] `rsync_results.sh` dry-run round-trips the mode-tokened tree
-- [ ] SHAP scheduled GPU-side; aggregation CPU-side post-sync
-- [ ] Heavy jobs run by the **user** from prepared scripts
+### 8.6 Feasibility checklist  *(all cleared — 2026-07-09)*
+- [x] `R_Patches_NWI` + `R_Patches_NWIextra` generated (4.2 semantics); field↔NWI pairing verified 1:1, `NWIextra` HUC12s ⊆ field
+- [x] `binary_*` stats masters built; both masters pass the 26-ch sanity
+- [x] Preflight GREEN for all 8 configs, both modes (esp. the leakage guard)
+- [x] Repo + 3 patch dirs rsynced to `/workdir/$USER`; image loaded via `docker1`
+- [x] `run_factorial.sh` launched in `screen`/`tmux`; resumable across windows
+- [x] R chosen (**ran R=5**); identical field split verified across configs/modes by the preflight
+- [x] `rsync_results.sh` dry-run round-trips the mode-tokened tree
+- [x] SHAP run GPU-side (80/80); aggregation CPU-side post-sync — **the last open step (§12)**
+- [x] Heavy jobs run by the **user** from prepared scripts
 
 ---
 
@@ -495,8 +505,11 @@ constants unless noted. Pick the **mode** explicitly (default `multiclass`) — 
 threads through.
 
 - **Phase 4 — patch-count learning curve** → `Models/results_patchcurve_v2/<mode>/<config>_n<level>/seed<k>/`.
-  `--n-patches` caps the seed-shuffled pool before the split. Levels `{100,200,300,400,500,full}`.
-  For NWI configs the curve also answers Q1's *quantity* question directly (`nwiextra` levels).
+  `--n-patches` caps the **TRAIN pool only** (seeded-shuffle prefix of the resolved pool, nested per
+  seed: level 100 ⊂ 200 ⊂ …); val and the field test set stay full, so every level is scored on the
+  base grid's exact test patches and the curve isolates training-data volume. Levels
+  `{100,200,300,400,500,full}`. For NWI configs the curve also answers Q1's *quantity* question
+  directly (`nwiextra` levels).
 - **Phase 5 — UNet3+ comparison** → `Models/results_arch_v2/<mode>/<config>_unet3plus/seed<k>/`.
   Same capacity (bf64/d5), deep-supervision ON, `16-mixed` + batch 8 (→4 on OOM). U-Net arm is the base
   grid.
@@ -617,4 +630,7 @@ guide should be a new doc or a §11.7 added post-implementation).
       (1378), not `NWIextra` alone (689 = 1×). Config updated.
 - [x] **Sub-decision 4.5 DECIDED (2026-07-06):** run both regimes, **HUC12 holdout is the headline**
       (`LEAKAGE_GUARD="huc12"`), `coord` as a sensitivity run; recorded in every manifest.
-- [ ] Phase 3 analysis scope (mode comparison + label-gradient contrasts) — user to expand before build.
+- [~] Phase 3 analysis scope — **partly resolved.** The label-gradient + per-mode aggregation contrasts
+      are specified (Phase 3 / `EXECUTION_v2.md` §12); the `dl_08` schema fix and `dl_10` mode wiring are
+      mechanical and pending. The **cross-mode (binary vs multiclass) comparison table** is the only piece
+      still awaiting the user's analysis spec.

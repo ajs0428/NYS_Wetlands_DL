@@ -110,17 +110,19 @@ def build_channel_mapping(predictor_names, normalization, in_channels):
 
 def run_shap(
     model_path: Path,
-    patches_dir: Path,
-    stats_path: Path,
-    output_dir: Path,
-    seed: int,
-    n_background: int,
-    n_test: int,
-    crop_size: int,
-    base_filters: int,
-    depth: int,
-    use_aspp: bool,
-    aspp_rates,
+    patches_dir: Path = None,
+    stats_path: Path = None,
+    output_dir: Path = None,
+    seed: int = 420,
+    n_background: int = 50,
+    n_test: int = 20,
+    crop_size: int = 128,
+    base_filters: int = 32,
+    depth: int = 4,
+    use_aspp: bool = False,
+    aspp_rates=(6, 12, 18),
+    background_pool=None,
+    test_pool=None,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = model_path.stem
@@ -152,8 +154,21 @@ def run_shap(
 
     band_channel_ranges = build_channel_mapping(predictor_names, normalization, in_channels)
 
-    # Data
-    train_files, _, test_files = create_data_splits(patches_dir, seed=seed)
+    # Data. Explicit pools take precedence (factorial v2: the caller resolves the
+    # cell's actual train/test file lists via dl_patch_pools.resolve_pools, so
+    # background comes from what the model trained on and SHAP test patches are
+    # the cell's held-out field patches). Without pools, fall back to the legacy
+    # seeded random split over patches_dir (v1 / standalone CLI behavior).
+    if background_pool is not None or test_pool is not None:
+        if not (background_pool and test_pool):
+            raise ValueError("background_pool and test_pool must be provided together")
+        train_files, test_files = list(background_pool), list(test_pool)
+        split_source = "pools"
+    else:
+        if patches_dir is None:
+            raise ValueError("either patches_dir or background_pool/test_pool is required")
+        train_files, _, test_files = create_data_splits(patches_dir, seed=seed)
+        split_source = "random"
     random.seed(seed)
     bg_files = random.sample(train_files, min(n_background, len(train_files)))
     test_files = random.sample(test_files, min(n_test, len(test_files)))
@@ -273,6 +288,7 @@ def run_shap(
         "n_test": int(test_data.shape[0]),
         "crop_size": crop_size,
         "seed": seed,
+        "split_source": split_source,
         "n_channels": {
             predictor_names[i]: int(n_channels[i]) for i in range(n_bands)
         },

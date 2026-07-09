@@ -3,9 +3,9 @@
 # architecture (vs U-Net) drives accuracy.
 #
 # Follow-on study (plan Phase 5). The U-Net baseline for this config already
-# lives in results/<config>/ (the base factorial, R=3), so this only adds the
-# UNet3+ arm on the SAME seeds and the SAME seed-determined test patches -> a
-# paired, apples-to-apples comparison.
+# lives in Models/factorial_results_v2/<mode>/<config>/ (the base grid), so this
+# only adds the UNet3+ arm on the SAME seeds and the SAME field-anchored pools
+# split -> a paired, apples-to-apples comparison.
 #
 # Fair comparison: capacity is held at the baseline's bf=64/d5; only the
 # architecture changes. Deep supervision is ON by default (treated as part of
@@ -14,7 +14,8 @@
 # Each seed defers to the shared idempotent run_config.sh with:
 #   ARCH=unet3plus  DEEP_SUPERVISION=1  CAT_CHANNELS=64
 #   CELL_NAME=<config>_unet3plus        -> distinct cell dir
-#   RESULTS_DIR=results_arch
+#   RESULTS_DIR=Models/results_arch_v2  (run_config adds the /<mode>/ level
+#                                        -> <root>/<mode>/<config>_unet3plus/seed<k>)
 #
 # Memory: UNet3+ at bf=64/d5 is heavy. Defaults to 16-mixed (factorial default)
 # and a reduced batch size (8); drop to BATCH_SIZE=4 if you hit OOM. eval auto-
@@ -22,8 +23,8 @@
 #
 # Usage:    run_arch_compare.sh <config>
 # Example:  run_arch_compare.sh fld_chmret_leafoff
-# Knobs:    SEEDS="0 1 2"  CAT_CHANNELS=64  DEEP_SUPERVISION=1  BATCH_SIZE=8
-#           plus all run_config.sh env.  DRY_RUN=1 to print the plan.
+# Knobs:    MODE=multiclass|binary  SEEDS="0 1 2"  CAT_CHANNELS=64  DEEP_SUPERVISION=1
+#           BATCH_SIZE=8  plus all run_config.sh env.  DRY_RUN=1 to print the plan.
 #
 # Long job: launch inside screen/tmux on the GPU node.
 set -uo pipefail
@@ -34,7 +35,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SEEDS="${SEEDS:-0 1 2}"
-RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/results_arch}"
+MODE="${MODE:-multiclass}"
+RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/Models/results_arch_v2}"
+BASELINE_DIR="$REPO_ROOT/Models/factorial_results_v2/$MODE/$CONFIG"
 
 # UNet3+ knobs (fair comparison: bf/depth inherited from run_config.sh defaults).
 export ARCH="unet3plus"
@@ -42,16 +45,16 @@ export DEEP_SUPERVISION="${DEEP_SUPERVISION:-1}"
 export CAT_CHANNELS="${CAT_CHANNELS:-64}"
 export BATCH_SIZE="${BATCH_SIZE:-8}"
 export CELL_NAME="${CONFIG}_unet3plus"
-export RESULTS_DIR
+export RESULTS_DIR MODE
 
 read -ra SEED_ARR <<< "$SEEDS"
 total=${#SEED_ARR[@]}
 
-echo "Architecture comparison: config=$CONFIG  arch=$ARCH (deep_supervision=$DEEP_SUPERVISION)"
+echo "Architecture comparison: config=$CONFIG  mode=$MODE  arch=$ARCH (deep_supervision=$DEEP_SUPERVISION)"
 echo "seeds:    ${SEED_ARR[*]}   ($total cells)"
 echo "batch:    $BATCH_SIZE   cat_channels=$CAT_CHANNELS"
-echo "results:  $RESULTS_DIR/$CELL_NAME"
-echo "baseline: $REPO_ROOT/results/$CONFIG  (U-Net, same seeds -- already trained)"
+echo "results:  $RESULTS_DIR/$MODE/$CELL_NAME"
+echo "baseline: $BASELINE_DIR  (U-Net, same seeds -- already trained)"
 echo
 
 done_n=0; failed=()
@@ -74,6 +77,7 @@ if (( ${#failed[@]} )); then
     echo "Re-run run_arch_compare.sh $CONFIG to retry only the unfinished cells."
     exit 1
 fi
-echo "all cells complete. Compare U-Net vs UNet3+ with:"
+echo "all cells complete. Compare U-Net vs UNet3+ on the CPU node after sync-back with:"
 echo "  python $REPO_ROOT/Python_Code_Analysis/DL_Pipeline_v2/dl_08b_aggregate_patchcurve.py \\"
-echo "      --arch-compare --config $CONFIG --unet-dir $REPO_ROOT/results --unet3plus-dir $RESULTS_DIR"
+echo "      --arch-compare --config $CONFIG --unet-dir $REPO_ROOT/Models/factorial_results_v2/$MODE \\"
+echo "      --unet3plus-dir $RESULTS_DIR/$MODE"

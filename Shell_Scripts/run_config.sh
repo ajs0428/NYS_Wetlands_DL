@@ -26,6 +26,8 @@
 #
 # Follow-on-study knobs (default to base-factorial behavior when unset):
 #   ARCH=unet|unet3plus  CAT_CHANNELS=64  DEEP_SUPERVISION=0|1
+#   N_PATCHES=<n>        learning curve: cap the TRAIN pool to n (seeded-shuffle
+#                        prefix, nested per seed); val/test stay full.
 #   CELL_NAME=<dir>      cell dir under RESULTS_DIR/<mode> (default: $CONFIG);
 #                        stats still resolve from the real $CONFIG.
 set -euo pipefail
@@ -102,6 +104,7 @@ if [[ "$ARCH" == "unet3plus" ]]; then
     EXTRA_TRAIN_ARGS+=(--cat-channels "$CAT_CHANNELS")
     [[ "$DEEP_SUPERVISION" == "1" ]] && EXTRA_TRAIN_ARGS+=(--deep-supervision)
 fi
+[[ -n "${N_PATCHES:-}" ]] && EXTRA_TRAIN_ARGS+=(--n-patches "$N_PATCHES")
 
 # --- Train + field-test in one shot (trainer resolves pools + evaluates on field). ---
 run "$PYTHON" "$PIPE/dl_04_train_lightning.py" \
@@ -132,6 +135,7 @@ if [[ "${DRY_RUN:-0}" != "1" ]]; then
     BATCH_SIZE="$BATCH_SIZE" PRECISION="$PRECISION" CE_WEIGHT="$CE_WEIGHT" \
     DICE_WEIGHT="$DICE_WEIGHT" FOCAL_GAMMA="$FOCAL_GAMMA" GIT_COMMIT="$GIT_COMMIT" \
     DATA_ROOT="$DATA_ROOT" CAT_CHANNELS="$CAT_CHANNELS" DEEP_SUPERVISION="$DEEP_SUPERVISION" \
+    N_PATCHES="${N_PATCHES:-}" \
     "$PYTHON" - <<'PY'
 import json, os, csv, re
 from pathlib import Path
@@ -201,6 +205,7 @@ manifest = {
     "deep_supervision": os.environ.get("DEEP_SUPERVISION") == "1" if os.environ["ARCH"] == "unet3plus" else None,
     "epochs": int(os.environ["EPOCHS"]),
     "batch_size": int(os.environ["BATCH_SIZE"]),
+    "n_patches": int(os.environ["N_PATCHES"]) if os.environ.get("N_PATCHES") else None,
     "precision": os.environ["PRECISION"],
     "train_stats": Path(os.environ["TRAIN_STATS_PATH"]).name,
     "eval_stats": Path(os.environ["EVAL_STATS_PATH"]).name,

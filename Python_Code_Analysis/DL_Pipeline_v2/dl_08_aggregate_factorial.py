@@ -62,6 +62,28 @@ def _seed_from_dir(p: Path) -> Optional[int]:
     return None
 
 
+def _scores(metrics: dict) -> dict:
+    """The score block of a metrics.json, schema-agnostic.
+
+    v2 (run_config.sh) nests the scores under "test_metrics"; v1 (dl_05) wrote
+    them flat at the top level. Everything downstream reads from this block, so a
+    plain `metrics.get("macro_f1")` silently returned None on every v2 cell.
+    """
+    return metrics.get("test_metrics") or metrics
+
+
+def _macro(sc: dict, key: str, per_class: dict) -> Optional[float]:
+    """Cell-level macro-`key`, preferring the stored value, else the unweighted
+    class mean. v2's test_metrics omits macro_recall/macro_precision but keeps
+    them per class, so recover them the same way macro_f1 is defined (mean over
+    scored classes)."""
+    val = sc.get(f"macro_{key}")
+    if val is not None:
+        return val
+    vals = [m[key] for m in per_class.values() if m.get(key) is not None]
+    return float(np.mean(vals)) if vals else None
+
+
 def load_cells(results_dir: Path) -> pd.DataFrame:
     """Walk results/<config>/seed<k>/metrics.json into a long per-class DataFrame.
 
@@ -83,7 +105,8 @@ def load_cells(results_dir: Path) -> pd.DataFrame:
             if not mfile.exists():
                 continue
             metrics = json.loads(mfile.read_text())
-            per_class = metrics.get("per_class", {})
+            sc = _scores(metrics)   # unwrap v2 "test_metrics"; flat for v1
+            per_class = sc.get("per_class", {})
 
             # manifest is optional (a cell can finish metrics before manifest in
             # a crash); fall back to the config registry for the axis labels.
@@ -97,11 +120,11 @@ def load_cells(results_dir: Path) -> pd.DataFrame:
                 "spectral": cfg["spectral"],
                 "featureset": f"{cfg['lidar']}_{cfg['spectral']}",
                 "seed": seed,
-                "macro_f1": metrics.get("macro_f1"),
-                "macro_recall": metrics.get("macro_recall"),
-                "macro_precision": metrics.get("macro_precision"),
-                "mean_iou": metrics.get("mean_iou"),
-                "overall_accuracy": metrics.get("overall_accuracy"),
+                "macro_f1": sc.get("macro_f1"),
+                "macro_recall": _macro(sc, "recall", per_class),
+                "macro_precision": _macro(sc, "precision", per_class),
+                "mean_iou": sc.get("mean_iou"),
+                "overall_accuracy": sc.get("overall_accuracy"),
                 "in_channels": manifest.get("in_channels", cfg["channels"]),
                 "git_commit": manifest.get("git_commit"),
             }
@@ -176,6 +199,23 @@ def factorial_table(long_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(recs)
 
 
+def _confusion(metrics: dict):
+    """(matrix ndarray, labels) from a metrics.json, schema-agnostic.
+
+    v2 (run_config.sh) stores confusion_matrix as {"labels": [...], "matrix":
+    [[...]]}; v1 (dl_05) stored the bare nested list with labels living in
+    per_class / class_names. Returns (None, None) if absent.
+    """
+    cm = metrics.get("confusion_matrix")
+    if cm is None:
+        return None, None
+    if isinstance(cm, dict):                       # v2 self-describing form
+        return np.array(cm["matrix"], dtype=float), cm.get("labels")
+    labels = metrics.get("class_names") \
+        or list(_scores(metrics).get("per_class", {}).keys())   # v1 bare list
+    return np.array(cm, dtype=float), labels
+
+
 def mean_confusion_matrices(results_dir: Path) -> Dict[str, pd.DataFrame]:
     """Seed-mean confusion matrix per config (true rows x predicted cols)."""
     out: Dict[str, pd.DataFrame] = {}
@@ -188,13 +228,12 @@ def mean_confusion_matrices(results_dir: Path) -> Dict[str, pd.DataFrame]:
             mfile = seed_dir / "metrics.json"
             if not mfile.exists():
                 continue
-            metrics = json.loads(mfile.read_text())
-            cm = metrics.get("confusion_matrix")
-            if cm is None:
+            mat, labels = _confusion(json.loads(mfile.read_text()))
+            if mat is None:
                 continue
-            mats.append(np.array(cm, dtype=float))
+            mats.append(mat)
             if class_names is None:
-                class_names = list(metrics.get("per_class", {}).keys())
+                class_names = labels
         if mats:
             mean_cm = np.mean(mats, axis=0)
             labels = class_names or [f"c{i}" for i in range(mean_cm.shape[0])]

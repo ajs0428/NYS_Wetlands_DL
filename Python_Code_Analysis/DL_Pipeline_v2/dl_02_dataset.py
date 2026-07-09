@@ -474,6 +474,7 @@ def create_dataloaders_from_pools(
     data_root: Optional[Path] = None,
     validate_bands: bool = True,
     label_transform: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+    n_patches: Optional[int] = None,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, torch.Tensor]:
     """Factorial-v2 dataloaders: resolve a config's field-anchored pools, then build
     train/val/test loaders with the correct per-config, per-mode stats files.
@@ -493,6 +494,13 @@ def create_dataloaders_from_pools(
     ``flddeg`` needs the seeded degrade (``dl_degrade_labels.py``); until a
     ``label_transform`` is supplied this raises rather than silently training on
     undegraded field labels.
+
+    ``n_patches`` (learning-curve studies) caps the TRAIN pool only, to the first
+    N of the seed-shuffled pool -- nested per seed, so smaller levels are prefixes
+    of larger ones. Val and test are never capped: test is the fixed field holdout
+    (comparability with the base grid) and a full val set keeps early stopping /
+    model selection equally reliable at every level, so the curve isolates
+    training-data volume alone.
 
     Returns: train_loader, val_loader, test_loader, class_weights (from TRAIN_STATS).
     """
@@ -515,6 +523,21 @@ def create_dataloaders_from_pools(
     train_files, val_files, test_files = P.resolve_pools(
         config, seed, leakage_guard=leakage_guard, data_root=data_root
     )
+
+    if n_patches is not None:
+        if n_patches < 1:
+            raise ValueError(f"n_patches must be >= 1, got {n_patches}")
+        if n_patches < len(train_files):
+            # Seeded-shuffle prefix over the name-sorted pool: reproducible and
+            # nested (level 100 ⊂ level 200 ⊂ ... for a given seed).
+            capped = sorted(train_files, key=lambda f: f.name)
+            random.Random(seed).shuffle(capped)
+            print(f"[pools] capping TRAIN pool: {len(train_files)} -> {n_patches} "
+                  f"(seed={seed}; val/test uncapped)")
+            train_files = capped[:n_patches]
+        else:
+            print(f"[pools] n_patches={n_patches} >= train pool ({len(train_files)}); "
+                  f"using all train patches")
 
     train_stats = stats_dir / X.stats_basename(config, mode=mode, weight_power=weight_power)
     eval_stats = stats_dir / X.stats_basename(X.eval_config_name(config), mode=mode, weight_power=weight_power)

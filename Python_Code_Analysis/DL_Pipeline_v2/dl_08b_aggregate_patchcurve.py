@@ -26,12 +26,17 @@ Two modes:
    one config, by seed (same seed -> same test patches), and writes:
      arch_compare.csv      per-seed and seed-mean U-Net vs UNet3+ + delta
 
+Reads BOTH metrics.json schemas: flat (v1, dl_05) and nested under "test_metrics"
+(v2, run_config.sh's trainer-journal extract). For v2 trees point at the MODE
+subtree (…_v2/<mode> is added by run_config.sh).
+
 Usage:
-  # patch curve
-  python dl_08b_aggregate_patchcurve.py --results-dir results_patchcurve
-  # arch comparison
+  # patch curve (v2)
+  python dl_08b_aggregate_patchcurve.py --results-dir Models/results_patchcurve_v2/multiclass
+  # arch comparison (v2)
   python dl_08b_aggregate_patchcurve.py --arch-compare --config fld_chmret_leafoff \
-      --unet-dir results --unet3plus-dir results_arch
+      --unet-dir Models/factorial_results_v2/multiclass \
+      --unet3plus-dir Models/results_arch_v2/multiclass
 """
 
 import argparse
@@ -54,6 +59,12 @@ def _seed_from_dir(p: Path) -> Optional[int]:
     if name.startswith("seed") and name[4:].isdigit():
         return int(name[4:])
     return None
+
+
+def _scores(metrics: dict) -> dict:
+    """The score block of a metrics.json: nested under "test_metrics" in v2
+    (run_config.sh's trainer-journal extract), flat at top level in v1 (dl_05)."""
+    return metrics.get("test_metrics") or metrics
 
 
 def _realized_split(cell: Path) -> dict:
@@ -101,18 +112,18 @@ def load_patchcurve(results_dir: Path) -> pd.DataFrame:
             mfile = seed_dir / "metrics.json"
             if not mfile.exists():
                 continue
-            metrics = json.loads(mfile.read_text())
+            sc = _scores(json.loads(mfile.read_text()))
             row = {
                 "config": config,
                 "level": level,
                 "level_sort": level_sort,
                 "seed": seed,
-                "macro_f1": metrics.get("macro_f1"),
-                "mean_iou": metrics.get("mean_iou"),
-                "overall_accuracy": metrics.get("overall_accuracy"),
+                "macro_f1": sc.get("macro_f1"),
+                "mean_iou": sc.get("mean_iou"),
+                "overall_accuracy": sc.get("overall_accuracy"),
                 **_realized_split(seed_dir),
             }
-            for cls, cm in metrics.get("per_class", {}).items():
+            for cls, cm in sc.get("per_class", {}).items():
                 row[f"iou_{cls}"] = cm.get("iou")
             rows.append(row)
     return pd.DataFrame(rows)
@@ -189,12 +200,12 @@ def _load_arch_cells(config_dir: Path, arch_label: str) -> pd.DataFrame:
         mfile = seed_dir / "metrics.json"
         if not mfile.exists():
             continue
-        metrics = json.loads(mfile.read_text())
+        sc = _scores(json.loads(mfile.read_text()))
         row = {"arch": arch_label, "seed": seed,
-               "macro_f1": metrics.get("macro_f1"),
-               "mean_iou": metrics.get("mean_iou"),
-               "overall_accuracy": metrics.get("overall_accuracy")}
-        for cls, cm in metrics.get("per_class", {}).items():
+               "macro_f1": sc.get("macro_f1"),
+               "mean_iou": sc.get("mean_iou"),
+               "overall_accuracy": sc.get("overall_accuracy")}
+        for cls, cm in sc.get("per_class", {}).items():
             row[f"iou_{cls}"] = cm.get("iou")
         rows.append(row)
     return pd.DataFrame(rows)
