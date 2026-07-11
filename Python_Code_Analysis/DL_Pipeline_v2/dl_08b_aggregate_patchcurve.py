@@ -18,7 +18,8 @@ Two modes:
 
    Outputs (under --output-dir, default <results>/analysis):
      patchcurve_long.csv   one row per (config, level, seed): macro_f1, mean_iou,
-                           per-class IoU, requested cap, realized train/val/test
+                           per-class IoU/F1/precision/recall, requested cap,
+                           realized train/val/test
      patchcurve.png        macro-F1 & mean-IoU (left) and per-class IoU (right)
                            vs realized #train patches, mean +/- sd over seeds
 
@@ -124,7 +125,8 @@ def load_patchcurve(results_dir: Path) -> pd.DataFrame:
                 **_realized_split(seed_dir),
             }
             for cls, cm in sc.get("per_class", {}).items():
-                row[f"iou_{cls}"] = cm.get("iou")
+                for metric in ("iou", "f1", "precision", "recall"):
+                    row[f"{metric}_{cls}"] = cm.get(metric)
             rows.append(row)
     return pd.DataFrame(rows)
 

@@ -85,6 +85,38 @@ CLAUDE.md
 !Models/results_arch/*/seed*/metrics.json
 !Models/results_arch/*/seed*/training_log.json
 !Models/results_arch/*/seed*/training_history_*.json
+# --- v2 results roots (read by R_Code_Analysis/dl_10_Factorial_viz_R.qmd) ----
+# same pattern with one extra <mode> level (multiclass/ | binary/):
+!Models/factorial_results_v2/
+!Models/factorial_results_v2/analysis/
+!Models/factorial_results_v2/analysis/**
+!Models/factorial_results_v2/*/
+!Models/factorial_results_v2/*/analysis/
+!Models/factorial_results_v2/*/analysis/**
+!Models/factorial_results_v2/*/*/
+!Models/factorial_results_v2/*/*/seed*/
+!Models/factorial_results_v2/*/*/seed*/metrics.json
+!Models/factorial_results_v2/*/*/seed*/training_log.json
+!Models/factorial_results_v2/*/*/seed*/training_history_*.json
+!Models/factorial_results_v2/*/*/seed*/shap/
+!Models/factorial_results_v2/*/*/seed*/shap/*_shap_importance.json
+!Models/results_patchcurve_v2/
+!Models/results_patchcurve_v2/*/
+!Models/results_patchcurve_v2/*/analysis/
+!Models/results_patchcurve_v2/*/analysis/**
+!Models/results_patchcurve_v2/*/*/
+!Models/results_patchcurve_v2/*/*/seed*/
+!Models/results_patchcurve_v2/*/*/seed*/metrics.json
+!Models/results_patchcurve_v2/*/*/seed*/training_log.json
+!Models/results_arch_v2/
+!Models/results_arch_v2/*/
+!Models/results_arch_v2/*/analysis/
+!Models/results_arch_v2/*/analysis/**
+!Models/results_arch_v2/*/*/
+!Models/results_arch_v2/*/*/seed*/
+!Models/results_arch_v2/*/*/seed*/metrics.json
+!Models/results_arch_v2/*/*/seed*/training_log.json
+!Models/results_arch_v2/*/*/seed*/training_history_*.json
 # re-ignore heavy artifacts + generated outputs the globs above would catch:
 Models/**/.ipynb_checkpoints/
 Models/**/figures/

@@ -1,0 +1,122 @@
+[
+  {
+    "timestamp": "2026-07-08T22:29:13",
+    "checkpoint": "best_multiclass_unet_bf64_d5_20260708_2225.ckpt",
+    "kfold": false,
+    "best_epoch": 50,
+    "best_val_loss": 0.8332,
+    "architecture": "unet",
+    "config": {
+      "arch": "unet",
+      "in_channels": 26,
+      "num_classes": 4,
+      "class_names": [
+        "EMW",
+        "FSW",
+        "SSW",
+        "UPL"
+      ],
+      "base_filters": 64,
+      "depth": 5,
+      "use_aspp": false,
+      "aspp_rates": [
+        6,
+        12,
+        18
+      ],
+      "cat_channels": 64,
+      "deep_supervision": false,
+      "dropout": 0.2,
+      "learning_rate": 0.0001,
+      "weight_decay": 0.0001,
+      "ce_weight": 1.0,
+      "dice_weight": 0.0,
+      "focal_gamma": 0.0,
+      "label_smoothing": 0.0,
+      "batch_size": 16,
+      "seed": 3,
+      "early_stopping_patience": 15,
+      "lr_patience": 5,
+      "precision": 0.904969566793498,
+      "gradient_clip_val": 1.0,
+      "n_patches": 200,
+      "factorial_config": "fld_chmret_leafoff",
+      "classification_mode": "multiclass",
+      "leakage_guard": "huc12"
+    },
+    "data_split": {
+      "train": 200,
+      "val": 112,
+      "test": 141
+    },
+    "test_metrics": {
+      "overall_accuracy": 0.8083,
+      "mean_iou": 0.4782,
+      "macro_f1": 0.6237,
+      "per_class": {
+        "EMW": {
+          "precision": 0.6508,
+          "recall": 0.4586,
+          "f1": 0.538,
+          "iou": 0.368,
+          "support": 639905
+        },
+        "FSW": {
+          "precision": 0.5986,
+          "recall": 0.6539,
+          "f1": 0.625,
+          "iou": 0.4546,
+          "support": 1517832
+        },
+        "SSW": {
+          "precision": 0.3573,
+          "recall": 0.5573,
+          "f1": 0.4355,
+          "iou": 0.2783,
+          "support": 317108
+        },
+        "UPL": {
+          "precision": 0.905,
+          "recall": 0.8878,
+          "f1": 0.8963,
+          "iou": 0.8121,
+          "support": 6765731
+        }
+      }
+    },
+    "confusion_matrix": {
+      "labels": [
+        "EMW",
+        "FSW",
+        "SSW",
+        "UPL"
+      ],
+      "matrix": [
+        [
+          293430,
+          45647,
+          139746,
+          161082
+        ],
+        [
+          9029,
+          992467,
+          90471,
+          425865
+        ],
+        [
+          41190,
+          55412,
+          176721,
+          43785
+        ],
+        [
+          107208,
+          564492,
+          87605,
+          6006426
+        ]
+      ]
+    }
+  }
+]

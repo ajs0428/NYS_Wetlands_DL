@@ -1,0 +1,49 @@
+{
+  "config": "fld_chmret_leafoff",
+  "mode": "binary",
+  "seed": 0,
+  "class_names": [
+    "WET",
+    "UPL"
+  ],
+  "test_metrics": {
+    "overall_accuracy": 0.8639,
+    "mean_iou": 0.7554,
+    "macro_f1": 0.8602,
+    "per_class": {
+      "WET": {
+        "precision": 0.8225,
+        "recall": 0.8529,
+        "f1": 0.8374,
+        "iou": 0.7203,
+        "support": 2154371
+      },
+      "UPL": {
+        "precision": 0.8947,
+        "recall": 0.8716,
+        "f1": 0.883,
+        "iou": 0.7905,
+        "support": 3088482
+      }
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "WET",
+      "UPL"
+    ],
+    "matrix": [
+      [
+        1837509,
+        316862
+      ],
+      [
+        396509,
+        2691973
+      ]
+    ]
+  },
+  "best_val_loss": 0.2292,
+  "best_epoch": 50,
+  "checkpoint": "best_binary_unet_bf64_d5_20260709_0257.safetensors"
+}

@@ -1,0 +1,17 @@
+group,contrast,class,metric,delta_mean,delta_sd,n_seeds,note
+lidar_tier,fld_chmret_leafon - fld_nolidar_leafon,UPL,iou,-0.0035,0.0183,5,full LiDAR gain (leafon)
+lidar_tier,fld_chmret_leafon - fld_nolidar_leafon,UPL,recall,0.0324,0.0357,5,full LiDAR gain (leafon)
+lidar_tier,fld_chmret_leafoff - fld_nolidar_leafoff,UPL,iou,-0.0123,0.0166,5,full LiDAR gain (leafoff)
+lidar_tier,fld_chmret_leafoff - fld_nolidar_leafoff,UPL,recall,-0.0272,0.0232,5,full LiDAR gain (leafoff)
+leafoff_main,fld_nolidar_leafoff - fld_nolidar_leafon,UPL,iou,0.0089,0.0107,5,leaf-off gain (nolidar)
+leafoff_main,fld_nolidar_leafoff - fld_nolidar_leafon,UPL,recall,0.0031,0.0184,5,leaf-off gain (nolidar)
+leafoff_main,fld_chmret_leafoff - fld_chmret_leafon,UPL,iou,0.0002,0.0349,5,leaf-off gain (chmret)
+leafoff_main,fld_chmret_leafoff - fld_chmret_leafon,UPL,recall,-0.0565,0.0485,5,leaf-off gain (chmret)
+label_gradient,nwi_chmret_leafoff - fld_chmret_leafoff,UPL,iou,-0.0099,0.0325,5,NWI vs field
+label_gradient,nwi_chmret_leafoff - fld_chmret_leafoff,UPL,recall,0.0373,0.0352,5,NWI vs field
+label_gradient,flddeg_chmret_leafoff - fld_chmret_leafoff,UPL,iou,0.0074,0.0296,5,degraded vs field (quantity)
+label_gradient,flddeg_chmret_leafoff - fld_chmret_leafoff,UPL,recall,0.0092,0.0333,5,degraded vs field (quantity)
+label_gradient,nwi_chmret_leafoff - flddeg_chmret_leafoff,UPL,iou,-0.0173,0.007,5,NWI vs degraded (correctness)
+label_gradient,nwi_chmret_leafoff - flddeg_chmret_leafoff,UPL,recall,0.0281,0.0107,5,NWI vs degraded (correctness)
+interaction,(leafoff-leafon)@chmret - @nolidar,UPL,iou,-0.0087,0.0276,5,"LiDAR x leaf-off (>0 complementary, <0 redundant)"
+interaction,(leafoff-leafon)@chmret - @nolidar,UPL,recall,-0.0596,0.0588,5,"LiDAR x leaf-off (>0 complementary, <0 redundant)"

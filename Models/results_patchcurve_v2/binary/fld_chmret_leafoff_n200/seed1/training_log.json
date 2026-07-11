@@ -1,0 +1,88 @@
+[
+  {
+    "timestamp": "2026-07-09T02:46:57",
+    "checkpoint": "best_binary_unet_bf64_d5_20260709_0244.ckpt",
+    "kfold": false,
+    "best_epoch": 37,
+    "best_val_loss": 0.3029,
+    "architecture": "unet",
+    "config": {
+      "arch": "unet",
+      "in_channels": 26,
+      "num_classes": 2,
+      "class_names": [
+        "WET",
+        "UPL"
+      ],
+      "base_filters": 64,
+      "depth": 5,
+      "use_aspp": false,
+      "aspp_rates": [
+        6,
+        12,
+        18
+      ],
+      "cat_channels": 64,
+      "deep_supervision": false,
+      "dropout": 0.2,
+      "learning_rate": 0.0001,
+      "weight_decay": 0.0001,
+      "ce_weight": 1.0,
+      "dice_weight": 0.0,
+      "focal_gamma": 0.0,
+      "label_smoothing": 0.0,
+      "batch_size": 16,
+      "seed": 1,
+      "early_stopping_patience": 15,
+      "lr_patience": 5,
+      "precision": 0.8538848728570552,
+      "gradient_clip_val": 1.0,
+      "n_patches": 200,
+      "factorial_config": "fld_chmret_leafoff",
+      "classification_mode": "binary",
+      "leakage_guard": "huc12"
+    },
+    "data_split": {
+      "train": 200,
+      "val": 114,
+      "test": 93
+    },
+    "test_metrics": {
+      "overall_accuracy": 0.8383,
+      "mean_iou": 0.7179,
+      "macro_f1": 0.8354,
+      "per_class": {
+        "WET": {
+          "precision": 0.8178,
+          "recall": 0.8091,
+          "f1": 0.8134,
+          "iou": 0.6855,
+          "support": 2654734
+        },
+        "UPL": {
+          "precision": 0.8539,
+          "recall": 0.8609,
+          "f1": 0.8574,
+          "iou": 0.7503,
+          "support": 3440085
+        }
+      }
+    },
+    "confusion_matrix": {
+      "labels": [
+        "WET",
+        "UPL"
+      ],
+      "matrix": [
+        [
+          2147980,
+          506754
+        ],
+        [
+          478656,
+          2961429
+        ]
+      ]
+    }
+  }
+]
