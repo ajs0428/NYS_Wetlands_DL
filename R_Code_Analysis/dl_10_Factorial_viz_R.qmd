@@ -52,14 +52,14 @@ glimpse(binary_fact_data)
 config_order <- c("fld_nolidar_leafon", "fld_nolidar_leafoff",  "fld_chmret_leafon", "fld_chmret_leafoff",
                  "nwi_chmret_leafoff", "nwiextra_chmret_leafoff", "nwifield_chmret_leafoff", "flddeg_chmret_leafoff")
 
-config_label <- c("fld_nolidar_leafon" = "Field Data\n No Lidar\n No Leaf-Off",
-                  "fld_nolidar_leafoff" = "Field Data\n No Lidar\n With Leaf-Off",
-                  "fld_chmret_leafon" = "Field Data\n With Lidar\n No Leaf-Off",
-                  "fld_chmret_leafoff" = "Field Data\n With Lidar\n With Leaf-Off",
-                  "nwi_chmret_leafoff" = "NWI Data\n With Lidar\n With Leaf-Off",
-                  "nwiextra_chmret_leafoff" = "NWI x2 Data\n With Lidar\n With Leaf-Off",
-                  "nwifield_chmret_leafoff" = "NWI + Field\n With Lidar\n With Leaf-Off",
-                  "flddeg_chmret_leafoff" = "Degraded Field\n With Lidar\n With Leaf-Off")
+config_label <- c("fld_nolidar_leafon" = "Baseline",
+                  "fld_nolidar_leafoff" = "With\nLeaf-Off",
+                  "fld_chmret_leafon" = "With\nLidar",
+                  "fld_chmret_leafoff" = "Full\nModel",
+                  "nwi_chmret_leafoff" = "NWI\nData",
+                  "nwiextra_chmret_leafoff" = "NWI x2",
+                  "nwifield_chmret_leafoff" = "NWI + Field",
+                  "flddeg_chmret_leafoff" = "Degraded\nField")
 
 # single-line variant for heatmap y-axes (stacked labels overlap there)
 config_label_1line <- gsub("\n ", ", ", config_label)
@@ -114,6 +114,124 @@ seq_fill <- function(...) {
 }
 ```
 
+### Conceptual figure or matrix for the factorial experiment design
+
+Structure
+
+- Sized for a slide: 16:9, few elements, large type, plain language (no "ablation")
+- Two tables sharing one model: table A varies the inputs with the field labels held constant,
+  table B varies the training labels with the full input set held constant. The orange
+  `fld_chmret_leafoff` model is the single model both tables have in common
+- Only the inputs that actually *vary* get columns. Terrain, geomorphon and leaf-on NAIP are in
+  every model, so they are stated once in the subtitle instead of drawn as always-filled columns
+- Built from `fact_data` itself (label / lidar / spectral / in_channels are columns of
+  `factorial_long.csv`), so the figure cannot drift out of sync with what actually ran
+
+```{r}
+#| label: design-matrix
+#| fig-width: 16
+#| fig-height: 9
+
+reference <- "fld_chmret_leafoff"
+ref_col   <- "#d95f02"
+
+design_cells <- fact_data |>
+  distinct(config, label, lidar, spectral, in_channels) |>
+  mutate(config = as.character(config))
+
+# ---- Table A: inputs vary, field labels held constant ------------------------
+col_lidar    <- "Lidar\n(CHM + return fractions)"
+col_leafoff  <- "NAIP\nleaf-off"
+col_channels <- "Input\nchannels"
+a_cols <- c(col_lidar, col_leafoff, col_channels)
+
+a_row <- c("fld_nolidar_leafon"  = "Baseline",
+           "fld_nolidar_leafoff" = "+ Leaf-off",
+           "fld_chmret_leafon"   = "+ Lidar",
+           "fld_chmret_leafoff"  = "Full inputs")
+
+a_cells <- design_cells |>
+  filter(label == "fld") |>
+  mutate(config = factor(config, levels = rev(config_order)))
+
+# "in"/"out" drive the fill; "meta" is the un-filled channel-count column
+a_tiles <- bind_rows(
+  a_cells |>
+    mutate("{col_lidar}"   := if_else(lidar == "chmret", "in", "out"),
+           "{col_leafoff}" := if_else(spectral == "leafoff", "in", "out")) |>
+    pivot_longer(all_of(c(col_lidar, col_leafoff)), names_to = "input", values_to = "state"),
+  a_cells |> mutate(input = col_channels, state = "meta")
+) |>
+  mutate(input = factor(input, levels = a_cols))
+
+p_a <- ggplot(a_tiles, aes(x = input, y = config)) +
+  geom_tile(aes(fill = state), colour = "white", linewidth = 1.2) +
+  geom_tile(data = filter(a_tiles, config == reference, state != "meta"),
+            fill = NA, colour = ref_col, linewidth = 1.8) +
+  geom_text(data = filter(a_tiles, state == "meta"), aes(label = in_channels),
+            colour = "grey15", size = 6.5, fontface = "bold") +
+  scale_fill_manual(values = c("in" = "#14523f", "out" = "grey88", "meta" = "white"),
+                    breaks = c("in", "out"), labels = c("In the model", "Left out"),
+                    name = NULL, na.value = "white") +
+  scale_x_discrete(limits = a_cols, position = "top") +
+  scale_y_discrete(labels = a_row) +
+  labs(x = NULL, y = NULL, title = "A · Field labels held constant — do lidar and leaf-off imagery help?")
+
+# ---- Table B: training labels vary, full input set held constant --------------
+b_head <- c("fld" = "Field", "nwi" = "NWI", "nwiextra" = "NWI x2",
+            "nwifield" = "NWI + Field", "flddeg" = "Degraded field")
+
+b_desc <- c("fld"      = "Field- and GIS-\nverified polygons",
+            "nwi"      = "NWI polygons, paired\nto the field patches",
+            "nwiextra" = "NWI polygons,\n~2x the patches",
+            "nwifield" = "Field plus extra\nNWI patches pooled",
+            "flddeg"   = "Field labels thinned to\nNWI wetland prevalence")
+
+b_cells <- design_cells |>
+  filter(lidar == "chmret", spectral == "leafoff") |>
+  mutate(label = factor(label, levels = names(b_head)),
+         row   = paste0("Full inputs\n(", in_channels, " channels)"))
+
+p_b <- ggplot(b_cells, aes(x = label, y = row)) +
+  geom_tile(fill = "#14523f", colour = "white", linewidth = 1.2) +
+  geom_tile(data = filter(b_cells, config == reference),
+            fill = NA, colour = ref_col, linewidth = 1.8) +
+  geom_text(aes(label = b_desc[as.character(label)]),
+            colour = "white", size = 4.6, lineheight = 0.95) +
+  scale_x_discrete(labels = b_head, position = "top") +
+  labs(x = NULL, y = NULL, title = "B · Full input set held constant — which training labels?")
+
+n_seeds <- n_distinct(fact_data$seed)
+
+theme_design <- theme_heatmap +
+  theme(text = element_text(size = 22),
+        legend.position = "bottom",
+        legend.text = element_text(size = rel(0.8), hjust = 0),
+        axis.text.x = element_text(size = rel(0.7), lineheight = 0.9),
+        axis.text.y = element_text(size = rel(0.8), hjust = 1, lineheight = 0.9),
+        plot.title = element_text(size = rel(0.8), face = "bold"),
+        plot.title.position = "plot")
+
+(p_a + theme_design) / (p_b + theme_design) +
+  plot_layout(heights = c(4, 1.6), guides = "collect") +
+  plot_annotation(
+    title = "Factorial design: 8 model configurations",
+    subtitle = paste0("Every model includes terrain, geomorphon and leaf-on NAIP, and is trained at ",
+                      n_seeds, " seeds x {multiclass, binary}.\n",
+                      "Every model is evaluated against field-verified labels, whatever it trained on."),
+    caption = paste0("Orange = the reference model (field labels + lidar + leaf-off): the one model both ",
+                     "tables share, and the\nstarting point for the follow-on studies — patch-count curve (Q6) ",
+                     "and UNet3+ (Q7)."),
+    theme = theme(plot.title = element_text(size = 26, face = "bold"),
+                  plot.subtitle = element_text(size = 15, colour = "grey30", lineheight = 1.1),
+                  plot.caption = element_text(size = 13, colour = "grey35", hjust = 0, lineheight = 1.1),
+                  plot.title.position = "plot",
+                  plot.caption.position = "plot",
+                  legend.position = "bottom",
+                  plot.margin = margin(12, 18, 12, 12))
+  )
+```
+
 
 ### Does leaf off imagery or lidar-derived metrics improve field-based models?
 
@@ -126,51 +244,58 @@ Structure
 
 ```{r}
 #| label: q1-precision-recall
-#| fig-width: 20
-#| fig-height: 9
-
-# fill palette: "<class> Precision" = class color, "<class> Recall" = lighter shade
-pr_fill <- c(
-  setNames(class_color, paste(names(class_color), "Precision")),
-  setNames(lighten(class_color, 0.45), paste(names(class_color), "Recall"))
-)
-pr_levels <- paste(rep(class_order, each = 2), c("Precision", "Recall"))
+#| fig-width: 8
+#| fig-height: 14
 
 pr_data <- fact_data |>
   filter(label == "fld") |>
   pivot_longer(c(precision, recall), names_to = "metric", values_to = "value") |>
-  mutate(class_metric = factor(paste(class, metric_label[metric]), levels = pr_levels))
+  mutate(metric = factor(metric_label[metric], levels = c("Precision", "Recall")))
 
-pr_plot <- function(which_mode) {
+pr_plot <- function(which_mode, which_metric) {
   pr_data |>
-    filter(mode == which_mode) |>
-    ggplot(aes(x = config, y = value, fill = class_metric)) +
+    filter(mode == which_mode, metric == which_metric) |>
+    ggplot(aes(x = config, y = value, fill = class)) +
+      facet_wrap(~ class, scales = "free_y", ncol = 1) +
       box_jitter(point_size = 3.5) +
-      scale_fill_manual(values = pr_fill, name = NULL) +
+      scale_fill_manual(values = class_color) +
       scale_x_discrete(labels = config_label) +
-      guides(fill = guide_legend(ncol = 1)) +
-      labs(x = NULL, y = "Precision / Recall", title = which_mode) +
+      labs(x = NULL, y = which_metric, title = which_mode) +
       theme_param
 }
 
-pr_plot("Multiclass") + pr_plot("Binary")
+pr_plot("Multiclass", "Precision")
+
+pr_plot("Multiclass", "Recall")
+
+pr_plot("Binary", "Precision")
+
+pr_plot("Binary", "Recall")
 ```
 
 ```{r}
 #| label: q1-f1-iou
-#| fig-width: 18
+#| fig-width: 5
 #| fig-height: 12
 
 fact_data |>
-  filter(label == "fld") |>
-  pivot_longer(c(f1, iou), names_to = "metric", values_to = "value") |>
-  mutate(metric = factor(metric_label[metric], levels = c("F1", "IoU"))) |>
-  ggplot(aes(x = config, y = value, fill = class)) +
+  filter(label == "fld", mode == "Multiclass") |>
+  ggplot(aes(x = config, y = f1, fill = class)) +
     box_jitter() +
-    facet_grid(metric ~ mode) +
+    facet_wrap(~ class, scales = "free_y", ncol = 1) +
     scale_fill_manual(values = class_color) +
     scale_x_discrete(labels = config_label) +
-    labs(x = NULL, y = NULL) +
+    labs(x = NULL, y = "F1") +
+    theme_param
+
+fact_data |>
+  filter(label == "fld", mode == "Multiclass") |>
+  ggplot(aes(x = config, y = iou, fill = class)) +
+    box_jitter() +
+    facet_wrap(~ class, scales = "free_y", ncol = 1) +
+    scale_fill_manual(values = class_color) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = "IoU") +
     theme_param
 ```
 
@@ -188,14 +313,22 @@ fact_data |>
 
 fact_data |>
   filter(featureset == "chmret_leafoff") |>
-  pivot_longer(c(f1, iou), names_to = "metric", values_to = "value") |>
-  mutate(metric = factor(metric_label[metric], levels = c("F1", "IoU"))) |>
-  ggplot(aes(x = config, y = value, fill = class)) +
+  ggplot(aes(x = config, y = f1, fill = class)) +
     box_jitter() +
-    facet_grid(metric ~ mode) +
+    facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
     scale_fill_manual(values = class_color) +
     scale_x_discrete(labels = config_label) +
-    labs(x = NULL, y = NULL) +
+    labs(x = NULL, y = "F1") +
+    theme_param
+
+fact_data |>
+  filter(featureset == "chmret_leafoff") |>
+  ggplot(aes(x = config, y = iou, fill = class)) +
+    box_jitter() +
+    facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
+    scale_fill_manual(values = class_color) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = "IoU") +
     theme_param
 ```
 
