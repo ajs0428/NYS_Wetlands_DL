@@ -358,6 +358,34 @@ python $PIPE/dl_08b_aggregate_patchcurve.py --arch-compare --config fld_chmret_l
 v1 (`EXECUTION.md` §10). Cells resolve from `factorial_results_v2/<MODE>`; the
 best-macro-F1 seed is picked from the v2 metrics (nested schema handled).
 
+*Prediction-only reservation (restage after training is done):* prediction needs
+NO training patches — `dl_06b_predict_huc.py` assembles the stack in-memory from
+the per-HUC source rasters. Per config it needs only the code, the mode-tokened
+`stats/`, and each cell's `best_*.safetensors` + `metrics.json` (seed selection)
++ `manifest.json` (arch/bf/depth). So instead of the §5 lean push, from the
+**CPU node** ship just (both modes' cells for the config you're mapping with;
+~50 MB/cell with `.ckpt` excluded):
+
+```bash
+cd /ibstorage/anthony/NYS_Wetlands_DL
+GPU_NODE=cbsugpu10.biohpc.cornell.edu   # whichever node holds the reservation
+ssh $USER@$GPU_NODE 'mkdir -p /workdir/$USER/nys_wetlands /workdir/$USER/tmp'
+rsync -avhP --relative \
+  --exclude='*.ckpt' --exclude='__pycache__' \
+  --exclude='tb_logs' --exclude='lightning_logs' --exclude='shap' \
+  Python_Code_Analysis/DL_Pipeline_v2 Shell_Scripts \
+  Data/Training_Data/stats \
+  Models/factorial_results_v2/multiclass/fld_chmret_leafoff \
+  Models/factorial_results_v2/binary/fld_chmret_leafoff \
+  "$USER@$GPU_NODE:/workdir/$USER/nys_wetlands/"
+```
+
+Always restage even if `/workdir/$USER/nys_wetlands` survived the previous
+reservation (stale wrappers otherwise), and check the image is still loaded
+(`docker1 images`; if wiped, re-`scp` the tarball and `docker1 load -i` per
+`EXECUTION.md` §4). Then pull sources and predict — one run per mode; the
+`DLpred_<mode>_…` naming keeps both in the same output dir:
+
 ```bash
 SERVER=… REMOTE_ROOT=… LOCAL_ROOT=/workdir/$USER/NYS_Wetlands_Data \
   bash Shell_Scripts/rsync_huc_sources.sh <cluster> <huc>
