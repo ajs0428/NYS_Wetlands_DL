@@ -39,7 +39,12 @@ Python_Code_Analysis/DL_Pipeline_v2/   # Main pipeline (production)
   dl_10b_huc_inference_viz.ipynb          # Data-heavy §8: HUC prevalence from prediction GeoTIFFs (rsync rasters separately)
   dl_huc_stack.py                         # Follow-on: build per-HUC inference stack
   factorial_experiment/EXECUTION.md       # Factorial: full operational walkthrough (read this)
+  production_model/dl_prod_config.py      # Production: the shipped model's recipe (single source of truth)
+  production_model/PLAN.md                # Production: recipe rationale + open decisions
+  production_model/EXECUTION.md           # Production: operational walkthrough (deltas from factorial)
 Shell_Scripts/                         # Orchestration wrappers (run_factorial.sh, run_*.sh, rsync_*.sh)
+Models/production_model/               # Production: the deployable model's cells (+ its checkpoints)
+webmap/                                # Leaflet/COG viewer + dev server (source tracked; COGs are not)
 Models/factorial_results/              # Synced base-factorial cells + analysis/
 Models/results_patchcurve/             # Follow-on: learning-curve cells + analysis/
 Models/results_arch/                   # Follow-on: UNet3+ cells + analysis/
@@ -49,6 +54,14 @@ Data/Training_Data/R_Patches/          # 256x256 GeoTIFF training patches
 Data/Training_Data/normalization_stats.json
 pyproject.toml                         # Dependencies + uv config
 ```
+
+## Repo & Branching
+- **`main` is the trunk.** All work lands here. (History note: `factorial-experiment-pipeline` had drifted into being the de-facto trunk while `main` sat abandoned; merged back into `main` 2026-07-27.)
+- **Short-lived feature branches only** — days, not months — for changes risky enough to want isolation (a `dl_02_dataset.py` refactor, a new architecture). Name them `feat/<thing>` / `fix/<thing>` and merge back fast.
+- **Never branch to separate a workstream.** Workstreams here share the entire core (`dl_01`–`dl_06`, dataset, model, losses), so a long-lived parallel branch means every core fix is applied twice and reconciled at merge — and this repo's merges are `.ipynb`-JSON and `.gitignore` merges, the painful kind.
+- **Separate workstreams by directory + results root + config instead**, keeping the 1:1:1 mapping: `<workstream>` = `Shell_Scripts/run_<workstream>.sh` = `Models/<workstream>/`, with a `<workstream>/` doc+config dir under `DL_Pipeline_v2/`. Current instances: `factorial_experiment` → `Models/factorial_results_v2/`; `production_model` → `Models/production_model/`.
+- **Freeze a published result with a tag, not a branch** (`factorial-v1`, `factorial-v2`). Tags are immutable and need no maintenance.
+- **`.gitignore` starts with a blanket `*`** — anything new is invisible until explicitly whitelisted, and reaching a deep file requires un-ignoring every parent dir first. Check with `git check-ignore -v --no-index <path>` (without `--no-index` it silently skips already-tracked files).
 
 ## Pipeline Workflow
 Run scripts in order: dl_01 -> dl_02 (imported by dl_04) -> dl_03 (imported by dl_04) -> dl_04_train_lightning -> dl_05 -> dl_06
@@ -226,3 +239,12 @@ Same node ritual: reload image, restage (lean push), run in container under `tmu
 - **HUC prediction / inference maps** → `Data/HUC_DL_Predictions/DLpred_<mode>_cluster_<C>_huc_<H>.tif` (class) + `…_probs.tif` (per-class softmax). Needs the **source rasters** for the HUC, which live **outside** `/app` at `/workdir/$USER/NYS_Wetlands_Data` → use a **two-mount** wrapper (`-v …/NYS_Wetlands_Data:/data -e DATA_ROOT=/data`). Pull only the ~7 per-HUC tiles first: `SERVER="$USER@$DATA_HOST:" REMOTE_ROOT=/ibstorage/anthony/NYS_Wetlands_Data LOCAL_ROOT=/workdir/$USER/NYS_Wetlands_Data bash Shell_Scripts/rsync_huc_sources.sh <cluster> <huc>`. Predict: `bash Shell_Scripts/run_predict_factorial.sh fld_chmret_leafoff <cluster> <huc>` (best-macro-F1 seed default; arch auto-detected). Pull predictions back with a plain `rsync …/Data/HUC_DL_Predictions/ Data/HUC_DL_Predictions/`. Visualize in GIS locally; `dl_10b_huc_inference_viz.ipynb` reports per-class area / wetland-prevalence summary stats (reads the prediction GeoTIFFs directly, so rsync them to `Data/HUC_DL_Predictions/` first — they are gitignored).
 
 `dl_10_factorial_viz.ipynb` §6–§7 visualize the first two studies (learning curves, U-Net vs UNet3+); §1–§5 cover the base factorial + SHAP. HUC prevalence (§8) lives in the data-heavy `dl_10b_huc_inference_viz.ipynb`. **Notebook split for git sync:** `dl_10` reads only small CSV/JSON (analysis `*.csv` + per-seed `metrics.json`/`training_log.json`/`training_history_*.json`/`shap/*_shap_importance.json`), which `.gitignore` whitelists (~2 MB) so they sync to a local Mac via `git pull`; `dl_10b` reads the multi-GB prediction GeoTIFFs, which stay gitignored and are rsync'd separately. Re-run `git add -A` after each aggregation to pick up new JSON/CSV.
+
+## Production Model (the single deployable model)
+Where the factorial asks *which inputs and labels matter*, this workstream ships **one** model. It is a **sibling workstream on the same trunk, not a branch** — it reuses `dl_01`–`dl_06`, the dataset, model, and losses untouched. **Full guide:** `Python_Code_Analysis/DL_Pipeline_v2/production_model/EXECUTION.md`; rationale + open decisions in `production_model/PLAN.md`.
+
+- **Recipe (single source of truth):** `production_model/dl_prod_config.py` — run it with no args to print + self-check. Currently `nwifield_chmret_leafoff`, multiclass, unet bf64/d5, 100 epochs, seeds 0-2. The config was picked on factorial-v2 field-test results (best WET IoU **and** recall); every other knob is **held at the factorial's values on purpose**, so the benchmark's ranking remains valid evidence for the shipped model. `--emit` prints shell-sourceable `PROD_*` vars.
+- **Driver:** `Shell_Scripts/run_production.sh [seed ...]` — a **thin wrapper over `run_config.sh`**, not a second training path, so fixes to training/metric-extraction land once. Inherits the skip-completed guard (safe stop/resume) and all of `run_config.sh`'s env knobs. `DRY_RUN=1` to plan.
+- **Results:** `Models/production_model/<mode>/production/seed<k>/` — same layout as a factorial cell. Evaluation is still **against field labels** on the seed's held-out field patches, so scores are directly comparable to `Models/factorial_results_v2/analysis/cross_mode_summary.csv`.
+- **Weights are the deliverable here** (unlike the factorial): pull the `.safetensors` back, not just `--metrics-only`. `.gitignore` tracks this root's `metrics.json`/`manifest.json`/`confusion_matrix.csv` and ignores the checkpoints.
+- **Still open (do not silently decide):** ship best seed vs. 3-model ensemble; whether to refit on the full pool for the final artifact (forfeits the held-out score). See PLAN.md §4.

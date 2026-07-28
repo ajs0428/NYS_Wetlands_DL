@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NYS Wetland DL Predictions</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="sidebar">
+    <header>
+      <h1>NYS Wetland DL Predictions</h1>
+      <p id="status" class="status">Loading manifest…</p>
+      <input id="search" type="search" placeholder="Filter by cluster or HUC…" disabled />
+    </header>
+    <div id="layer-list">
+      <section id="group-multiclass" class="layer-group">
+        <h2>Multiclass <span class="count"></span></h2>
+        <div class="rows"></div>
+      </section>
+      <section id="group-binary" class="layer-group">
+        <h2>Binary <span class="count"></span></h2>
+        <div class="rows"></div>
+      </section>
+      <section class="layer-group">
+        <h2>Reference overlays</h2>
+        <div class="rows">
+          <div class="layer-row">
+            <label><input type="checkbox" id="toggle-nys-hillshade" /> NYS lidar hillshade</label>
+          </div>
+          <div class="layer-row">
+            <label><input type="checkbox" id="toggle-esri-hillshade" /> Esri World Hillshade</label>
+          </div>
+          <div class="layer-row">
+            <label><input type="checkbox" id="toggle-nwi" /> NWI wetlands</label>
+          </div>
+        </div>
+      </section>
+    </div>
+    <footer>
+      <div id="legend"></div>
+    </footer>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/esri-leaflet@3.0.12/dist/esri-leaflet.js" crossorigin=""></script>
+  <!-- proj4 must load before georaster-layer-for-leaflet: the prediction COGs are
+       EPSG:6347 (NAD83(2011)/UTM 18N), which is missing from the layer bundle's
+       built-in projection database; app.js registers it on the global proj4. -->
+  <script src="https://unpkg.com/proj4@2.11.0/dist/proj4.js" crossorigin=""></script>
+  <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js" crossorigin=""></script>
+  <script src="https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js" crossorigin=""></script>
+  <!-- vector NWI overlay from a single static .pmtiles (reader is bundled) -->
+  <script src="https://unpkg.com/protomaps-leaflet@4.1.1/dist/protomaps-leaflet.js" crossorigin=""></script>
+  <script src="app.js?v=6"></script>
+</body>
+</html>
