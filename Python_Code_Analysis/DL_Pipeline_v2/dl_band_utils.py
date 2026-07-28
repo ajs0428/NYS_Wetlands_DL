@@ -102,18 +102,26 @@ def discover_bands_from_raster(path: Path) -> List[str]:
     return band_names
 
 
-def get_predictor_band_names(band_names: List[str], label_band: str) -> List[str]:
+def get_predictor_band_names(band_names: List[str], label_band: str,
+                             extra_label_bands: Optional[List[str]] = None) -> List[str]:
     """
-    Return band names excluding the label band.
+    Return band names excluding the label band(s).
 
     Args:
         band_names: All band names from the raster.
-        label_band: Name of the label band (e.g. "MOD_CLASS").
+        label_band: Name of the active label band (e.g. "MOD_CLASS").
+        extra_label_bands: Other label bands present in the raster that must NOT
+            be treated as predictors. Multi-source label patches carry several
+            label bands (e.g. MOD_CLASS_NWI, MOD_CLASS_FLDDEG alongside the active
+            MOD_CLASS); without this they would leak into the predictor set and
+            inflate in_channels. Configured via "aux_label_bands" in
+            dl_band_config.json. Defaults to none (single-label patches).
 
     Returns:
         List of predictor band names in original order.
     """
-    return [name for name in band_names if name != label_band]
+    exclude = {label_band, *(extra_label_bands or [])}
+    return [name for name in band_names if name not in exclude]
 
 
 def get_normalization_method(band_name: str, config: dict) -> dict:

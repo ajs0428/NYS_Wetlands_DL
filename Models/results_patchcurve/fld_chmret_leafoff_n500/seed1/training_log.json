@@ -1,0 +1,119 @@
+[
+  {
+    "timestamp": "2026-06-26T15:08:49",
+    "checkpoint": "best_multiclass_unet_bf64_d5_20260626_1503.ckpt",
+    "kfold": false,
+    "best_epoch": 50,
+    "best_val_loss": 0.8719,
+    "architecture": "unet",
+    "config": {
+      "arch": "unet",
+      "in_channels": 26,
+      "num_classes": 4,
+      "class_names": [
+        "EMW",
+        "FSW",
+        "SSW",
+        "UPL"
+      ],
+      "base_filters": 64,
+      "depth": 5,
+      "use_aspp": false,
+      "aspp_rates": [
+        6,
+        12,
+        18
+      ],
+      "cat_channels": 64,
+      "deep_supervision": false,
+      "dropout": 0.2,
+      "learning_rate": 0.0001,
+      "weight_decay": 0.0001,
+      "ce_weight": 1.0,
+      "dice_weight": 0.0,
+      "focal_gamma": 0.0,
+      "label_smoothing": 0.0,
+      "batch_size": 16,
+      "seed": 1,
+      "early_stopping_patience": 15,
+      "lr_patience": 5,
+      "precision": 0.9320113119195591,
+      "gradient_clip_val": 1.0,
+      "n_patches": 500
+    },
+    "data_split": {
+      "train": 350,
+      "val": 75,
+      "test": 75
+    },
+    "test_metrics": {
+      "overall_accuracy": 0.8272,
+      "mean_iou": 0.5213,
+      "macro_f1": 0.6641,
+      "per_class": {
+        "EMW": {
+          "precision": 0.6641,
+          "recall": 0.4707,
+          "f1": 0.5509,
+          "iou": 0.3802,
+          "support": 296395
+        },
+        "FSW": {
+          "precision": 0.6426,
+          "recall": 0.766,
+          "f1": 0.6989,
+          "iou": 0.5372,
+          "support": 871387
+        },
+        "SSW": {
+          "precision": 0.4515,
+          "recall": 0.5432,
+          "f1": 0.4931,
+          "iou": 0.3272,
+          "support": 273812
+        },
+        "UPL": {
+          "precision": 0.932,
+          "recall": 0.8954,
+          "f1": 0.9133,
+          "iou": 0.8405,
+          "support": 3473606
+        }
+      }
+    },
+    "confusion_matrix": {
+      "labels": [
+        "EMW",
+        "FSW",
+        "SSW",
+        "UPL"
+      ],
+      "matrix": [
+        [
+          139505,
+          19255,
+          92767,
+          44868
+        ],
+        [
+          5266,
+          667460,
+          34813,
+          163848
+        ],
+        [
+          33569,
+          73338,
+          148742,
+          18163
+        ],
+        [
+          31720,
+          278609,
+          53145,
+          3110132
+        ]
+      ]
+    }
+  }
+]

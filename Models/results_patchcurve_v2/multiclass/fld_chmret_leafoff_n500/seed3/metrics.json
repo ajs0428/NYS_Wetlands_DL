@@ -1,0 +1,83 @@
+{
+  "config": "fld_chmret_leafoff",
+  "mode": "multiclass",
+  "seed": 3,
+  "class_names": [
+    "EMW",
+    "FSW",
+    "SSW",
+    "UPL"
+  ],
+  "test_metrics": {
+    "overall_accuracy": 0.8373,
+    "mean_iou": 0.5332,
+    "macro_f1": 0.6778,
+    "per_class": {
+      "EMW": {
+        "precision": 0.7485,
+        "recall": 0.573,
+        "f1": 0.6491,
+        "iou": 0.4805,
+        "support": 639905
+      },
+      "FSW": {
+        "precision": 0.678,
+        "recall": 0.6221,
+        "f1": 0.6489,
+        "iou": 0.4802,
+        "support": 1517832
+      },
+      "SSW": {
+        "precision": 0.4312,
+        "recall": 0.5993,
+        "f1": 0.5015,
+        "iou": 0.3347,
+        "support": 317108
+      },
+      "UPL": {
+        "precision": 0.9015,
+        "recall": 0.9217,
+        "f1": 0.9115,
+        "iou": 0.8374,
+        "support": 6765731
+      }
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "EMW",
+      "FSW",
+      "SSW",
+      "UPL"
+    ],
+    "matrix": [
+      [
+        366695,
+        15293,
+        85584,
+        172333
+      ],
+      [
+        20459,
+        944317,
+        95692,
+        457364
+      ],
+      [
+        48266,
+        27196,
+        190056,
+        51590
+      ],
+      [
+        54454,
+        405997,
+        69476,
+        6235804
+      ]
+    ]
+  },
+  "best_val_loss": 0.6881,
+  "best_epoch": 50,
+  "checkpoint": "best_multiclass_unet_bf64_d5_20260708_2253.safetensors"
+}

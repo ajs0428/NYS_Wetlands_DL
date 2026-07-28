@@ -110,17 +110,19 @@ def build_channel_mapping(predictor_names, normalization, in_channels):
 
 def run_shap(
     model_path: Path,
-    patches_dir: Path,
-    stats_path: Path,
-    output_dir: Path,
-    seed: int,
-    n_background: int,
-    n_test: int,
-    crop_size: int,
-    base_filters: int,
-    depth: int,
-    use_aspp: bool,
-    aspp_rates,
+    patches_dir: Path = None,
+    stats_path: Path = None,
+    output_dir: Path = None,
+    seed: int = 420,
+    n_background: int = 50,
+    n_test: int = 20,
+    crop_size: int = 128,
+    base_filters: int = 32,
+    depth: int = 4,
+    use_aspp: bool = False,
+    aspp_rates=(6, 12, 18),
+    background_pool=None,
+    test_pool=None,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = model_path.stem
@@ -152,8 +154,21 @@ def run_shap(
 
     band_channel_ranges = build_channel_mapping(predictor_names, normalization, in_channels)
 
-    # Data
-    train_files, _, test_files = create_data_splits(patches_dir, seed=seed)
+    # Data. Explicit pools take precedence (factorial v2: the caller resolves the
+    # cell's actual train/test file lists via dl_patch_pools.resolve_pools, so
+    # background comes from what the model trained on and SHAP test patches are
+    # the cell's held-out field patches). Without pools, fall back to the legacy
+    # seeded random split over patches_dir (v1 / standalone CLI behavior).
+    if background_pool is not None or test_pool is not None:
+        if not (background_pool and test_pool):
+            raise ValueError("background_pool and test_pool must be provided together")
+        train_files, test_files = list(background_pool), list(test_pool)
+        split_source = "pools"
+    else:
+        if patches_dir is None:
+            raise ValueError("either patches_dir or background_pool/test_pool is required")
+        train_files, _, test_files = create_data_splits(patches_dir, seed=seed)
+        split_source = "random"
     random.seed(seed)
     bg_files = random.sample(train_files, min(n_background, len(train_files)))
     test_files = random.sample(test_files, min(n_test, len(test_files)))
@@ -186,6 +201,17 @@ def run_shap(
 
     importance_per_class = shap_band.mean(axis=1)          # (num_classes, n_bands)
     importance_overall = importance_per_class.mean(axis=0)  # (n_bands,)
+
+    # Per-channel (MEAN) aggregation alongside the SUM above. One-hot bands
+    # (e.g. Geomorph_local -> 10 channels) accumulate a sum over all their
+    # channels, which inflates them vs single-channel bands; dividing by the
+    # channel count gives the fair per-channel view. Exact and recoverable, but
+    # we emit it directly so downstream consumers need not reconstruct it.
+    n_channels = np.array(
+        [band_channel_ranges[b][1] - band_channel_ranges[b][0] for b in predictor_names]
+    )
+    importance_overall_pc = importance_overall / n_channels            # (n_bands,)
+    importance_per_class_pc = importance_per_class / n_channels        # (num_classes, n_bands)
 
     sort_idx = np.argsort(importance_overall)[::-1]
     sorted_names = [predictor_names[i] for i in sort_idx]
@@ -262,6 +288,11 @@ def run_shap(
         "n_test": int(test_data.shape[0]),
         "crop_size": crop_size,
         "seed": seed,
+        "split_source": split_source,
+        "n_channels": {
+            predictor_names[i]: int(n_channels[i]) for i in range(n_bands)
+        },
+        # SUM aggregation (per-band total |SHAP|) -- the headline number.
         "importance_overall": {
             predictor_names[i]: float(importance_overall[i]) for i in range(n_bands)
         },
@@ -271,12 +302,42 @@ def run_shap(
             }
             for c in range(num_classes)
         },
+        # MEAN aggregation (per-channel = sum / n_channels) -- fair across bands
+        # with differing channel counts (one-hot vs single-channel).
+        "importance_overall_per_channel": {
+            predictor_names[i]: float(importance_overall_pc[i]) for i in range(n_bands)
+        },
+        "importance_per_class_per_channel": {
+            class_names[c]: {
+                predictor_names[i]: float(importance_per_class_pc[c, i]) for i in range(n_bands)
+            }
+            for c in range(num_classes)
+        },
         "ranking": [predictor_names[i] for i in sort_idx],
     }
     p4 = output_dir / f"{stem}_shap_importance.json"
     with open(p4, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Saved {p4}")
+
+    # Persist the spatially-averaged per-channel |SHAP| array. This is the only
+    # piece the JSON discards (it stores band-level aggregates only), and it is
+    # what enables within-band channel breakdowns (e.g. which Geomorph_local
+    # one-hot class drives the band) and any future re-aggregation WITHOUT a
+    # re-run. Already spatially reduced, so it is small.
+    channel_band = []
+    for b in predictor_names:
+        s, e = band_channel_ranges[b]
+        channel_band.extend([b] * (e - s))
+    p5 = output_dir / f"{stem}_shap_per_channel.npz"
+    np.savez_compressed(
+        p5,
+        shap_abs=shap_abs.astype(np.float32),     # (num_classes, n_test, C_input)
+        channel_band=np.array(channel_band),      # (C_input,) parent band per channel
+        predictor_names=np.array(predictor_names),
+        class_names=np.array(class_names),
+    )
+    print(f"Saved {p5}")
 
     # Console table
     print(f"\n{'Rank':<6}{'Band':<20}{'Mean |SHAP|':>14}")

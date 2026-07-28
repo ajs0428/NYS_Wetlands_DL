@@ -19,6 +19,7 @@ dependencies = [
     "scikit-learn>=1.3",
     # Visualization
     "matplotlib>=3.7",
+    "seaborn>=0.13",
     # Utilities
     "tqdm>=4.60",
     "tensorboard>=2.20.0",

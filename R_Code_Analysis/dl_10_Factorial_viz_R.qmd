@@ -1,0 +1,674 @@
+---
+title: "Factorial Experiment Visualization (v2)"
+author: "Anthony Stewart"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    fig-width: 16
+    fig-height: 9
+execute:
+  warning: false
+  message: false
+---
+
+Walkthrough of the v2 factorial experiment results (8 configs x 5 seeds x
+{multiclass, binary}) plus the follow-on studies (patch-count learning curve,
+UNet3+ comparison). Inputs are the small CSV/JSON aggregation outputs only:
+
+- `dl_08_aggregate_factorial.py` -> `Models/factorial_results_v2/<mode>/analysis/`
+- `dl_08b_aggregate_patchcurve.py` -> `Models/results_patchcurve_v2/<mode>/analysis/` and `Models/results_arch_v2/<mode>/analysis/`
+- `dl_09b_shap_geomorph_export.py` -> `Models/factorial_results_v2/<mode>/analysis/shap_geomorph_channels.csv`
+
+```{r}
+#| label: setup
+
+library(tidyverse)
+library(patchwork)
+library(jsonlite)
+library(colorspace)
+library(scales)
+```
+
+
+```{r}
+#| label: factorial-data
+
+multi_dir  <- "../Models/factorial_results_v2/multiclass"
+binary_dir <- "../Models/factorial_results_v2/binary"
+
+multi_fact_data <- read.csv(file.path(multi_dir, "analysis/factorial_long.csv"))
+glimpse(multi_fact_data)
+
+binary_fact_data <- read.csv(file.path(binary_dir, "analysis/factorial_long.csv"))
+glimpse(binary_fact_data)
+```
+
+```{r}
+#| label: data-organizing
+
+config_order <- c("fld_nolidar_leafon", "fld_nolidar_leafoff",  "fld_chmret_leafon", "fld_chmret_leafoff",
+                 "nwi_chmret_leafoff", "nwiextra_chmret_leafoff", "nwifield_chmret_leafoff", "flddeg_chmret_leafoff")
+
+config_label <- c("fld_nolidar_leafon" = "Baseline",
+                  "fld_nolidar_leafoff" = "With\nLeaf-Off",
+                  "fld_chmret_leafon" = "With\nLidar",
+                  "fld_chmret_leafoff" = "Full\nModel",
+                  "nwi_chmret_leafoff" = "NWI\nData",
+                  "nwiextra_chmret_leafoff" = "NWI x2",
+                  "nwifield_chmret_leafoff" = "NWI + Field",
+                  "flddeg_chmret_leafoff" = "Degraded\nField")
+
+# single-line variant for heatmap y-axes (stacked labels overlap there)
+config_label_1line <- gsub("\n ", ", ", config_label)
+
+class_order <- c("EMW", "FSW", "SSW", "WET", "UPL")
+class_color <- c("FSW" = "#81b14f", "SSW" = "#c4bd8b", "EMW" = "#8faab3", "UPL" = "#6a4836", "WET" = "#388C73")
+
+metric_label <- c("precision" = "Precision", "recall" = "Recall", "f1" = "F1", "iou" = "IoU",
+                  "macro_f1" = "Macro F1", "mean_iou" = "Mean IoU", "overall_accuracy" = "Overall accuracy")
+
+organize <- function(df) {
+  df |>
+    mutate(config = factor(config, levels = config_order),
+           class  = factor(class,  levels = class_order))
+}
+multi_fact_data  <- organize(multi_fact_data)
+binary_fact_data <- organize(binary_fact_data)
+
+# Both modes in one frame for faceted figures
+fact_data <- bind_rows(
+  multi_fact_data  |> mutate(mode = "Multiclass"),
+  binary_fact_data |> mutate(mode = "Binary")
+) |> mutate(mode = factor(mode, levels = c("Multiclass", "Binary")))
+
+theme_param <- theme(
+  text = element_text(size = 18),
+  legend.position = 'right',
+  legend.text = element_text(size = rel(0.70), hjust = 0.5),
+  panel.background = element_blank(),
+  panel.grid.major = element_line(colour = "grey50", linewidth = 0.2),
+  axis.ticks = element_blank(),
+  axis.text = element_text(size = rel(0.9)),
+  axis.title = element_text(size = rel(1)),
+  strip.background = element_blank(),
+  strip.text = element_text(size = rel(0.9), face = "bold")
+)
+
+theme_heatmap <- theme_param + theme(panel.grid.major = element_blank())
+
+# Boxplot + jittered seed points, shared across the metric figures
+box_jitter <- function(point_size = 5) {
+  list(
+    geom_boxplot(outlier.shape = NA, position = position_dodge(width = 0.75)),
+    geom_jitter(position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.75),
+                size = point_size, shape = 21, colour = "grey15")
+  )
+}
+
+# Single-hue sequential fill for the heatmaps (magnitude = light -> dark)
+seq_fill <- function(...) {
+  scale_fill_gradient(low = "#f2f7f5", high = "#14523f", na.value = "grey93", ...)
+}
+```
+
+### Conceptual figure or matrix for the factorial experiment design
+
+Structure
+
+- Sized for a slide: 16:9, few elements, large type, plain language (no "ablation")
+- Two tables sharing one model: table A varies the inputs with the field labels held constant,
+  table B varies the training labels with the full input set held constant. The orange
+  `fld_chmret_leafoff` model is the single model both tables have in common
+- Only the inputs that actually *vary* get columns. Terrain, geomorphon and leaf-on NAIP are in
+  every model, so they are stated once in the subtitle instead of drawn as always-filled columns
+- Built from `fact_data` itself (label / lidar / spectral / in_channels are columns of
+  `factorial_long.csv`), so the figure cannot drift out of sync with what actually ran
+
+```{r}
+#| label: design-matrix
+#| fig-width: 16
+#| fig-height: 9
+
+reference <- "fld_chmret_leafoff"
+ref_col   <- "#d95f02"
+
+design_cells <- fact_data |>
+  distinct(config, label, lidar, spectral, in_channels) |>
+  mutate(config = as.character(config))
+
+# ---- Table A: inputs vary, field labels held constant ------------------------
+col_lidar    <- "Lidar\n(CHM + return fractions)"
+col_leafoff  <- "NAIP\nleaf-off"
+col_channels <- "Input\nchannels"
+a_cols <- c(col_lidar, col_leafoff, col_channels)
+
+a_row <- c("fld_nolidar_leafon"  = "Baseline",
+           "fld_nolidar_leafoff" = "+ Leaf-off",
+           "fld_chmret_leafon"   = "+ Lidar",
+           "fld_chmret_leafoff"  = "Full inputs")
+
+a_cells <- design_cells |>
+  filter(label == "fld") |>
+  mutate(config = factor(config, levels = rev(config_order)))
+
+# "in"/"out" drive the fill; "meta" is the un-filled channel-count column
+a_tiles <- bind_rows(
+  a_cells |>
+    mutate("{col_lidar}"   := if_else(lidar == "chmret", "in", "out"),
+           "{col_leafoff}" := if_else(spectral == "leafoff", "in", "out")) |>
+    pivot_longer(all_of(c(col_lidar, col_leafoff)), names_to = "input", values_to = "state"),
+  a_cells |> mutate(input = col_channels, state = "meta")
+) |>
+  mutate(input = factor(input, levels = a_cols))
+
+p_a <- ggplot(a_tiles, aes(x = input, y = config)) +
+  geom_tile(aes(fill = state), colour = "white", linewidth = 1.2) +
+  geom_tile(data = filter(a_tiles, config == reference, state != "meta"),
+            fill = NA, colour = ref_col, linewidth = 1.8) +
+  geom_text(data = filter(a_tiles, state == "meta"), aes(label = in_channels),
+            colour = "grey15", size = 6.5, fontface = "bold") +
+  scale_fill_manual(values = c("in" = "#14523f", "out" = "grey88", "meta" = "white"),
+                    breaks = c("in", "out"), labels = c("In the model", "Left out"),
+                    name = NULL, na.value = "white") +
+  scale_x_discrete(limits = a_cols, position = "top") +
+  scale_y_discrete(labels = a_row) +
+  labs(x = NULL, y = NULL, title = "A · Field labels held constant — do lidar and leaf-off imagery help?")
+
+# ---- Table B: training labels vary, full input set held constant --------------
+b_head <- c("fld" = "Field", "nwi" = "NWI", "nwiextra" = "NWI x2",
+            "nwifield" = "NWI + Field", "flddeg" = "Degraded field")
+
+b_desc <- c("fld"      = "Field- and GIS-\nverified polygons",
+            "nwi"      = "NWI polygons, paired\nto the field patches",
+            "nwiextra" = "NWI polygons,\n~2x the patches",
+            "nwifield" = "Field plus extra\nNWI patches pooled",
+            "flddeg"   = "Field labels thinned to\nNWI wetland prevalence")
+
+b_cells <- design_cells |>
+  filter(lidar == "chmret", spectral == "leafoff") |>
+  mutate(label = factor(label, levels = names(b_head)),
+         row   = paste0("Full inputs\n(", in_channels, " channels)"))
+
+p_b <- ggplot(b_cells, aes(x = label, y = row)) +
+  geom_tile(fill = "#14523f", colour = "white", linewidth = 1.2) +
+  geom_tile(data = filter(b_cells, config == reference),
+            fill = NA, colour = ref_col, linewidth = 1.8) +
+  geom_text(aes(label = b_desc[as.character(label)]),
+            colour = "white", size = 4.6, lineheight = 0.95) +
+  scale_x_discrete(labels = b_head, position = "top") +
+  labs(x = NULL, y = NULL, title = "B · Full input set held constant — which training labels?")
+
+n_seeds <- n_distinct(fact_data$seed)
+
+theme_design <- theme_heatmap +
+  theme(text = element_text(size = 22),
+        legend.position = "bottom",
+        legend.text = element_text(size = rel(0.8), hjust = 0),
+        axis.text.x = element_text(size = rel(0.7), lineheight = 0.9),
+        axis.text.y = element_text(size = rel(0.8), hjust = 1, lineheight = 0.9),
+        plot.title = element_text(size = rel(0.8), face = "bold"),
+        plot.title.position = "plot")
+
+(p_a + theme_design) / (p_b + theme_design) +
+  plot_layout(heights = c(4, 1.6), guides = "collect") +
+  plot_annotation(
+    title = "Factorial design: 8 model configurations",
+    subtitle = paste0("Every model includes terrain, geomorphon and leaf-on NAIP, and is trained at ",
+                      n_seeds, " seeds x {multiclass, binary}.\n",
+                      "Every model is evaluated against field-verified labels, whatever it trained on."),
+    caption = paste0("Orange = the reference model (field labels + lidar + leaf-off): the one model both ",
+                     "tables share, and the\nstarting point for the follow-on studies — patch-count curve (Q6) ",
+                     "and UNet3+ (Q7)."),
+    theme = theme(plot.title = element_text(size = 26, face = "bold"),
+                  plot.subtitle = element_text(size = 15, colour = "grey30", lineheight = 1.1),
+                  plot.caption = element_text(size = 13, colour = "grey35", hjust = 0, lineheight = 1.1),
+                  plot.title.position = "plot",
+                  plot.caption.position = "plot",
+                  legend.position = "bottom",
+                  plot.margin = margin(12, 18, 12, 12))
+  )
+```
+
+
+### Does leaf off imagery or lidar-derived metrics improve field-based models?
+
+Structure
+
+- Just using the the field-verified dataset models
+- Model config on the x-axis, model evaluation metric on the y-axis
+- box and whiskers plots representing the model measure spread, points for the individual model measures
+- Precision and recall share a panel: full class color = precision, lighter shade = recall
+
+```{r}
+#| label: q1-precision-recall
+#| fig-width: 8
+#| fig-height: 14
+
+pr_data <- fact_data |>
+  filter(label == "fld") |>
+  pivot_longer(c(precision, recall), names_to = "metric", values_to = "value") |>
+  mutate(metric = factor(metric_label[metric], levels = c("Precision", "Recall")))
+
+pr_plot <- function(which_mode, which_metric) {
+  pr_data |>
+    filter(mode == which_mode, metric == which_metric) |>
+    ggplot(aes(x = config, y = value, fill = class)) +
+      facet_wrap(~ class, scales = "free_y", ncol = 1) +
+      box_jitter(point_size = 3.5) +
+      scale_fill_manual(values = class_color) +
+      scale_x_discrete(labels = config_label) +
+      labs(x = NULL, y = which_metric, title = which_mode) +
+      theme_param
+}
+
+pr_plot("Multiclass", "Precision")
+
+pr_plot("Multiclass", "Recall")
+
+pr_plot("Binary", "Precision")
+
+pr_plot("Binary", "Recall")
+```
+
+```{r}
+#| label: q1-f1-iou
+#| fig-width: 5
+#| fig-height: 12
+
+fact_data |>
+  filter(label == "fld", mode == "Multiclass") |>
+  ggplot(aes(x = config, y = f1, fill = class)) +
+    box_jitter() +
+    facet_wrap(~ class, scales = "free_y", ncol = 1) +
+    scale_fill_manual(values = class_color) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = "F1") +
+    theme_param
+
+fact_data |>
+  filter(label == "fld", mode == "Multiclass") |>
+  ggplot(aes(x = config, y = iou, fill = class)) +
+    box_jitter() +
+    facet_wrap(~ class, scales = "free_y", ncol = 1) +
+    scale_fill_manual(values = class_color) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = "IoU") +
+    theme_param
+```
+
+
+### How do NWI data labels compare to field and GIS-derived data?
+
+#### Also does degrading the field data hinder its performance?
+
+- All label sources on the full feature set (`chmret_leafoff`), evaluated against field labels
+
+```{r}
+#| label: q2-nwi-f1-iou
+#| fig-width: 20
+#| fig-height: 12
+
+fact_data |>
+  filter(featureset == "chmret_leafoff") |>
+  ggplot(aes(x = config, y = f1, fill = class)) +
+    box_jitter() +
+    facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
+    scale_fill_manual(values = class_color) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = "F1") +
+    theme_param
+
+fact_data |>
+  filter(featureset == "chmret_leafoff") |>
+  ggplot(aes(x = config, y = iou, fill = class)) +
+    box_jitter() +
+    facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
+    scale_fill_manual(values = class_color) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = "IoU") +
+    theme_param
+```
+
+Model-level summary (macro metrics are repeated on every class row of
+`factorial_long.csv`, so collapse to one row per model first):
+
+```{r}
+#| label: q2-macro
+#| fig-width: 20
+#| fig-height: 8
+
+fact_data |>
+  filter(featureset == "chmret_leafoff") |>
+  distinct(mode, config, seed, macro_f1, mean_iou) |>
+  pivot_longer(c(macro_f1, mean_iou), names_to = "metric", values_to = "value") |>
+  mutate(metric = metric_label[metric]) |>
+  ggplot(aes(x = config, y = value, fill = metric)) +
+    box_jitter(point_size = 4) +
+    facet_grid(. ~ mode) +
+    scale_fill_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = lighten("#388C73", 0.45)), name = NULL) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = NULL) +
+    theme_param
+```
+
+
+### How do field and NWI models compare across each other
+
+- Heat maps of model metrics: config (rows) x class (cols), one panel per metric.
+
+```{r}
+#| label: q3-metric-heatmap
+#| fig-width: 18
+#| fig-height: 14
+
+metric_heat <- fact_data |>
+  pivot_longer(c(precision, recall, f1, iou), names_to = "metric", values_to = "value") |>
+  mutate(metric = factor(metric_label[metric], levels = c("Precision", "Recall", "F1", "IoU"))) |>
+  group_by(mode, config, class, metric) |>
+  summarise(value = mean(value), .groups = "drop")
+
+heat_panel <- function(which_mode) {
+  metric_heat |>
+    filter(mode == which_mode) |>
+    ggplot(aes(x = class, y = fct_rev(config), fill = value)) +
+      geom_tile(colour = "white", linewidth = 1) +
+      geom_text(aes(label = number(value, accuracy = 0.01),
+                    colour = value > 0.55), size = 4.5, show.legend = FALSE) +
+      facet_grid(. ~ metric) +
+      scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "grey20")) +
+      seq_fill(limits = c(0, 1), name = "Seed-mean\nscore") +
+      scale_y_discrete(labels = config_label_1line) +
+      labs(x = NULL, y = NULL, title = which_mode) +
+      theme_heatmap
+}
+
+heat_panel("Multiclass") / heat_panel("Binary") +
+  plot_layout(guides = "collect", heights = c(1, 1))
+```
+
+
+### How accurate are the classes via confusion matrices?
+
+- binary and multiclass model confusion matrices for each configuration
+- color and fill by relative % but include a parentheses with the number of pixels e.g. 70% (3,400,000)
+- rows (true class) sum to 100%, so the diagonal reads as recall; counts are seed-mean pixels
+
+```{r}
+#| label: q4-confusion-load
+
+read_confusion <- function(mode_dir) {
+  map_dfr(config_order, function(cfg) {
+    f <- file.path(mode_dir, "analysis/confusion_mean", paste0(cfg, ".csv"))
+    if (!file.exists(f)) return(NULL)
+    read.csv(f, row.names = 1, check.names = FALSE) |>
+      rownames_to_column("true") |>
+      pivot_longer(-true, names_to = "pred", values_to = "n") |>
+      mutate(config = factor(cfg, levels = config_order))
+  }) |>
+    group_by(config, true) |>
+    mutate(prop = n / sum(n)) |>
+    ungroup() |>
+    mutate(true = factor(true, levels = rev(class_order)),
+           pred = factor(pred, levels = class_order),
+           cell_label = paste0(percent(prop, accuracy = 1), "\n(",
+                               number(n, accuracy = 0.1, scale_cut = cut_short_scale()), ")"))
+}
+
+confusion_plot <- function(mode_dir, title, text_size = 4.5) {
+  read_confusion(mode_dir) |>
+    ggplot(aes(x = pred, y = true, fill = prop)) +
+      geom_tile(colour = "white", linewidth = 1) +
+      geom_text(aes(label = cell_label, colour = prop > 0.55),
+                size = text_size, lineheight = 0.9, show.legend = FALSE) +
+      facet_wrap(~ config, ncol = 4, labeller = labeller(config = config_label)) +
+      scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "grey20")) +
+      seq_fill(limits = c(0, 1), labels = percent, name = "% of\ntrue class") +
+      labs(x = "Predicted", y = "True", title = title) +
+      theme_heatmap
+}
+```
+
+```{r}
+#| label: q4-confusion-multi
+#| fig-width: 20
+#| fig-height: 11
+
+confusion_plot(multi_dir, "Multiclass")
+```
+
+```{r}
+#| label: q4-confusion-binary
+#| fig-width: 20
+#| fig-height: 8
+
+confusion_plot(binary_dir, "Binary", text_size = 5.5)
+```
+
+
+### What were the important features in each model configuration according to SHAP?
+
+- Model heatmap with cross-model comparison: each model normalized to its own total importance, so bands are comparable across configs. Bands a config doesn't use are blank.
+- Uses the PER-CHANNEL MEAN aggregation (not the raw sum) so the one-hot Geomorph_local band is not inflated 10x relative to single-channel bands.
+- Also show within the Geomorphons category a heatmap of the different categories across models
+
+```{r}
+#| label: q5-shap-load
+
+band_order <- c("DEM", "slope_local", "Geomorph_local", "flowacc", "twi",
+                "CHM", "pct_below_1m", "pct_1m_to_5m", "pct_above_5m",
+                "r", "g", "b", "nir", "r_lo", "g_lo", "b_lo", "nir_lo")
+
+band_label <- c("DEM" = "DEM", "slope_local" = "Slope", "Geomorph_local" = "Geomorphons",
+                "flowacc" = "Flow accum.", "twi" = "TWI",
+                "CHM" = "CHM", "pct_below_1m" = "% returns < 1 m",
+                "pct_1m_to_5m" = "% returns 1-5 m", "pct_above_5m" = "% returns > 5 m",
+                "r" = "Red (leaf-on)", "g" = "Green (leaf-on)", "b" = "Blue (leaf-on)", "nir" = "NIR (leaf-on)",
+                "r_lo" = "Red (leaf-off)", "g_lo" = "Green (leaf-off)", "b_lo" = "Blue (leaf-off)", "nir_lo" = "NIR (leaf-off)")
+
+read_shap_mode <- function(mode_dir) {
+  files <- Sys.glob(file.path(mode_dir, "*", "seed*", "shap", "*_shap_importance.json"))
+  map_dfr(files, function(f) {
+    j <- fromJSON(f)
+    tibble(
+      config = basename(dirname(dirname(dirname(f)))),
+      seed   = parse_number(str_extract(f, "seed\\d+")),
+      band   = names(j$importance_overall_per_channel),
+      value  = unlist(j$importance_overall_per_channel)
+    )
+  })
+}
+
+shap_share <- bind_rows(
+  read_shap_mode(multi_dir)  |> mutate(mode = "Multiclass"),
+  read_shap_mode(binary_dir) |> mutate(mode = "Binary")
+) |>
+  group_by(mode, config, band) |>
+  summarise(value = mean(value), .groups = "drop_last") |>   # mean over seeds
+  mutate(share = value / sum(value)) |>                      # normalize per model
+  ungroup() |>
+  complete(mode, config = config_order, band = band_order) |>  # blanks for unused bands
+  mutate(mode   = factor(mode, levels = c("Multiclass", "Binary")),
+         config = factor(config, levels = config_order),
+         band   = factor(band, levels = rev(band_order)))
+```
+
+```{r}
+#| label: q5-shap-heatmap
+#| fig-width: 16
+#| fig-height: 18
+
+shap_share |>
+  ggplot(aes(x = config, y = band, fill = share)) +
+    geom_tile(colour = "white", linewidth = 1) +
+    geom_text(aes(label = percent(share, accuracy = 1), colour = share > 0.10),
+              size = 4, na.rm = TRUE, show.legend = FALSE) +
+    facet_wrap(~ mode, ncol = 1) +
+    scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "grey20")) +
+    seq_fill(labels = percent, name = "Share of model's\ntotal |SHAP|\n(per-channel mean)") +
+    scale_x_discrete(labels = config_label) +
+    scale_y_discrete(labels = band_label) +
+    labs(x = NULL, y = NULL) +
+    theme_heatmap
+```
+
+Within the Geomorphons band: which landform channels carry the importance
+(share of the band's total, seed-mean; forms follow the `rgeomorphon`/GRASS
+value order 1-10):
+
+```{r}
+#| label: q5-shap-geomorph
+#| fig-width: 16
+#| fig-height: 12
+
+geomorph_forms <- c("flat", "peak", "ridge", "shoulder", "spur",
+                    "slope", "hollow", "footslope", "valley", "pit")
+
+geomorph_shap <- bind_rows(
+  read.csv(file.path(multi_dir,  "analysis/shap_geomorph_channels.csv")) |> mutate(mode = "Multiclass"),
+  read.csv(file.path(binary_dir, "analysis/shap_geomorph_channels.csv")) |> mutate(mode = "Binary")
+) |>
+  filter(class == "overall") |>
+  group_by(mode, config, geomorphon_form) |>
+  summarise(value = mean(mean_abs_shap), .groups = "drop_last") |>
+  mutate(share = value / sum(value)) |>
+  ungroup() |>
+  mutate(mode   = factor(mode, levels = c("Multiclass", "Binary")),
+         config = factor(config, levels = config_order),
+         geomorphon_form = factor(geomorphon_form, levels = rev(geomorph_forms)))
+
+geomorph_shap |>
+  ggplot(aes(x = config, y = geomorphon_form, fill = share)) +
+    geom_tile(colour = "white", linewidth = 1) +
+    geom_text(aes(label = percent(share, accuracy = 1), colour = share > 0.20),
+              size = 4, show.legend = FALSE) +
+    facet_wrap(~ mode, ncol = 1) +
+    scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "grey20")) +
+    seq_fill(labels = percent, name = "Share of\nGeomorphons\nband |SHAP|") +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = NULL) +
+    theme_heatmap
+```
+
+
+### Does the number of patches matter for model accuracy
+
+- F1, IoU, Precision, Recall graphs across the patch numbers input into the model
+- Include binary and multiclass stacked graphs
+- x-axis is the REALIZED training-set size (from `training_log.json`), points are seeds, lines are seed means
+- The `n500` level is dropped: the field-anchored split leaves only ~440-510 training patches, so `n500` realizes essentially the same size as `full` and the two levels overlap.
+
+```{r}
+#| label: q6-patchcurve
+#| fig-width: 16
+#| fig-height: 16
+
+patchcurve <- bind_rows(
+  read.csv("../Models/results_patchcurve_v2/multiclass/analysis/patchcurve_long.csv") |> mutate(mode = "Multiclass"),
+  read.csv("../Models/results_patchcurve_v2/binary/analysis/patchcurve_long.csv")     |> mutate(mode = "Binary")
+) |>
+  filter(level != "500") |>   # n500 == full given the ~440-510 patch pool cap
+  mutate(mode = factor(mode, levels = c("Multiclass", "Binary")))
+
+pc_class <- patchcurve |>
+  pivot_longer(matches("^(iou|f1|precision|recall)_"),
+               names_pattern = "^(iou|f1|precision|recall)_(.+)$",
+               names_to = c("metric", "class"), values_to = "value") |>
+  filter(!is.na(value)) |>   # bind_rows pads the other mode's class columns with NA
+  mutate(metric = factor(metric_label[metric], levels = c("Precision", "Recall", "F1", "IoU")),
+         class  = factor(class, levels = class_order))
+
+# the realized train count varies a little across seeds within a level,
+# so average x and y per level for the mean line
+pc_class_mean <- pc_class |>
+  group_by(mode, metric, class, level) |>
+  summarise(train_patches = mean(train_patches), value = mean(value), .groups = "drop")
+
+pc_class |>
+  ggplot(aes(x = train_patches, y = value, colour = class)) +
+    geom_point(size = 3, alpha = 0.4) +
+    geom_line(data = pc_class_mean, linewidth = 1.2) +
+    geom_point(data = pc_class_mean, size = 4) +
+    facet_grid(metric ~ mode) +
+    scale_colour_manual(values = class_color) +
+    labs(x = "Realized training patches", y = NULL) +
+    theme_param
+```
+
+Model-level curve (macro metrics):
+
+```{r}
+#| label: q6-patchcurve-macro
+#| fig-width: 16
+#| fig-height: 8
+
+pc_macro <- patchcurve |>
+  pivot_longer(c(macro_f1, mean_iou, overall_accuracy), names_to = "metric", values_to = "value") |>
+  mutate(metric = factor(metric_label[metric], levels = c("Macro F1", "Mean IoU", "Overall accuracy")))
+
+pc_macro_mean <- pc_macro |>
+  group_by(mode, metric, level) |>
+  summarise(train_patches = mean(train_patches), value = mean(value), .groups = "drop")
+
+pc_macro |>
+  ggplot(aes(x = train_patches, y = value, colour = metric)) +
+    geom_point(size = 3, alpha = 0.4) +
+    geom_line(data = pc_macro_mean, linewidth = 1.2) +
+    geom_point(data = pc_macro_mean, size = 4) +
+    facet_grid(. ~ mode) +
+    scale_colour_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = "#6a4836",
+                                   "Overall accuracy" = "grey40"), name = NULL) +
+    labs(x = "Realized training patches", y = NULL) +
+    theme_param
+```
+
+
+### Does model architecture matter?
+
+- Boxplot of metrics with point overlaid to show distribution of model runs
+- U-Net vs UNet3+ on `fld_chmret_leafoff` (same seeds -> same test patches; bf64/d5 held constant)
+
+```{r}
+#| label: q7-arch
+#| fig-width: 16
+#| fig-height: 12
+
+arch_color <- c("U-Net" = "#4477AA", "UNet3+" = "#EE7733")
+
+arch_data <- bind_rows(
+  read.csv("../Models/results_arch_v2/multiclass/analysis/arch_compare.csv") |> mutate(mode = "Multiclass"),
+  read.csv("../Models/results_arch_v2/binary/analysis/arch_compare.csv")     |> mutate(mode = "Binary")
+) |>
+  filter(seed != "mean") |>
+  select(-starts_with("arch_"), -starts_with("delta_")) |>
+  pivot_longer(-c(config, seed, mode),
+               names_pattern = "^(.*)_(unet3plus|unet)$",
+               names_to = c("metric", "arch"), values_to = "value") |>
+  filter(!is.na(value)) |>   # bind_rows pads the other mode's class columns with NA
+  mutate(mode = factor(mode, levels = c("Multiclass", "Binary")),
+         arch = factor(if_else(arch == "unet", "U-Net", "UNet3+"), levels = names(arch_color)))
+
+arch_macro <- arch_data |>
+  filter(metric %in% names(metric_label)) |>
+  mutate(metric = factor(metric_label[metric], levels = c("Macro F1", "Mean IoU", "Overall accuracy"))) |>
+  ggplot(aes(x = metric, y = value, fill = arch)) +
+    box_jitter(point_size = 4) +
+    facet_grid(. ~ mode) +
+    scale_fill_manual(values = arch_color, name = NULL) +
+    labs(x = NULL, y = NULL, title = "Model-level metrics") +
+    theme_param
+
+arch_class <- arch_data |>
+  filter(str_starts(metric, "iou_")) |>
+  mutate(class = factor(str_remove(metric, "^iou_"), levels = class_order)) |>
+  ggplot(aes(x = class, y = value, fill = arch)) +
+    box_jitter(point_size = 4) +
+    facet_grid(. ~ mode, scales = "free_x", space = "free_x") +
+    scale_fill_manual(values = arch_color, name = NULL) +
+    labs(x = NULL, y = "IoU", title = "Per-class IoU") +
+    theme_param
+
+arch_macro / arch_class + plot_layout(guides = "collect")
+```
