@@ -57,8 +57,8 @@ config_label <- c("fld_nolidar_leafon" = "Baseline",
                   "fld_chmret_leafon" = "With\nLidar",
                   "fld_chmret_leafoff" = "Full\nModel",
                   "nwi_chmret_leafoff" = "NWI\nData",
-                  "nwiextra_chmret_leafoff" = "NWI x2",
-                  "nwifield_chmret_leafoff" = "NWI + Field",
+                  "nwiextra_chmret_leafoff" = "NWI\nx2",
+                  "nwifield_chmret_leafoff" = "NWI\n+\nField",
                   "flddeg_chmret_leafoff" = "Degraded\nField")
 
 # single-line variant for heatmap y-axes (stacked labels overlap there)
@@ -246,6 +246,7 @@ Structure
 #| label: q1-precision-recall
 #| fig-width: 8
 #| fig-height: 14
+#| layout-ncol: 2
 
 pr_data <- fact_data |>
   filter(label == "fld") |>
@@ -275,8 +276,8 @@ pr_plot("Binary", "Recall")
 
 ```{r}
 #| label: q1-f1-iou
-#| fig-width: 5
-#| fig-height: 12
+#| fig-width: 8
+#| fig-height: 14
 
 fact_data |>
   filter(label == "fld", mode == "Multiclass") |>
@@ -285,7 +286,9 @@ fact_data |>
     facet_wrap(~ class, scales = "free_y", ncol = 1) +
     scale_fill_manual(values = class_color) +
     scale_x_discrete(labels = config_label) +
+    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
     labs(x = NULL, y = "F1") +
+    # ylim(0.0, 1.0) +
     theme_param
 
 fact_data |>
@@ -295,6 +298,29 @@ fact_data |>
     facet_wrap(~ class, scales = "free_y", ncol = 1) +
     scale_fill_manual(values = class_color) +
     scale_x_discrete(labels = config_label) +
+    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+    labs(x = NULL, y = "IoU") +
+    theme_param
+
+  fact_data |>
+  filter(label == "fld", mode == "Binary") |>
+  ggplot(aes(x = config, y = f1, fill = class)) +
+    box_jitter() +
+    facet_wrap(~ class, scales = "free_y", ncol = 1) +
+    scale_fill_manual(values = class_color) +
+    scale_x_discrete(labels = config_label) +
+    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+    labs(x = NULL, y = "F1") +
+    theme_param
+
+fact_data |>
+  filter(label == "fld", mode == "Binary") |>
+  ggplot(aes(x = config, y = iou, fill = class)) +
+    box_jitter() +
+    facet_wrap(~ class, scales = "free_y", ncol = 1) +
+    scale_fill_manual(values = class_color) +
+    scale_x_discrete(labels = config_label) +
+    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
     labs(x = NULL, y = "IoU") +
     theme_param
 ```
@@ -308,28 +334,55 @@ fact_data |>
 
 ```{r}
 #| label: q2-nwi-f1-iou
-#| fig-width: 20
-#| fig-height: 12
+#| fig-width: 24
+#| fig-height: 6
+
+config_label_nwi <- config_label
+config_label_nwi[4] <- "Full\nModel\nField+GIS"
 
 fact_data |>
-  filter(featureset == "chmret_leafoff") |>
+  filter(featureset == "chmret_leafoff", mode == "Multiclass") |>
+  ggplot(aes(x = config, y = f1, fill = class)) +
+    box_jitter() +
+    facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
+    scale_fill_manual(values = class_color) +
+    scale_x_discrete(labels = config_label_nwi) +
+    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+    labs(x = NULL, y = "F1") +
+    theme_param
+
+fact_data |>
+  filter(featureset == "chmret_leafoff", mode == "Binary") |>
   ggplot(aes(x = config, y = f1, fill = class)) +
     box_jitter() +
     facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
     scale_fill_manual(values = class_color) +
     scale_x_discrete(labels = config_label) +
+    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
     labs(x = NULL, y = "F1") +
     theme_param
 
-fact_data |>
-  filter(featureset == "chmret_leafoff") |>
-  ggplot(aes(x = config, y = iou, fill = class)) +
-    box_jitter() +
-    facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
-    scale_fill_manual(values = class_color) +
-    scale_x_discrete(labels = config_label) +
-    labs(x = NULL, y = "IoU") +
-    theme_param
+# fact_data |>
+#   filter(featureset == "chmret_leafoff", mode == "Multiclass") |>
+#   ggplot(aes(x = config, y = iou, fill = class)) +
+#     box_jitter() +
+#     facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
+#     scale_fill_manual(values = class_color) +
+#     scale_x_discrete(labels = config_label) +
+#     scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+#     labs(x = NULL, y = "IoU") +
+#     theme_param
+
+# fact_data |>
+#   filter(featureset == "chmret_leafoff", mode == "Binary") |>
+#   ggplot(aes(x = config, y = iou, fill = class)) +
+#     box_jitter() +
+#     facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
+#     scale_fill_manual(values = class_color) +
+#     scale_x_discrete(labels = config_label) +
+#     scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+#     labs(x = NULL, y = "IoU") +
+#     theme_param
 ```
 
 Model-level summary (macro metrics are repeated on every class row of
@@ -341,9 +394,48 @@ Model-level summary (macro metrics are repeated on every class row of
 #| fig-height: 8
 
 fact_data |>
-  filter(featureset == "chmret_leafoff") |>
-  distinct(mode, config, seed, macro_f1, mean_iou) |>
-  pivot_longer(c(macro_f1, mean_iou), names_to = "metric", values_to = "value") |>
+  filter(featureset == "chmret_leafoff", mode == "Multiclass") |>
+  distinct(mode, config, seed, macro_f1) |>
+  pivot_longer(c(macro_f1), names_to = "metric", values_to = "value") |>
+  mutate(metric = metric_label[metric]) |>
+  ggplot(aes(x = config, y = value, fill = metric)) +
+    box_jitter(point_size = 4) +
+    facet_grid(. ~ mode) +
+    scale_fill_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = lighten("#388C73", 0.45)), name = NULL) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = NULL) +
+    theme_param
+  
+fact_data |>
+  filter(featureset == "chmret_leafoff", mode == "Multiclass") |>
+  distinct(mode, config, seed, mean_iou) |>
+  pivot_longer(c(mean_iou), names_to = "metric", values_to = "value") |>
+  mutate(metric = metric_label[metric]) |>
+  ggplot(aes(x = config, y = value, fill = metric)) +
+    box_jitter(point_size = 4) +
+    facet_grid(. ~ mode) +
+    scale_fill_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = lighten("#388C73", 0.45)), name = NULL) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = NULL) +
+    theme_param
+
+fact_data |>
+  filter(featureset == "chmret_leafoff", mode == "Binary") |>
+  distinct(mode, config, seed, macro_f1) |>
+  pivot_longer(c(macro_f1), names_to = "metric", values_to = "value") |>
+  mutate(metric = metric_label[metric]) |>
+  ggplot(aes(x = config, y = value, fill = metric)) +
+    box_jitter(point_size = 4) +
+    facet_grid(. ~ mode) +
+    scale_fill_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = lighten("#388C73", 0.45)), name = NULL) +
+    scale_x_discrete(labels = config_label) +
+    labs(x = NULL, y = NULL) +
+    theme_param
+  
+fact_data |>
+  filter(featureset == "chmret_leafoff", mode == "Binary") |>
+  distinct(mode, config, seed, mean_iou) |>
+  pivot_longer(c(mean_iou), names_to = "metric", values_to = "value") |>
   mutate(metric = metric_label[metric]) |>
   ggplot(aes(x = config, y = value, fill = metric)) +
     box_jitter(point_size = 4) +
@@ -627,7 +719,8 @@ pc_macro |>
 
 ### Does model architecture matter?
 
-- Boxplot of metrics with point overlaid to show distribution of model runs
+- Top: model-level Macro F1 (U-Net vs UNet3+); bottom: per-class F1 coloured by class
+- Boxplot with seed points overlaid to show distribution of model runs
 - U-Net vs UNet3+ on `fld_chmret_leafoff` (same seeds -> same test patches; bf64/d5 held constant)
 
 ```{r}
@@ -650,25 +743,54 @@ arch_data <- bind_rows(
   mutate(mode = factor(mode, levels = c("Multiclass", "Binary")),
          arch = factor(if_else(arch == "unet", "U-Net", "UNet3+"), levels = names(arch_color)))
 
-arch_macro <- arch_data |>
-  filter(metric %in% names(metric_label)) |>
-  mutate(metric = factor(metric_label[metric], levels = c("Macro F1", "Mean IoU", "Overall accuracy"))) |>
-  ggplot(aes(x = metric, y = value, fill = arch)) +
-    box_jitter(point_size = 4) +
-    facet_grid(. ~ mode) +
-    scale_fill_manual(values = arch_color, name = NULL) +
-    labs(x = NULL, y = NULL, title = "Model-level metrics") +
-    theme_param
+# Per-class F1 is not in arch_compare.csv (IoU only) -> read the per-seed metrics.json
+read_arch_perclass <- function(mode_name, mode_dir) {
+  arch_dirs <- c("U-Net" = "fld_chmret_leafoff", "UNet3+" = "fld_chmret_leafoff_unet3plus")
+  imap_dfr(arch_dirs, function(sub, arch_name) {
+    seed_dirs <- list.dirs(file.path(mode_dir, sub), recursive = FALSE)
+    map_dfr(seed_dirs, function(sd) {
+      pc <- fromJSON(file.path(sd, "metrics.json"), simplifyVector = FALSE)$test_metrics$per_class
+      tibble(arch = arch_name, seed = basename(sd), class = names(pc), f1 = map_dbl(pc, "f1"))
+    })
+  }) |> mutate(mode = mode_name)
+}
 
-arch_class <- arch_data |>
-  filter(str_starts(metric, "iou_")) |>
-  mutate(class = factor(str_remove(metric, "^iou_"), levels = class_order)) |>
-  ggplot(aes(x = class, y = value, fill = arch)) +
-    box_jitter(point_size = 4) +
-    facet_grid(. ~ mode, scales = "free_x", space = "free_x") +
-    scale_fill_manual(values = arch_color, name = NULL) +
-    labs(x = NULL, y = "IoU", title = "Per-class IoU") +
-    theme_param
+arch_class_data <- bind_rows(
+  read_arch_perclass("Multiclass", "../Models/results_arch_v2/multiclass"),
+  read_arch_perclass("Binary",     "../Models/results_arch_v2/binary")
+) |>
+  mutate(mode  = factor(mode, levels = c("Multiclass", "Binary")),
+         arch  = factor(arch, levels = names(arch_color)),
+         class = factor(class, levels = class_order))
 
-arch_macro / arch_class + plot_layout(guides = "collect")
+# One figure per mode so the y-axes are scaled to that mode's metric range
+# Per-class panel: side-by-side boxplots per class for the two archs; class colour
+# kept as fill, arch encoded by alpha (UNet3+ lighter) so both dodge together.
+arch_alpha <- c("U-Net" = 1, "UNet3+" = 0.4)
+
+arch_fig <- function(m) {
+  macro <- arch_data |>
+    filter(metric == "macro_f1", mode == m) |>
+    ggplot(aes(x = arch, y = value, fill = arch)) +
+      box_jitter(point_size = 4) +
+      scale_fill_manual(values = arch_color, name = NULL) +
+      labs(x = NULL, y = "Macro F1", title = paste0(m, ": model-level Macro F1")) +
+      theme_param
+
+  cls <- arch_class_data |>
+    filter(mode == m) |>
+    ggplot(aes(x = class, y = f1, fill = class, alpha = arch,
+               group = interaction(class, arch))) +
+      box_jitter(point_size = 4) +
+      scale_fill_manual(values = class_color, guide = "none") +
+      scale_alpha_manual(values = arch_alpha, name = NULL) +
+      guides(alpha = guide_legend(override.aes = list(fill = "grey30"))) +
+      labs(x = NULL, y = "F1", title = "Per-class F1 (U-Net vs UNet3+)") +
+      theme_param
+
+  macro / cls + plot_layout(heights = c(1, 1.4))
+}
+
+arch_fig("Multiclass")
+arch_fig("Binary")
 ```
