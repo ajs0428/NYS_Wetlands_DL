@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>COG viewer — pipeline diagnostics</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    body { margin: 0; display: flex; height: 100vh; font-family: monospace; }
+    #log { width: 46%; overflow-y: auto; padding: 10px; font-size: 12px;
+           background: #111; color: #ddd; white-space: pre-wrap; }
+    #log .err { color: #ff6b6b; } #log .ok { color: #69db7c; }
+    #map { flex: 1; }
+  </style>
+</head>
+<body>
+  <div id="log"></div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/proj4@2.11.0/dist/proj4.js" crossorigin=""></script>
+  <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js" crossorigin=""></script>
+  <script src="https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js" crossorigin=""></script>
+  <script>
+    // absolute URL required: georaster fetches from a Web Worker, which
+    // cannot resolve page-relative paths
+    const COG_BASE = new URL("../../Data/HUC_DL_Predictions_v2/cogs", location.href).href;
+    const logEl = document.getElementById("log");
+    const t0 = Date.now();
+    function log(msg, cls) {
+      const line = document.createElement("div");
+      if (cls) line.className = cls;
+      line.textContent = `[${((Date.now() - t0) / 1000).toFixed(2)}s] ${msg}`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    window.addEventListener("error", (e) => log(`UNCAUGHT: ${e.message} (${e.filename}:${e.lineno})`, "err"));
+    window.addEventListener("unhandledrejection", (e) => log(`UNHANDLED REJECTION: ${e.reason?.message ?? e.reason}`, "err"));
+
+    // Count every fetch the COG libraries make
+    let nFetch = 0, nRange = 0, shown = 0;
+    const origFetch = window.fetch.bind(window);
+    window.fetch = (url, opts) => {
+      nFetch++;
+      const range = opts?.headers?.Range ?? opts?.headers?.range;
+      if (range) nRange++;
+      if (shown++ < 8) log(`fetch #${nFetch}: ${String(url).split("/").pop()} ${range ? "[" + range + "]" : ""}`);
+      return origFetch(url, opts);
+    };
+
+    (async () => {
+      try {
+        log(`libs: leaflet=${typeof L !== "undefined"} proj4=${typeof proj4 !== "undefined"} ` +
+            `parseGeoraster=${typeof parseGeoraster !== "undefined"} GeoRasterLayer=${typeof GeoRasterLayer !== "undefined"}`);
+        if (typeof proj4 !== "undefined") {
+          for (let z = 1; z <= 19; z++)
+            proj4.defs(`EPSG:${6329 + z}`, `+proj=utm +zone=${z} +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`);
+          log(`proj4 defs registered; "EPSG:6347" in proj4.defs -> ${"EPSG:6347" in proj4.defs}`, "ok");
+        }
+
+        const map = L.map("map", { center: [42.9, -75.5], zoom: 7 });
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+
+        let t = Date.now();
+        const resp = await origFetch(`${COG_BASE}/manifest.json`);
+        const manifest = await resp.json();
+        log(`manifest: HTTP ${resp.status}, ${manifest.length} entries (${Date.now() - t}ms)`, "ok");
+
+        const wanted = new URLSearchParams(location.search).get("file");
+        const entry = wanted ? manifest.find((e) => e.file === wanted) : manifest.find((e) => e.valid_cog);
+        log(`testing: ${entry.file} (classes: ${entry.classes.join(",")})`);
+
+        t = Date.now();
+        const georaster = await parseGeoraster(`${COG_BASE}/${entry.file}`);
+        log(`parseGeoraster OK in ${Date.now() - t}ms — projection=${georaster.projection}, ` +
+            `${georaster.width}x${georaster.height}, pixel=${georaster.pixelWidth?.toFixed?.(2)}m, ` +
+            `fetches so far: ${nFetch} (${nRange} ranged)`, "ok");
+
+        t = Date.now();
+        const layer = new GeoRasterLayer({
+          georaster,
+          pixelValuesToColorFn: (v) =>
+            v[0] === 255 || v[0] == null ? null : ["#F0E442", "#009E73", "#D55E00", "#999999"][v[0]] ?? "#0072B2",
+          resolution: 64,
+        });
+        log(`GeoRasterLayer constructed in ${Date.now() - t}ms`, "ok");
+
+        let tilesStarted = 0, tilesDone = 0, tileErrs = 0, firstTile = null;
+        layer.on("tileloadstart", () => { tilesStarted++; });
+        layer.on("tileload", () => {
+          tilesDone++;
+          if (!firstTile) { firstTile = Date.now(); log(`FIRST TILE RENDERED ${firstTile - t}ms after layer add`, "ok"); }
+        });
+        layer.on("tileerror", (e) => { if (tileErrs++ < 5) log(`tileerror: ${e.error?.message ?? e.error ?? "?"}`, "err"); });
+        layer.on("load", () => log(`all visible tiles done: ${tilesDone}/${tilesStarted} ok, ${tileErrs} errors, ` +
+            `total fetches ${nFetch} (${nRange} ranged)`, "ok"));
+
+        t = Date.now();
+        layer.addTo(map);
+        const [w, s, e, n] = entry.bounds_wgs84;
+        map.fitBounds(L.latLngBounds([s, w], [n, e]).pad(0.05));
+        log("layer added to map; waiting for tiles…");
+
+        setInterval(() => {
+          if (!firstTile) log(`still waiting… tiles started=${tilesStarted} done=${tilesDone} errs=${tileErrs} fetches=${nFetch}`);
+        }, 5000);
+      } catch (err) {
+        log(`PIPELINE FAILED: ${err?.message ?? err}`, "err");
+        console.error(err);
+      }
+    })();
+  </script>
+</body>
+</html>

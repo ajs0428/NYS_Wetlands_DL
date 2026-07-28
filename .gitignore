@@ -30,6 +30,11 @@ Python_Code_Analysis/raster_footprint*
 !Python_Code_Analysis/DL_Pipeline_v2/factorial_experiment/*
 # but not generated HTML previews
 Python_Code_Analysis/DL_Pipeline_v2/factorial_experiment/*.html
+# production model workstream (docs + recipe); same shape as factorial_experiment
+!Python_Code_Analysis/DL_Pipeline_v2/production_model/
+!Python_Code_Analysis/DL_Pipeline_v2/production_model/*
+Python_Code_Analysis/DL_Pipeline_v2/production_model/*.html
+Python_Code_Analysis/DL_Pipeline_v2/production_model/__pycache__/
 
 # Track models directory structure but not contents
 !Models/
@@ -43,6 +48,7 @@ Models/*
 !Dockerfile
 !pyproject.toml
 CLAUDE.md
+!AGENTS.md
 !*.Rproj
 !*.RHistory
 !README.md
@@ -52,6 +58,23 @@ CLAUDE.md
 !.gitkeep
 !Data/Training_Data/
 !Data/
+
+# --- webmap viewer source (root rule is `*`, so this needs whitelisting) ------
+# The Leaflet/COG viewer + its dev server. Source only -- the COGs and any
+# generated tiles it serves are data and stay ignored.
+!webmap/
+!webmap/*.py
+!webmap/*.md
+!webmap/viewer/
+!webmap/viewer/*.html
+!webmap/viewer/*.js
+!webmap/viewer/*.css
+webmap/__pycache__/
+
+# --- generated R outputs (rendered artifacts, not source) --------------------
+R_Code_Analysis/*.html
+R_Code_Analysis/Rplots.pdf
+R_Code_Analysis/.positron-temp-*
 
 # --- dl_10 lightweight notebook inputs (sync small CSV/JSON via git) ----------
 # §1–§7 of dl_10_factorial_viz.ipynb read these; the heavy .ckpt/.safetensors
@@ -117,6 +140,21 @@ CLAUDE.md
 !Models/results_arch_v2/*/*/seed*/metrics.json
 !Models/results_arch_v2/*/*/seed*/training_log.json
 !Models/results_arch_v2/*/*/seed*/training_history_*.json
+# --- production model (Models/production_model/<mode>/production/seed<k>/) ----
+# Same <mode> nesting as the v2 roots. The manifest is whitelisted here (it is
+# not in the factorial roots) because provenance -- git_commit, pool rule, band
+# list -- is what makes a SHIPPED checkpoint auditable after the fact.
+!Models/production_model/
+!Models/production_model/analysis/
+!Models/production_model/analysis/**
+!Models/production_model/*/
+!Models/production_model/*/*/
+!Models/production_model/*/*/seed*/
+!Models/production_model/*/*/seed*/metrics.json
+!Models/production_model/*/*/seed*/manifest.json
+!Models/production_model/*/*/seed*/confusion_matrix.csv
+!Models/production_model/*/*/seed*/training_log.json
+!Models/production_model/*/*/seed*/training_history_*.json
 # re-ignore heavy artifacts + generated outputs the globs above would catch:
 Models/**/.ipynb_checkpoints/
 Models/**/figures/
