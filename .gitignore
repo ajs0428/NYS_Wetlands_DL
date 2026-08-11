@@ -33,6 +33,8 @@ Python_Code_Analysis/DL_Pipeline_v2/factorial_experiment/*.html
 # production model workstream (docs + recipe); same shape as factorial_experiment
 !Python_Code_Analysis/DL_Pipeline_v2/production_model/
 !Python_Code_Analysis/DL_Pipeline_v2/production_model/*
+!Python_Code_Analysis/DL_Pipeline_v2/arch_fusion/
+!Python_Code_Analysis/DL_Pipeline_v2/arch_fusion/*
 Python_Code_Analysis/DL_Pipeline_v2/production_model/*.html
 Python_Code_Analysis/DL_Pipeline_v2/production_model/__pycache__/
 
