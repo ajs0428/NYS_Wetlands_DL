@@ -18,7 +18,7 @@
 #   RESULTS_DIR  results root to walk  (default: Models/factorial_results if it
 #                exists -- the synced location -- else <repo>/results)
 #   OUTPUT_DIR   where CSVs land       (default: <RESULTS_DIR>/analysis)
-#   SEEDS        expected seeds, for the coverage report (default: "0 1 2")
+#   SEEDS        expected seeds, for the coverage report (default: "0 1 2 3 4")
 #   PYTHON       interpreter           (default: python; needs the project env active)
 set -euo pipefail
 
@@ -35,7 +35,7 @@ if [[ -z "${RESULTS_DIR:-}" ]]; then
         RESULTS_DIR="$REPO_ROOT/results"
     fi
 fi
-SEEDS="${SEEDS:-0 1 2}"
+SEEDS="${SEEDS:-0 1 2 3 4}"
 
 [[ -d "$RESULTS_DIR" ]] || {
     echo "[error] results dir not found: $RESULTS_DIR"

@@ -142,6 +142,50 @@ R_Code_Analysis/.positron-temp-*
 !Models/results_arch_v2/*/*/seed*/metrics.json
 !Models/results_arch_v2/*/*/seed*/training_log.json
 !Models/results_arch_v2/*/*/seed*/training_history_*.json
+# --- factorial v3 roots (Models/<root>/<mode>/<cell>/seed<k>/) ----------------
+# Same shape as the v2 roots. Two additions, both driven by the three-arm
+# architecture comparison: confusion_matrix.csv, because dl_08b's FSW<->UPL
+# contrast is computed from the per-cell matrix and should be reproducible from a
+# git pull alone; and seed*/gates/*.npz, the fusion gate rasters, which are a
+# deliverable (float16, ~0.5 MB/patch) rather than a debug artifact.
+!Models/factorial_results_v3/
+!Models/results_arch_v3/
+!Models/results_arch_fusion_v3/
+!Models/factorial_results_v3/*/
+!Models/results_arch_v3/*/
+!Models/results_arch_fusion_v3/*/
+!Models/factorial_results_v3/*/analysis/
+!Models/results_arch_v3/*/analysis/
+!Models/results_arch_fusion_v3/*/analysis/
+!Models/factorial_results_v3/*/analysis/**
+!Models/results_arch_v3/*/analysis/**
+!Models/results_arch_fusion_v3/*/analysis/**
+!Models/factorial_results_v3/*/*/
+!Models/results_arch_v3/*/*/
+!Models/results_arch_fusion_v3/*/*/
+!Models/factorial_results_v3/*/*/seed*/
+!Models/results_arch_v3/*/*/seed*/
+!Models/results_arch_fusion_v3/*/*/seed*/
+!Models/factorial_results_v3/*/*/seed*/metrics.json
+!Models/results_arch_v3/*/*/seed*/metrics.json
+!Models/results_arch_fusion_v3/*/*/seed*/metrics.json
+!Models/factorial_results_v3/*/*/seed*/manifest.json
+!Models/results_arch_v3/*/*/seed*/manifest.json
+!Models/results_arch_fusion_v3/*/*/seed*/manifest.json
+!Models/factorial_results_v3/*/*/seed*/confusion_matrix.csv
+!Models/results_arch_v3/*/*/seed*/confusion_matrix.csv
+!Models/results_arch_fusion_v3/*/*/seed*/confusion_matrix.csv
+!Models/factorial_results_v3/*/*/seed*/training_log.json
+!Models/results_arch_v3/*/*/seed*/training_log.json
+!Models/results_arch_fusion_v3/*/*/seed*/training_log.json
+!Models/factorial_results_v3/*/*/seed*/training_history_*.json
+!Models/results_arch_v3/*/*/seed*/training_history_*.json
+!Models/results_arch_fusion_v3/*/*/seed*/training_history_*.json
+!Models/factorial_results_v3/*/*/seed*/shap/
+!Models/factorial_results_v3/*/*/seed*/shap/*_shap_importance.json
+!Models/results_arch_fusion_v3/*/*/seed*/gates/
+!Models/results_arch_fusion_v3/*/*/seed*/gates/gate_summary.json
+!Models/results_arch_fusion_v3/*/*/seed*/gates/*.npz
 # --- production model (Models/production_model/<mode>/production/seed<k>/) ----
 # Same <mode> nesting as the v2 roots. The manifest is whitelisted here (it is
 # not in the factorial roots) because provenance -- git_commit, pool rule, band

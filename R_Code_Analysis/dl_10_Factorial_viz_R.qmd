@@ -47,6 +47,17 @@ glimpse(binary_fact_data)
 ```
 
 ```{r}
+#| label: results-roots
+
+# Root holding the architecture-comparison analysis/ dirs -- i.e. the LAST
+# --arch-dir passed to dl_08b_aggregate_patchcurve.py, which is where it writes.
+# v2: results_arch_v2 (two arms). For v3 point this at the fusion root, which
+# also holds the gate exports read by the last section:
+#   arch_dir_base <- "../Models/results_arch_fusion_v3"
+arch_dir_base <- "../Models/results_arch_v2"
+```
+
+```{r}
 #| label: data-organizing
 
 config_order <- c("fld_nolidar_leafon", "fld_nolidar_leafoff",  "fld_chmret_leafon", "fld_chmret_leafoff",
@@ -719,57 +730,65 @@ pc_macro |>
 
 ### Does model architecture matter?
 
-- Top: model-level Macro F1 (U-Net vs UNet3+); bottom: per-class F1 coloured by class
-- Boxplot with seed points overlaid to show distribution of model runs
-- U-Net vs UNet3+ on `fld_chmret_leafoff` (same seeds -> same test patches; bf64/d5 held constant)
+- Three arms on `fld_chmret_leafoff`: U-Net (base grid), UNet3+, and the multi-branch
+  fusion encoder. Same seeds -> same test patches, and bf64/d5 held constant, so the
+  only thing that varies is the architecture.
+- Top: model-level Macro F1; middle: per-class F1 coloured by class; bottom: the
+  FSW<->UPL confusion rates the fusion encoder is meant to attack.
+- Boxplot with seed points overlaid to show the distribution of model runs.
+- Reads `arch_compare_long.csv` (tidy, one row per arch x seed), so adding a fourth
+  arm to `dl_08b_aggregate_patchcurve.py --arch-dir` needs no change here beyond a
+  colour. Arms absent from the CSV are dropped silently.
+
+```{r}
+#| label: q7-arch-data
+
+# Display names + palette, keyed by the `arch` values dl_08b writes. Extend both
+# to add an arm; everything downstream keys off ARCH_LEVELS.
+arch_name  <- c(unet = "U-Net", unet3plus = "UNet3+", mbfusion = "Fusion")
+arch_color <- c("U-Net" = "#4477AA", "UNet3+" = "#EE7733", "Fusion" = "#009988")
+
+arch_root <- function(mode_dir) file.path(arch_dir_base, mode_dir, "analysis")
+
+read_arch_csv <- function(file) {
+  bind_rows(
+    read.csv(file.path(arch_root("multiclass"), file)) |> mutate(mode = "Multiclass"),
+    read.csv(file.path(arch_root("binary"), file))     |> mutate(mode = "Binary")
+  ) |>
+    mutate(mode = factor(mode, levels = c("Multiclass", "Binary")))
+}
+
+arch_long <- read_arch_csv("arch_compare_long.csv") |>
+  mutate(arch = factor(arch_name[arch], levels = arch_name))
+
+# Levels actually present, so a two-arm (pre-fusion) tree still renders
+ARCH_LEVELS <- levels(droplevels(arch_long$arch))
+arch_long <- arch_long |> mutate(arch = factor(as.character(arch), levels = ARCH_LEVELS))
+
+# Long-form metrics: macro/mean-IoU, per-class IoU & F1, and confusion rates all
+# arrive as columns; melt everything numeric and label the pieces.
+arch_metrics <- arch_long |>
+  select(-any_of(c("params", "gflops", "sec_per_epoch", "epochs_run", "fit_seconds"))) |>
+  pivot_longer(where(is.numeric) & !any_of("seed"),
+               names_to = "metric", values_to = "value") |>
+  filter(!is.na(value))
+
+arch_class <- arch_metrics |>
+  filter(str_detect(metric, "^(iou|f1)_")) |>
+  separate_wider_regex(metric, c(metric = "iou|f1", "_", class = ".*")) |>
+  mutate(class = factor(class, levels = class_order))
+```
 
 ```{r}
 #| label: q7-arch
 #| fig-width: 16
-#| fig-height: 12
+#| fig-height: 16
 
-arch_color <- c("U-Net" = "#4477AA", "UNet3+" = "#EE7733")
-
-arch_data <- bind_rows(
-  read.csv("../Models/results_arch_v2/multiclass/analysis/arch_compare.csv") |> mutate(mode = "Multiclass"),
-  read.csv("../Models/results_arch_v2/binary/analysis/arch_compare.csv")     |> mutate(mode = "Binary")
-) |>
-  filter(seed != "mean") |>
-  select(-starts_with("arch_"), -starts_with("delta_")) |>
-  pivot_longer(-c(config, seed, mode),
-               names_pattern = "^(.*)_(unet3plus|unet)$",
-               names_to = c("metric", "arch"), values_to = "value") |>
-  filter(!is.na(value)) |>   # bind_rows pads the other mode's class columns with NA
-  mutate(mode = factor(mode, levels = c("Multiclass", "Binary")),
-         arch = factor(if_else(arch == "unet", "U-Net", "UNet3+"), levels = names(arch_color)))
-
-# Per-class F1 is not in arch_compare.csv (IoU only) -> read the per-seed metrics.json
-read_arch_perclass <- function(mode_name, mode_dir) {
-  arch_dirs <- c("U-Net" = "fld_chmret_leafoff", "UNet3+" = "fld_chmret_leafoff_unet3plus")
-  imap_dfr(arch_dirs, function(sub, arch_name) {
-    seed_dirs <- list.dirs(file.path(mode_dir, sub), recursive = FALSE)
-    map_dfr(seed_dirs, function(sd) {
-      pc <- fromJSON(file.path(sd, "metrics.json"), simplifyVector = FALSE)$test_metrics$per_class
-      tibble(arch = arch_name, seed = basename(sd), class = names(pc), f1 = map_dbl(pc, "f1"))
-    })
-  }) |> mutate(mode = mode_name)
-}
-
-arch_class_data <- bind_rows(
-  read_arch_perclass("Multiclass", "../Models/results_arch_v2/multiclass"),
-  read_arch_perclass("Binary",     "../Models/results_arch_v2/binary")
-) |>
-  mutate(mode  = factor(mode, levels = c("Multiclass", "Binary")),
-         arch  = factor(arch, levels = names(arch_color)),
-         class = factor(class, levels = class_order))
-
-# One figure per mode so the y-axes are scaled to that mode's metric range
-# Per-class panel: side-by-side boxplots per class for the two archs; class colour
-# kept as fill, arch encoded by alpha (UNet3+ lighter) so both dodge together.
-arch_alpha <- c("U-Net" = 1, "UNet3+" = 0.4)
+# Alpha separates arms inside a class group; recycled to however many arms exist.
+arch_alpha <- setNames(seq(1, 0.4, length.out = length(ARCH_LEVELS)), ARCH_LEVELS)
 
 arch_fig <- function(m) {
-  macro <- arch_data |>
+  macro <- arch_metrics |>
     filter(metric == "macro_f1", mode == m) |>
     ggplot(aes(x = arch, y = value, fill = arch)) +
       box_jitter(point_size = 4) +
@@ -777,20 +796,133 @@ arch_fig <- function(m) {
       labs(x = NULL, y = "Macro F1", title = paste0(m, ": model-level Macro F1")) +
       theme_param
 
-  cls <- arch_class_data |>
-    filter(mode == m) |>
-    ggplot(aes(x = class, y = f1, fill = class, alpha = arch,
+  cls <- arch_class |>
+    filter(metric == "f1", mode == m) |>
+    ggplot(aes(x = class, y = value, fill = class, alpha = arch,
                group = interaction(class, arch))) +
       box_jitter(point_size = 4) +
       scale_fill_manual(values = class_color, guide = "none") +
       scale_alpha_manual(values = arch_alpha, name = NULL) +
       guides(alpha = guide_legend(override.aes = list(fill = "grey30"))) +
-      labs(x = NULL, y = "F1", title = "Per-class F1 (U-Net vs UNet3+)") +
+      labs(x = NULL, y = "F1",
+           title = paste0("Per-class F1 (", paste(ARCH_LEVELS, collapse = " vs "), ")")) +
       theme_param
 
-  macro / cls + plot_layout(heights = c(1, 1.4))
+  parts <- list(macro, cls)
+  heights <- c(1, 1.4)
+
+  # Confusion panel: multiclass only -- binary has no FSW, so dl_08b omits the
+  # conf_ columns there rather than writing zeros.
+  conf <- arch_metrics |> filter(mode == m, str_detect(metric, "^conf_.*_as_"))
+  if (nrow(conf) > 0) {
+    conf_p <- conf |>
+      mutate(metric = recode(metric,
+                             conf_FSW_as_UPL = "True FSW -> predicted UPL",
+                             conf_UPL_as_FSW = "True UPL -> predicted FSW")) |>
+      ggplot(aes(x = arch, y = value, fill = arch)) +
+        box_jitter(point_size = 4) +
+        facet_wrap(~ metric, scales = "free_y") +
+        scale_fill_manual(values = arch_color, guide = "none") +
+        scale_y_continuous(labels = scales::label_percent(accuracy = 0.1)) +
+        labs(x = NULL, y = "Share of the true class's pixels",
+             title = "FSW <-> UPL confusion (lower is better)") +
+        theme_param
+    parts <- c(parts, list(conf_p))
+    heights <- c(heights, 1)
+  }
+
+  wrap_plots(parts, ncol = 1) + plot_layout(heights = heights)
 }
 
 arch_fig("Multiclass")
 arch_fig("Binary")
+```
+
+Paired per-seed contrasts against the baseline arm. Same seed => same test patches,
+so each row is a paired difference, and at n=5 the credible summary is the sign
+consistency (`n_better` / `n_seeds`), not a p-value. `lower_is_better` marks the
+confusion rates, where a negative delta is the improvement.
+
+```{r}
+#| label: q7-contrasts
+
+read_arch_csv("arch_contrasts.csv") |>
+  filter(metric %in% c("macro_f1", "mean_iou") | str_detect(metric, "^conf_")) |>
+  mutate(arch = arch_name[arch], baseline = arch_name[baseline],
+         across(c(baseline_mean, arch_mean, delta_mean, delta_sd), \(x) round(x, 4)),
+         # pandas writes "True"/"False"; read.csv leaves those as character
+         across(c(sign_consistent, lower_is_better), as.logical),
+         seeds = paste0(n_better, "/", n_seeds)) |>
+  select(mode, arch, baseline, metric, baseline_mean, arch_mean,
+         delta_mean, delta_sd, seeds, sign_consistent, lower_is_better) |>
+  arrange(mode, arch, metric) |>
+  knitr::kable(caption = "Paired per-seed deltas vs the baseline architecture")
+```
+
+What the extra accuracy costs. Params come from the training journal (exact);
+GFLOPs from Lightning's model summary in `train.log`, so they are blank for cells
+whose Lightning version did not print that line. `sec_per_epoch` is fit-only wall
+clock and is only recorded for v3 runs onwards -- it is a same-GPU comparison, not
+a portable benchmark.
+
+```{r}
+#| label: q7-cost
+
+read_arch_csv("arch_cost.csv") |>
+  mutate(arch = arch_name[arch],
+         params_M = round(params / 1e6, 2),
+         params_x = round(params_x_baseline, 3)) |>
+  select(mode, arch, params_M, params_x, gflops, sec_per_epoch, epochs_run) |>
+  arrange(mode, desc(params_M)) |>
+  knitr::kable(caption = "Cost per architecture (seed means)")
+```
+
+### What do the fusion gates attend to?
+
+`dl_11_export_gates.py` writes one `.npz` per held-out patch under
+`<cell>/seed<k>/gates/`, holding the per-scale softmax gate weights (one channel
+per branch, summing to 1 at every pixel) plus a `gate_summary.json` of the means.
+
+**Read these as spatial patterns within a branch, not as a cross-branch ranking.**
+A branch's mean gate weight is confounded by its channel width and by what the
+projection layer does downstream, so "terrain averages 0.31" is provenance, not
+importance. What is interpretable: where within a scene one branch's weight rises
+relative to its own average, and whether the gates stay mixed (entropy near
+log(n_branch)) rather than collapsing onto one branch.
+
+```{r}
+#| label: q8-gates
+
+gate_files <- Sys.glob(file.path(arch_dir_base, "*", "*_mbfusion", "seed*",
+                                 "gates", "gate_summary.json"))
+
+if (length(gate_files) == 0) {
+  cat("No gate exports found -- run dl_11_export_gates.py and rsync the .npz back.\n")
+} else {
+  gate_means <- map_dfr(gate_files, function(f) {
+    js <- fromJSON(f, simplifyVector = FALSE)
+    seed <- str_extract(f, "seed\\d+")
+    mode <- if (str_detect(f, "/binary/")) "Binary" else "Multiclass"
+    map_dfr(names(js$per_scale), function(sc) {
+      tibble(mode = mode, seed = seed, scale = sc,
+             branch = names(js$per_scale[[sc]]),
+             mean_gate = as.numeric(unlist(js$per_scale[[sc]])))
+    })
+  }) |>
+    mutate(mode  = factor(mode, levels = c("Multiclass", "Binary")),
+           scale = factor(scale, levels = unique(scale)))
+
+  gate_means |>
+    ggplot(aes(x = scale, y = mean_gate, colour = branch, group = branch)) +
+      stat_summary(fun = mean, geom = "line", linewidth = 1) +
+      stat_summary(fun = mean, geom = "point", size = 3) +
+      geom_jitter(width = 0.08, alpha = 0.35, size = 2) +
+      facet_wrap(~ mode) +
+      scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+      labs(x = "Encoder scale (0 = full resolution)", y = "Mean gate weight",
+           colour = NULL,
+           title = "Fusion gate weight by branch and scale",
+           subtitle = "Seed points jittered; compare a branch across scales, not branches to each other") +
+      theme_param
+}
 ```

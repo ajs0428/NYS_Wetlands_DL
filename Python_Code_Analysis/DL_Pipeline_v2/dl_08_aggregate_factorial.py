@@ -361,8 +361,8 @@ def main():
                     help="Root holding <config>/seed<k>/ cells (default: <repo>/results)")
     ap.add_argument("--output-dir", type=Path, default=None,
                     help="Where to write the CSVs (default: <results-dir>/analysis)")
-    ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2],
-                    help="Expected replicate seeds, for the coverage report (default: 0 1 2)")
+    ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4],
+                    help="Expected replicate seeds, for the coverage report (default: 0 1 2 3 4)")
     args = ap.parse_args()
 
     results_dir = args.results_dir if args.results_dir.is_absolute() \

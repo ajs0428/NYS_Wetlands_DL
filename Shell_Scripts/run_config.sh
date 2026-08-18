@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_config.sh -- train + evaluate ONE factorial-v2 cell (config x seed x mode).
+# run_config.sh -- train + evaluate ONE factorial-v3 cell (config x seed x mode).
 #
 # Phase 2.1. Holds architecture, loss, optimizer, schedule, and weight_power
 # constant across every run; only the active predictor bands, the training label
@@ -25,7 +25,11 @@
 #   Results root is mode-tokened: RESULTS_DIR/<mode>/<config>/seed<k>/.
 #
 # Follow-on-study knobs (default to base-factorial behavior when unset):
-#   ARCH=unet|unet3plus  CAT_CHANNELS=64  DEEP_SUPERVISION=0|1
+#   ARCH=unet|unet3plus|mbfusion   CAT_CHANNELS=64  DEEP_SUPERVISION=0|1
+#   GATE_KERNEL=3        [mbfusion] spatial kernel of the per-scale branch gate.
+#                        The branch->channel map itself is NOT a knob: the trainer
+#                        derives it from the config's stats file and stores it in
+#                        the checkpoint, so eval/predict need no extra flags.
 #   N_PATCHES=<n>        learning curve: cap the TRAIN pool to n (seeded-shuffle
 #                        prefix, nested per seed); val/test stay full.
 #   CELL_NAME=<dir>      cell dir under RESULTS_DIR/<mode> (default: $CONFIG);
@@ -42,7 +46,7 @@ PIPE="$REPO_ROOT/Python_Code_Analysis/DL_Pipeline_v2"
 DATA="$REPO_ROOT/Data/Training_Data"
 DATA_ROOT="${DATA_ROOT:-$DATA}"
 STATS_DIR="${STATS_DIR:-$DATA/stats}"
-RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/Models/factorial_results_v2}"
+RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/Models/factorial_results_v3}"
 PYTHON="${PYTHON:-python}"
 
 # --- Mode + leakage regime (v2 axes) ---
@@ -61,6 +65,7 @@ PRECISION="${PRECISION:-16-mixed}"
 # --- Follow-on-study knobs (default to base-factorial behavior) ---
 CAT_CHANNELS="${CAT_CHANNELS:-64}"
 DEEP_SUPERVISION="${DEEP_SUPERVISION:-0}"
+GATE_KERNEL="${GATE_KERNEL:-3}"
 
 # --- Resolve config -> stats files (single source of truth: dl_experiment_config) ---
 eval "$("$PYTHON" "$PIPE/dl_experiment_config.py" --emit "$CONFIG" --mode "$MODE")"
@@ -104,6 +109,9 @@ if [[ "$ARCH" == "unet3plus" ]]; then
     EXTRA_TRAIN_ARGS+=(--cat-channels "$CAT_CHANNELS")
     [[ "$DEEP_SUPERVISION" == "1" ]] && EXTRA_TRAIN_ARGS+=(--deep-supervision)
 fi
+if [[ "$ARCH" == "mbfusion" ]]; then
+    EXTRA_TRAIN_ARGS+=(--gate-kernel "$GATE_KERNEL")
+fi
 [[ -n "${N_PATCHES:-}" ]] && EXTRA_TRAIN_ARGS+=(--n-patches "$N_PATCHES")
 
 # --- Train + field-test in one shot (trainer resolves pools + evaluates on field). ---
@@ -135,7 +143,7 @@ if [[ "${DRY_RUN:-0}" != "1" ]]; then
     BATCH_SIZE="$BATCH_SIZE" PRECISION="$PRECISION" CE_WEIGHT="$CE_WEIGHT" \
     DICE_WEIGHT="$DICE_WEIGHT" FOCAL_GAMMA="$FOCAL_GAMMA" GIT_COMMIT="$GIT_COMMIT" \
     DATA_ROOT="$DATA_ROOT" CAT_CHANNELS="$CAT_CHANNELS" DEEP_SUPERVISION="$DEEP_SUPERVISION" \
-    N_PATCHES="${N_PATCHES:-}" \
+    N_PATCHES="${N_PATCHES:-}" GATE_KERNEL="$GATE_KERNEL" PIPE="$PIPE" \
     "$PYTHON" - <<'PY'
 import json, os, csv, re
 from pathlib import Path
@@ -168,6 +176,15 @@ if matrix is not None:
         csv.writer(f).writerows(matrix)
 
 train_stats = json.loads(Path(os.environ["TRAIN_STATS_PATH"]).read_text())
+
+branches = None
+if os.environ["ARCH"] == "mbfusion":
+    import sys
+    sys.path.insert(0, os.environ["PIPE"])
+    from dl_experiment_config import branch_indices_from_predictors, BRANCH_WIDTHS
+    _bi = branch_indices_from_predictors(train_stats["predictor_names"])
+    branches = {b: {"channels": len(idx), "width": BRANCH_WIDTHS[b]}
+                for b, idx in _bi.items()}
 
 # Best-effort degrade provenance for flddeg: pull the flip_prob the degrader
 # logged (in-memory degrade, so it lives in train.log, not a manifest file).
@@ -203,6 +220,12 @@ manifest = {
     "depth": int(os.environ["DEPTH"]),
     "cat_channels": int(os.environ["CAT_CHANNELS"]) if os.environ["ARCH"] == "unet3plus" else None,
     "deep_supervision": os.environ.get("DEEP_SUPERVISION") == "1" if os.environ["ARCH"] == "unet3plus" else None,
+    "gate_kernel": int(os.environ["GATE_KERNEL"]) if os.environ["ARCH"] == "mbfusion" else None,
+    # Branch layout for mbfusion: names -> (channels, encoder width). The exact
+    # index map lives in the checkpoint sidecar (it is what rebuilds the net);
+    # this is the human-readable provenance, and it also pins branch ORDER, which
+    # fixes the gate's channel order when reading gate rasters later.
+    "branches": branches,
     "epochs": int(os.environ["EPOCHS"]),
     "batch_size": int(os.environ["BATCH_SIZE"]),
     "n_patches": int(os.environ["N_PATCHES"]) if os.environ.get("N_PATCHES") else None,

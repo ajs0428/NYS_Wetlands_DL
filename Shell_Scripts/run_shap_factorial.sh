@@ -20,8 +20,8 @@
 #   docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 #     -v /workdir/$USER/nys_wetlands:/app \
 #     nys-wetlands-dl bash Shell_Scripts/run_shap_factorial.sh \
-#     --results-dir Models/factorial_results_v2/multiclass
-#   ... run_shap_factorial.sh --results-dir Models/factorial_results_v2/binary --mode binary
+#     --results-dir Models/factorial_results_v3/multiclass
+#   ... run_shap_factorial.sh --results-dir Models/factorial_results_v3/binary --mode binary
 #
 # Subset example:
 #   ... bash Shell_Scripts/run_shap_factorial.sh --configs fld_chmret_leafoff --seeds 0

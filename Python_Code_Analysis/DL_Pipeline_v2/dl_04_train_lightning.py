@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import lightning as L
+import time
 from datetime import datetime
 
 from lightning.pytorch.callbacks import (
@@ -612,8 +613,12 @@ def train(
         enable_progress_bar=True,
     )
 
-    
+    # Wall-clock around fit only (not test): the cost table's "sec/epoch" compares
+    # architectures, and test time is a fixed per-cell overhead that would dilute it.
+    fit_start = time.perf_counter()
     trainer.fit(module, datamodule=dm)
+    fit_seconds = time.perf_counter() - fit_start
+    epochs_run = trainer.current_epoch          # early stopping makes this < epochs
     test_results = trainer.test(module, datamodule=dm, ckpt_path="best")
 
     # Report best checkpoint
@@ -676,13 +681,16 @@ def train(
             tp = cm_float[i, i].item()
             support = cm_float[i].sum().item()
             pred_total = cm_float[:, i].sum().item()
-            precision = tp / pred_total if pred_total > 0 else 0.0
+            # cls_precision, not `precision` -- that name holds the training
+            # precision string ("16-mixed") that the journal records below, and
+            # shadowing it wrote a float into config.precision for every v1/v2 run.
+            cls_precision = tp / pred_total if pred_total > 0 else 0.0
             recall = tp / support if support > 0 else 0.0
-            f1 = (2 * precision * recall / (precision + recall)
-                   if (precision + recall) > 0 else 0.0)
+            f1 = (2 * cls_precision * recall / (cls_precision + recall)
+                   if (cls_precision + recall) > 0 else 0.0)
             iou = test_metrics_dict.get(f"test/iou_{name}", 0.0)
             per_class[name] = {
-                "precision": round(precision, 4),
+                "precision": round(cls_precision, 4),
                 "recall": round(recall, 4),
                 "f1": round(f1, 4),
                 "iou": round(iou, 4),
@@ -698,11 +706,26 @@ def train(
         "test": len(dm.test_dataloader().dataset),
     }
 
+    # Cost provenance -- what the arch-compare cost table reads. Recorded here
+    # because it is exact and free at train time; deriving it afterwards means
+    # parsing Lightning's rounded summary out of train.log ("125 M").
+    n_params = sum(p.numel() for p in module.net.parameters())
+    n_trainable = sum(p.numel() for p in module.net.parameters() if p.requires_grad)
+
     journal_entry = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "checkpoint": Path(best_path).name if best_path else None,
         "kfold": False,
         "best_epoch": module.current_epoch,
+        "cost": {
+            "params": n_params,
+            "trainable_params": n_trainable,
+            "epochs_run": epochs_run,
+            "fit_seconds": round(fit_seconds, 1),
+            "sec_per_epoch": round(fit_seconds / max(epochs_run, 1), 2),
+            "batch_size": batch_size,
+            "precision": precision,
+        },
         "best_val_loss": round(best_score.item(), 4) if best_score is not None else None,
         "architecture": arch,
         "config": {

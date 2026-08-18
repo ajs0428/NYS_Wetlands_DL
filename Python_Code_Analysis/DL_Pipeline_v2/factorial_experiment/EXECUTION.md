@@ -38,7 +38,7 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 # --- pull results back to /ibstorage for analysis ------------------------
 SERVER="$USER@cbsugpu09.biohpc.cornell.edu:" \
 REMOTE_RESULTS="/workdir/$USER/nys_wetlands/results" \
-LOCAL_DEST="/ibstorage/anthony/NYS_Wetlands_DL/Models/factorial_results" \
+LOCAL_DEST="/ibstorage/anthony/NYS_Wetlands_DL/Models/factorial_results_v3" \
   Shell_Scripts/rsync_results.sh --metrics-only   # add no flag for full weights
 ```
 
@@ -80,28 +80,34 @@ Every config name decodes into three experiment axes (defined once in
 
 | Slot | Values | Meaning |
 |---|---|---|
-| `<label>` | `fld` / `nwi` / `flddeg` | training **label source**: field-verified / NWI / field degraded to NWI prevalence |
-| `<lidar>` | `nolidar` / `chm` / `chmret` | LiDAR tier: none / CHM only / CHM + return-fraction bands |
+| `<label>` | `fld` / `nwi` / `nwiextra` / `nwifield` / `flddeg` | training **label source**: field-verified / NWI paired / NWI + extra footprints / field ∪ NWI-extra / field degraded to NWI prevalence |
+| `<lidar>` | `nolidar` / `chmret` | LiDAR tier: none / CHM + return-fraction bands (the v1 CHM-only tier was dropped) |
 | `<spectral>` | `leafon` / `leafoff` | leaf-on NAIP only / + leaf-off NAIP RGB+NIR |
 
 So `fld_chmret_leafoff` = field labels, full LiDAR, both seasons (the full
-26-channel feature set); `nwi_chmret_leafoff` = same features, NWI labels.
+29-channel feature set); `nwi_chmret_leafoff` = same features, NWI labels.
 
 The **8 configs** (feature ablation runs on field labels only; the label
-comparison runs on the full feature set only — see plan §2):
+comparison runs on the full feature set only — see plan §2). **v3 channel counts**
+— three terrain metrics (`TPI_local`, `meanc_local`, `dmv_local`) were added
+upstream, so every config gained 3 channels over v2's 18/22/26:
 
-| Config | `in_channels` |
-|---|---|
-| `fld_nolidar_leafon`    | 18 |
-| `fld_nolidar_leafoff`   | 22 |
-| `fld_chm_leafon`        | 19 |
-| `fld_chm_leafoff`       | 23 |
-| `fld_chmret_leafon`     | 22 |
-| `fld_chmret_leafoff`    | 26 |
-| `nwi_chmret_leafoff`    | 26 |
-| `flddeg_chmret_leafoff` | 26 |
+| Config | `in_channels` (v3) | was (v2) |
+|---|---|---|
+| `fld_nolidar_leafon`      | 21 | 18 |
+| `fld_nolidar_leafoff`     | 25 | 22 |
+| `fld_chmret_leafon`       | 25 | 22 |
+| `fld_chmret_leafoff`      | 29 | 26 |
+| `nwi_chmret_leafoff`      | 29 | 26 |
+| `nwiextra_chmret_leafoff` | 29 | 26 |
+| `nwifield_chmret_leafoff` | 29 | 26 |
+| `flddeg_chmret_leafoff`   | 29 | 26 |
 
-× 3 seeds (0,1,2) = **24 cells**.
+× 2 modes (multiclass, binary) × 5 seeds (0–4) = **80 cells**. v3 raised the
+replicate count from v2's R=3 so the factorial and the three-arm architecture
+comparison share one seed set. Always confirm
+against `python dl_experiment_config.py` — that file, not this table, is the
+source of truth.
 
 ### 2b. Python mechanism scripts (`Python_Code_Analysis/DL_Pipeline_v2/`)
 
@@ -115,6 +121,7 @@ comparison runs on the full feature set only — see plan §2):
 | `dl_04_train_lightning.py` | Training (called by the runner). |
 | `dl_05_evaluate.py` | Test-set metrics + confusion matrix (called by the runner; auto-detects arch from the checkpoint). |
 | `dl_08_aggregate_factorial.py` | **Phase 3 aggregation (CPU).** Walks `results/<config>/seed*/metrics.json` into the factorial table + paired-by-seed contrasts (LiDAR tiers, leaf-off main effect, LiDAR×leaf-off interaction, label gradient). Pure pandas; safe to run on a partial tree (reports coverage). |
+| `dl_11_export_gates.py` | **[mbfusion] Gate rasters (§10.4).** Loads a fusion cell's checkpoint and exports per-scale, per-branch softmax gates for a deterministic prefix of the seed's held-out field patches → `<cell>/gates/*.npz` + `gate_summary.json`. Standalone (does not touch `dl_05`), so it re-runs against any archived cell. |
 | `dl_09_shap_factorial.py` | **Phase 3 SHAP (GPU).** Thin wrapper over `dl_07_shap_analysis.run_shap` that walks the field-trained cells, loading each cell's checkpoint + per-config stats (correct band subset) at the cell's seed → `results/<config>/seed<k>/shap/`. Idempotent; **run inside the container before reservation teardown.** |
 
 ### 2c. Shell orchestration (`Shell_Scripts/`)
@@ -122,9 +129,11 @@ comparison runs on the full feature set only — see plan §2):
 | Script | What it does |
 |---|---|
 | `run_config.sh <config> <seed>` | **The workhorse.** Runs *one* cell: resolves stats via `dl_experiment_config.py --emit`, trains, finds the best checkpoint, evaluates on the **field** test set, writes `results/<config>/seed<k>/` (metrics, confusion matrix, manifest, logs). **Idempotent** — skips a cell whose `metrics.json` + `manifest.json` already exist. |
-| `run_<config>.sh` (8 of them) | Thin wrapper: loops one config over `SEEDS` (default `0 1 2`), deferring to `run_config.sh`. Use to run a single config's replicates. |
+| `run_<config>.sh` (8 of them) | Thin wrapper: loops one config over `SEEDS` (default `0 1 2 3 4`), deferring to `run_config.sh`. Use to run a single config's replicates. |
 | `run_factorial.sh` | **Top-level driver.** Walks every (config × seed) cell, seed-outer, calling `run_config.sh`; skip-completed makes it resumable. This is what you launch in `tmux`. |
-| `rsync_results.sh` | Pull `results/` from the GPU node's `/workdir` back to the CPU node (`--metrics-only` for fast JSON/CSV/PNG, no flag for full checkpoints). |
+| `run_arch_compare.sh <config>` | UNet3+ arm of the architecture comparison → `Models/results_arch_v3/`. |
+| `run_arch_fusion.sh <config>` | **Multi-branch fusion arm** (`--arch mbfusion`) → `Models/results_arch_fusion_v3/`. See §10.4. |
+| `rsync_results.sh` | Pull `results/` from the GPU node's `/workdir` back to the CPU node (`--metrics-only` for fast JSON/CSV/PNG/**NPZ**, no flag for full checkpoints). |
 | `run_aggregate.sh` | **Phase 3 aggregation.** Wraps `dl_08_aggregate_factorial.py` (CPU/pandas) → `<RESULTS_DIR>/analysis/`. Defaults `RESULTS_DIR` to `Models/factorial_results` (the synced location) if present, else `results/`. Safe on a partial tree. |
 | `run_tensorboard.sh` | Serve TensorBoard over `results/` from the host (one dashboard, every cell a run). |
 
@@ -139,7 +148,7 @@ runner enforces this automatically by evaluating with the matching
 
 | Var | Default | Use |
 |---|---|---|
-| `SEEDS` | `0 1 2` | replicate seeds (`SEEDS="0 1 2 3 4"` to extend to R=5) |
+| `SEEDS` | `0 1 2 3 4` | replicate seeds (R=5 in v3; `SEEDS="0 1 2"` for a v2-style R=3 run) |
 | `CONFIGS` | all 8 | subset, e.g. `CONFIGS="fld_chmret_leafoff nwi_chmret_leafoff"` |
 | `EPOCHS` | `50` | training epochs |
 | `BATCH_SIZE` | `16` | per-step batch |
@@ -579,10 +588,20 @@ not feed `dl_08`); §4a/§4b pick up the new outputs automatically.
 
 ## 10. Follow-on studies (plan Section 9)
 
-Three studies on top of the base factorial. Each reuses the idempotent
-`run_config.sh` via new env knobs (`ARCH`, `N_PATCHES`, `CELL_NAME`,
-`CAT_CHANNELS`, `DEEP_SUPERVISION`) that default to base-factorial behavior, so
-the 8×3 factorial is untouched. Pick `<config>` from `factorial_table.csv` (the
+Studies on top of the base factorial. Each reuses the idempotent `run_config.sh`
+via env knobs (`ARCH`, `N_PATCHES`, `CELL_NAME`, `CAT_CHANNELS`,
+`DEEP_SUPERVISION`, `GATE_KERNEL`) that default to base-factorial behavior, so
+the base grid is untouched.
+
+> **v3 changes to this section.** The architecture comparison now has **three**
+> arms — U-Net (base grid), UNet3+ (`run_arch_compare.sh`), and the multi-branch
+> fusion encoder (`run_arch_fusion.sh`, see §10.4). The **patch-count learning
+> curve is dropped from v3** (`run_patchcurve.sh` still works and is unchanged —
+> it is deferred until the training pool reaches 1000s of patches, since the
+> current 100–500 range is under one order of magnitude and won't support a
+> scaling claim). Results roots moved to the `_v3` namespace:
+> `Models/factorial_results_v3/`, `Models/results_arch_v3/`,
+> `Models/results_arch_fusion_v3/`. Pick `<config>` from `factorial_table.csv` (the
 best deployable field config, likely `fld_chmret_leafoff`). Heavy runs go on the
 GPU node inside `tmux`/`docker1` exactly like `run_factorial.sh`; aggregation is
 pure pandas on the CPU node. Validate the plan first with `DRY_RUN=1`.
@@ -648,8 +667,8 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 node (`results_patchcurve/`, `results_arch/`). Pull each **under `Models/`** on the
 CPU node — same convention as the base factorial's `Models/factorial_results` — via
 `rsync_results.sh`'s env vars, then aggregate. The aggregation commands below point
-`--results-dir` / `--unet-dir` / `--unet3plus-dir` at those `Models/…` paths
-(`dl_08b` resolves relative paths against the repo root):
+`--results-dir` / `--arch-dir` at those `Models/…` paths (`dl_08b` resolves
+relative paths against the repo root):
 
 ```bash
 # FROM the CPU node, per study (patch-curve shown; arch study is the same shape):
@@ -667,7 +686,9 @@ LOCAL_DEST="/ibstorage/anthony/NYS_Wetlands_DL/Models/results_patchcurve" \
 
 ---
 
-**Patch-count learning curve** (`results_patchcurve/<config>_n<level>/seed<k>/`):
+**Patch-count learning curve** (`results_patchcurve/<config>_n<level>/seed<k>/`)
+— **not part of v3.** Dropped in favour of the third architecture arm; the
+script and this block stay so the v2 curve reproduces.
 
 ```bash
 # GPU node — drop into the §10.0 wrapper's final slot as <study-script> <args>
@@ -681,21 +702,48 @@ python Python_Code_Analysis/DL_Pipeline_v2/dl_08b_aggregate_patchcurve.py \
 #   x-axis = REALIZED #train patches (training_log.json data_split), not the cap.
 ```
 
-**UNet3+ architecture comparison** (`results_arch/<config>_unet3plus/seed<k>/`):
+**Architecture comparison** — v3 runs **three arms** on one config: the U-Net base
+grid, UNet3+ (`results_arch_v3/<config>_unet3plus/seed<k>/`), and the fusion
+encoder (§10.4).
 
 ```bash
-# GPU node — in the §10.0 wrapper's final slot (3 cells; deep-supervision ON;
-#   bf64/d5 held = fair vs U-Net baseline):
+# GPU node — in the §10.0 wrapper's final slot (5 cells per mode; deep-supervision
+#   ON; bf64/d5 held = fair vs U-Net baseline):
 bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff
+MODE=binary bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff
 #   BATCH_SIZE defaults to 8; drop to 4 on OOM. eval auto-detects arch.
 # The U-Net arm already exists in the base factorial — on the CPU node that is the
-# synced Models/factorial_results/<config>/ (same seeds).
-# CPU node:
+# synced Models/factorial_results_v3/<mode>/<config>/ (same seeds; all three
+# drivers default to SEEDS="0 1 2 3 4").
+# CPU node — one --arch-dir per arm, run once per mode:
 python Python_Code_Analysis/DL_Pipeline_v2/dl_08b_aggregate_patchcurve.py \
-    --arch-compare --config fld_chmret_leafoff \
-    --unet-dir Models/factorial_results --unet3plus-dir Models/results_arch
-#   -> Models/results_arch/analysis/arch_compare.csv  (paired-by-seed U-Net vs UNet3+ + delta)
+    --arch-compare --config fld_chmret_leafoff --mode multiclass \
+    --arch-dir unet=Models/factorial_results_v3 \
+    --arch-dir unet3plus=Models/results_arch_v3 \
+    --arch-dir mbfusion=Models/results_arch_fusion_v3
 ```
+
+Four CSVs land in the **last** arm's `<root>/<mode>/analysis/` (override with
+`--output-dir`):
+
+| File | What it holds |
+|---|---|
+| `arch_compare_long.csv` | one row per (arch, seed) — every metric plus cost. The tidy form; plot from this. |
+| `arch_contrasts.csv` | paired per-seed deltas vs the baseline arm (first `--arch-dir`, or `--baseline`), with `n_better`/`n_seeds`. |
+| `arch_cost.csv` | params, GFLOPs, sec/epoch per arm, and params as a multiple of the baseline's. |
+| `arch_compare.csv` | wide per-seed table + seed-mean row (the v2-shaped output). |
+
+Two things to know about the contrasts. **`--confusion-pair` (default `FSW UPL`)**
+adds row-normalized directional confusion rates — the share of true-FSW pixels
+predicted UPL and vice versa — which is the specific failure the fusion encoder
+targets; in binary mode neither class exists, so those rows are simply absent.
+And **at n=5 the credible summary is sign consistency**, `n_better`/`n_seeds`, not
+a p-value: same seed ⇒ same test patches ⇒ each delta is genuinely paired, but
+five paired differences do not support a distributional claim. No p-values are
+computed, deliberately.
+
+`--unet-dir` / `--unet3plus-dir` still work as deprecated two-arm aliases, so the
+v2 arch-compare output reproduces from the same script.
 
 **Prediction / inference maps** (per HUC: class + per-class softmax probs). Unlike
 training, this needs the **source rasters** for the target HUC on the prediction
@@ -735,6 +783,80 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 Start with 2–3 demo HUCs to validate before scaling up.
 
 ---
+
+### 10.4 Multi-branch fusion encoder (`mbfusion`) — the third architecture arm
+
+Design and rationale: `../arch_fusion/PLAN.md`. A per-input-category encoder
+(terrain / lidar / leafon / leafoff) fused at every scale by a per-pixel,
+softmax-normalized gate, with a decoder **bit-identical** to the U-Net's — so the
+comparison isolates encoder + fusion as the only changed variable.
+
+```bash
+# GPU node, in the container, inside tmux:
+bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff              # multiclass
+MODE=binary bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff  # binary
+```
+
+Writes `Models/results_arch_fusion_v3/<mode>/<config>_mbfusion/seed<k>/`.
+
+**The branch map is not a knob.** The trainer derives it from the config's stats
+file (`stats["predictor_names"]`, in post-one-hot-expansion channel space) and
+stores it in the checkpoint + `.meta.json`, so eval/predict auto-detect it and a
+`nolidar`/`leafon` config simply yields fewer branches. `dl_preflight_check` **[9]**
+gates the map on CPU before any GPU time — this is the one silent failure mode
+(a wrong map trains fine and reports plausible numbers while each encoder reads
+the wrong bands).
+
+**Seeds — all three arms must match.** The paired per-seed comparison uses the
+*intersection*, so a short arm silently shrinks n rather than erroring. All three
+drivers default to `SEEDS="0 1 2 3 4"`, so a completed v3 grid already supplies the
+U-Net arm at the right seeds — no top-up run. `run_arch_fusion.sh` prints a
+seed-coverage table per arm when it finishes; check it before aggregating.
+
+**Memory.** Params are ~1.3× the U-Net (162M vs 125M at bf64/d5/29ch), but the
+binding constraint is *activations*: at level 0 the fused tensor is 144 channels
+at 256² against the U-Net's 64 — 2.25× the finest-scale activation. Defaults to
+`BATCH_SIZE=8`; halve to 4 on CUDA OOM. Lighter than UNet3+.
+
+**Watch for gate collapse.** TensorBoard scalars `train/gate_entropy/level0..5`.
+Healthy is near `log(n_branch)` (1.386 for 4 branches); trending toward 0 in the
+first few epochs means the gate has collapsed onto one branch. The standard fix is
+a temperature on the gate logits — deliberately not built in speculatively.
+
+**Gate rasters (a deliverable, not a debug artifact).** Export before teardown:
+
+```bash
+python $PIPE/dl_11_export_gates.py \
+  --cell Models/results_arch_fusion_v3/multiclass/fld_chmret_leafoff_mbfusion/seed0 \
+  --config fld_chmret_leafoff --seed 0 --mode multiclass
+```
+
+Writes `<cell>/gates/<patch>.npz` (six float16 `(n_branch, H, W)` arrays, ~0.5 MB
+per patch) + `gate_summary.json`, from a deterministic prefix of the seed's
+held-out field patches. `rsync_results.sh --metrics-only` now includes `*.npz`, so
+they come back with the JSON/CSV — and `*.log`, because Lightning's model summary
+in `train.log` is the only source of the GFLOPs column in `arch_cost.csv`.
+
+**Aggregating the fusion arm** is just the three-arm `--arch-dir` command above;
+nothing is fusion-specific about it. Cost columns come from the trainer's journal
+(`cost` block: exact params, fit-only wall clock, epochs actually run), added in
+v3 — v1/v2 cells fall back to the `.safetensors` header for params and report
+timing as blank rather than reconstructing a guess from file mtimes.
+
+Figures live in `R_Code_Analysis/dl_10_Factorial_viz_R.qmd`: set `arch_dir_base`
+to the fusion root and the architecture section renders all three arms, the
+FSW↔UPL confusion panel, the contrast and cost tables, and the gate-weight plot.
+It reads `arch_compare_long.csv`, so a fourth arm needs only a colour.
+
+> **Reading gate maps — the one caveat.** After gating, `proj` is a 1×1 conv, so
+> the decoder sees `Σᵢ Wᵢ(fᵢ·gᵢ)`. **Valid:** within-branch spatial comparison
+> ("terrain reliance rises in depressions relative to sideslopes") — the gate is
+> the only thing varying across space. **Confounded:** cross-branch absolute
+> comparison ("terrain matters more than LiDAR overall"), since a branch with
+> modest gates but large `Wᵢ` can still dominate. GroupNorm equalizes features,
+> not projection weights. Plot gates **standardized within branch**, and take
+> overall branch importance from **SHAP**. The means in `gate_summary.json` are
+> provenance, not a ranking.
 
 ## 11. Repeating the experiment (a versioned v2 run)
 

@@ -2,10 +2,15 @@
 # run_arch_compare.sh -- re-train ONE config under UNet3+ to gauge how much the
 # architecture (vs U-Net) drives accuracy.
 #
-# Follow-on study (plan Phase 5). The U-Net baseline for this config already
-# lives in Models/factorial_results_v2/<mode>/<config>/ (the base grid), so this
-# only adds the UNet3+ arm on the SAME seeds and the SAME field-anchored pools
-# split -> a paired, apples-to-apples comparison.
+# Follow-on study (plan Phase 5). The U-Net baseline for this config lives in
+# Models/factorial_results_v3/<mode>/<config>/ (the base grid), so this only adds
+# the UNet3+ arm on the SAME seeds and the SAME field-anchored pools split -> a
+# paired, apples-to-apples comparison.
+#
+# v3 runs THREE arms: this one, the U-Net base grid, and mbfusion
+# (run_arch_fusion.sh). All three must cover the same seeds -- the paired
+# comparison uses the intersection, so a short arm silently shrinks n. All three
+# default to SEEDS="0 1 2 3 4" (the v3 grid included), so no top-up is needed.
 #
 # Fair comparison: capacity is held at the baseline's bf=64/d5; only the
 # architecture changes. Deep supervision is ON by default (treated as part of
@@ -14,7 +19,7 @@
 # Each seed defers to the shared idempotent run_config.sh with:
 #   ARCH=unet3plus  DEEP_SUPERVISION=1  CAT_CHANNELS=64
 #   CELL_NAME=<config>_unet3plus        -> distinct cell dir
-#   RESULTS_DIR=Models/results_arch_v2  (run_config adds the /<mode>/ level
+#   RESULTS_DIR=Models/results_arch_v3  (run_config adds the /<mode>/ level
 #                                        -> <root>/<mode>/<config>_unet3plus/seed<k>)
 #
 # Memory: UNet3+ at bf=64/d5 is heavy. Defaults to 16-mixed (factorial default)
@@ -23,7 +28,7 @@
 #
 # Usage:    run_arch_compare.sh <config>
 # Example:  run_arch_compare.sh fld_chmret_leafoff
-# Knobs:    MODE=multiclass|binary  SEEDS="0 1 2"  CAT_CHANNELS=64  DEEP_SUPERVISION=1
+# Knobs:    MODE=multiclass|binary  SEEDS="0 1 2 3 4"  CAT_CHANNELS=64  DEEP_SUPERVISION=1
 #           BATCH_SIZE=8  plus all run_config.sh env.  DRY_RUN=1 to print the plan.
 #
 # Long job: launch inside screen/tmux on the GPU node.
@@ -34,10 +39,10 @@ CONFIG="${1:?usage: run_arch_compare.sh <config>}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-SEEDS="${SEEDS:-0 1 2}"
+SEEDS="${SEEDS:-0 1 2 3 4}"
 MODE="${MODE:-multiclass}"
-RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/Models/results_arch_v2}"
-BASELINE_DIR="$REPO_ROOT/Models/factorial_results_v2/$MODE/$CONFIG"
+RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/Models/results_arch_v3}"
+BASELINE_DIR="$REPO_ROOT/Models/factorial_results_v3/$MODE/$CONFIG"
 
 # UNet3+ knobs (fair comparison: bf/depth inherited from run_config.sh defaults).
 export ARCH="unet3plus"
@@ -79,5 +84,7 @@ if (( ${#failed[@]} )); then
 fi
 echo "all cells complete. Compare U-Net vs UNet3+ on the CPU node after sync-back with:"
 echo "  python $REPO_ROOT/Python_Code_Analysis/DL_Pipeline_v2/dl_08b_aggregate_patchcurve.py \\"
-echo "      --arch-compare --config $CONFIG --unet-dir $REPO_ROOT/Models/factorial_results_v2/$MODE \\"
-echo "      --unet3plus-dir $RESULTS_DIR/$MODE"
+echo "      --arch-compare --config $CONFIG --mode $MODE \\"
+echo "      --arch-dir unet=$REPO_ROOT/Models/factorial_results_v3/$MODE \\"
+echo "      --arch-dir unet3plus=$RESULTS_DIR/$MODE \\"
+echo "      --arch-dir mbfusion=$REPO_ROOT/Models/results_arch_fusion_v3/$MODE"

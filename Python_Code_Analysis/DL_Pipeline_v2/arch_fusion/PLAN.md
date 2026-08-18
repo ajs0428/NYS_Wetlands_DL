@@ -4,9 +4,17 @@ Third architecture arm for the factorial paper's architecture comparison. A mult
 encoder that extracts features separately per input category and fuses them with a
 per-pixel, softmax-normalized gate at every encoder scale.
 
-**Status:** design settled; Phase 0 (data) complete, implementation in progress.
+**Status:** implemented and CPU-tested; **not yet trained**. Phases 0–4 complete
+(data, v3 config registry, model + plumbing, orchestration, aggregation + figures).
+Remaining: the GPU runs — the whole v3 grid at R=5, then the two extra arms — and
+then the production gate in §8.
 **Sibling docs:** `factorial_experiment/EXECUTION.md` (node ritual, transfer pattern),
 `production_model/PLAN.md` (the shipped recipe — *not* to be modified by this work).
+
+Measured at bf64/d5/29ch: **162.01 M params vs the U-Net's 125.27 M = 1.293×** — the
+~1.3× this document's cost argument predicted (§3). The decoder is verified
+bit-identical to the U-Net's (82 tensors, matching shapes), so the comparison
+isolates encoder + fusion as intended.
 
 ### v3 context (added 2026-08-17)
 
@@ -263,8 +271,10 @@ Note the `<mode>/` level in the cell path: `run_config.sh` inserts it
 `Models/factorial_results_v2/<mode>/fld_chmret_leafoff/` and UNet3+ in
 `Models/results_arch_v2/<mode>/fld_chmret_leafoff_unet3plus/` — are 26-channel runs on the
 old 689-patch field pool and are **not comparable** to a v3 fusion cell. All three arches
-retrain on the 29-channel v3 stack, at **the same 5 seeds** (v2 ran 3; a 5-seed fusion arm
-paired against 3-seed baselines yields only 3 paired seeds), in **both modes**. The v3 roots
+retrain on the 29-channel v3 stack, at **the same 5 seeds** — R=5 is now the v3 default in
+`run_factorial.sh` itself (v2 ran 3, which would have left a 5-seed fusion arm with only 3
+paired seeds; raising the grid rather than topping up one config keeps every factorial
+contrast at n=5 too) — in **both modes**. The v3 roots
 are `Models/factorial_results_v3/` (U-Net) and `Models/results_arch_v3/` (UNet3+).
 
 **Two deltas from the arch-compare template:**
@@ -287,20 +297,26 @@ are `Models/factorial_results_v3/` (U-Net) and `Models/results_arch_v3/` (UNet3+
 
 ## 6 · Aggregation & figures
 
-Generalize `dl_08b_aggregate_patchcurve.py --arch-compare` from its hardcoded two arms
-(`--unet-dir` / `--unet3plus-dir`) to repeatable `--arch-dir <name>=<path>` pairs, so arm
-count follows from the CLI:
+**Implemented.** `dl_08b_aggregate_patchcurve.py --arch-compare` now takes repeatable
+`--arch-dir <name>=<path>` pairs, so arm count follows from the CLI:
 
 ```bash
 python dl_08b_aggregate_patchcurve.py --arch-compare \
   --config fld_chmret_leafoff --mode multiclass \
-  --arch-dir unet=Models/factorial_results_v3/multiclass \
-  --arch-dir unet3plus=Models/results_arch_v3/multiclass \
-  --arch-dir mbfusion=Models/results_arch_fusion_v3/multiclass
+  --arch-dir unet=Models/factorial_results_v3 \
+  --arch-dir unet3plus=Models/results_arch_v3 \
+  --arch-dir mbfusion=Models/results_arch_fusion_v3
 ```
 
-Keep `--unet-dir` / `--unet3plus-dir` working as deprecated aliases so the v2 arch-compare
-output still reproduces from the same script.
+`--mode` is appended to each root when the root does not already end in it, so both
+path forms work. The cell inside a root is `<config>_<name>`, falling back to plain
+`<config>` for the base grid, whose cells are not arch-suffixed. Output: four CSVs in
+the last arm's `analysis/` — `arch_compare_long.csv` (tidy, one row per arch × seed),
+`arch_contrasts.csv`, `arch_cost.csv`, and the v2-shaped wide `arch_compare.csv`.
+
+`--unet-dir` / `--unet3plus-dir` remain as deprecated aliases; the v2 two-arm output
+reproduces **numerically identically** from the new code (verified column-by-column
+against the committed v2 CSVs — the new columns are purely additive).
 
 **Report paired per-seed deltas, not only mean ± sd.** Same seed ⇒ same test patches, so
 each seed gives all three arches an identical evaluation set. At n=5, consistency of sign
@@ -309,19 +325,33 @@ on n=5 are not worth the space.
 
 **Metrics, in priority order:**
 
-1. **UPL↔FSW confusion cells** — the specific failure this architecture targets. Available
-   per cell in `confusion_matrix.csv`; surface as a named contrast rather than leaving it
-   inside `confusion_mean/`.
-2. Macro F1 and per-class IoU (the standard table).
+1. **UPL↔FSW confusion cells** — the specific failure this architecture targets.
+   Implemented as `--confusion-pair A B` (default `FSW UPL`), read per cell from
+   `confusion_matrix.csv` and **row-normalized**, so `conf_FSW_as_UPL` is "share of
+   true-FSW pixels predicted UPL" — comparable across cells of differing prevalence,
+   which raw counts are not. Contrasts on these rows are direction-aware
+   (`lower_is_better`). Absent classes (binary mode) are skipped, not zero-filled.
+2. Macro F1 and per-class IoU (the standard table) — plus per-class F1.
 3. WET IoU + recall — the criteria `dl_prod_config.py` used, so the production-recipe
-   question stays answerable from the same output.
+   question stays answerable from the same output. Binary-mode cells carry `iou_WET` /
+   `f1_WET` through the same columns.
 
-**Cost table.** Params, GFLOPs, and epoch wall-time for all three arches. The pitch is
-partly "~1.3× the encoder, not 4×" — that claim must appear as measured numbers next to
-UNet3+, which is the heavier model. (Wang et al. report exactly this for the same reason.)
+**Cost table** (`arch_cost.csv`): params, GFLOPs, and sec/epoch per arm, plus params as
+a multiple of the baseline's — the "~1.3× the encoder, not 4×" claim as measured numbers
+next to UNet3+. Provenance, since the three columns do not share a source: **params**
+come from the trainer's journal `cost` block (exact, added in v3), falling back to the
+`.safetensors` header (also exact, but absent from a `--metrics-only` pull) and then to
+Lightning's rounded summary; **GFLOPs** only from that summary in `train.log`, so the
+column is blank where the container's Lightning did not print it; **sec/epoch** is
+fit-only wall clock from the journal, v3 onwards, left blank rather than reconstructed
+from file mtimes for older cells. It is a same-GPU comparison, not a portable benchmark.
 
-**Figures** extend `dl_10_factorial_viz.ipynb` §7 (the existing arch section) to three
-arms, plus a new subsection for gate rasters over an FSW/UPL transition.
+**Figures** live in `R_Code_Analysis/dl_10_Factorial_viz_R.qmd` — the active viz notebook
+(the Python `dl_10_factorial_viz.ipynb` is the older sibling). Its architecture section
+now reads `arch_compare_long.csv` and is arm-count-agnostic: point `arch_dir_base` at the
+fusion root and it renders macro-F1, per-class F1, the FSW↔UPL confusion panel, the
+contrast and cost tables, and a gate-weight-by-scale plot. Adding a fourth arm needs only
+an entry in `arch_name`/`arch_color`.
 
 ### Interpreting gate maps — the one caveat
 

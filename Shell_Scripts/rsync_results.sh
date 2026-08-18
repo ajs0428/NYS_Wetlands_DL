@@ -24,7 +24,7 @@ set -euo pipefail
 # Usage:
 #   SERVER="user@cbsugpu09.biohpc.cornell.edu:" \
 #   REMOTE_RESULTS="/workdir/<labid>/nys_wetlands/results" \
-#   LOCAL_DEST="../Models/factorial_results" \
+#   LOCAL_DEST="../Models/factorial_results_v3" \
 #     ./rsync_results.sh [CONFIG ...] [--metrics-only] [-n|--dry-run] [--delete]
 #
 #   - CONFIG ...    : optional config names to limit the sync (default: all).
@@ -36,7 +36,7 @@ set -euo pipefail
 # Example (pull just the small metrics for all configs):
 #   SERVER="ajs544@cbsugpu09.biohpc.cornell.edu:" \
 #   REMOTE_RESULTS="/workdir/ajs544/nys_wetlands/results" \
-#   LOCAL_DEST="/ibstorage/anthony/NYS_Wetlands_DL/Models/factorial_results" \
+#   LOCAL_DEST="/ibstorage/anthony/NYS_Wetlands_DL/Models/factorial_results_v3" \
 #     ./rsync_results.sh --metrics-only
 
 # === CONFIGURATION (override via environment) ===
@@ -78,8 +78,13 @@ OPTS=($RSYNC_OPTS)
 [ "$DELETE"  -eq 1 ] && OPTS+=(--delete)
 if [ "$METRICS_ONLY" -eq 1 ]; then
     # Keep only lightweight analysis artifacts; drop weights/checkpoints.
+    # .npz is here for mbfusion gate rasters (seed<k>/gates/*.npz) -- a deliverable,
+    # not a debug artifact, and float16 keeps a default 8-patch export at a few MB.
     OPTS+=(--include='*/')
-    OPTS+=(--include='*.json' --include='*.csv' --include='*.png')
+    # .log is the only place Lightning's FLOPs line lands, which the arch-compare
+    # cost table reads; train.log/eval.log are a few KB each.
+    OPTS+=(--include='*.json' --include='*.csv' --include='*.png' --include='*.npz'
+           --include='*.log')
     OPTS+=(--exclude='*')
 fi
 
