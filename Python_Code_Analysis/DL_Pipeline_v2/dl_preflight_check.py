@@ -145,7 +145,8 @@ def _sampled(files, sample):
 
 
 def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
-                  seeds=(0, 1, 2), leakage_guard=None, modes=("multiclass", "binary"),
+                  seeds=(0, 1, 2, 3, 4), leakage_guard=None,
+                  modes=("multiclass", "binary"),
                   sample=None) -> int:
     rep = Report()
     guard = leakage_guard or LEAKAGE_GUARD
@@ -296,19 +297,28 @@ def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
     nwi_files = {nwi_field_twin(f): f for f in files_by_dir.get("R_Patches_NWI", [])}
     mask_mism = []
     checked = 0
+    skipped_off = 0
+    full = (PATCH_SIZE, PATCH_SIZE)
     for fname, farr in fld_cache.items():
         nf = nwi_files.get(field_key(Path(fname)))
         if nf is None:
             continue
         narr = _read_label(nf)
-        if farr.shape != narr.shape:
-            mask_mism.append(f"{fname} (shape {farr.shape} vs {narr.shape})")
-        elif not np.array_equal(farr == IGNORE_VALUE, narr == IGNORE_VALUE):
+        # Same exclusion as [4]: the dataset's modal-size filter drops off-size
+        # patches, so a twin where either side is off-size never reaches training
+        # and its masks cannot be compared anyway (different shapes). [1] already
+        # reports it. Without this, one oversized patch fails a gate about an
+        # alignment that has no bearing on any cell that will actually run.
+        if farr.shape != full or narr.shape != full:
+            skipped_off += 1
+            continue
+        if not np.array_equal(farr == IGNORE_VALUE, narr == IGNORE_VALUE):
             mask_mism.append(fname)
         checked += 1
+    off_note = f" ({skipped_off} off-size twin(s) skipped -- see [1])" if skipped_off else ""
     rep.check(not mask_mism, "fld/NWI 255-mask identity",
-              detail_ok=f"identical no-data mask in all {checked} checked twins",
-              detail_fail=f"{len(mask_mism)} mismatch(es), e.g. {mask_mism[:3]}")
+              detail_ok=f"identical no-data mask in all {checked} trainable twins{off_note}",
+              detail_fail=f"{len(mask_mism)} mismatch(es), e.g. {mask_mism[:3]}{off_note}")
 
     # ---[7] Field-anchored split + leakage gate ---
     print(f"\n[7] Field-anchored split + leakage gate (guard={guard}, seeds={list(seeds)})")
@@ -421,7 +431,8 @@ def main():
     ap.add_argument("--norm-master", type=Path,
                     default=data_default / "multiclass_normalization_stats_wp0.5.json",
                     help="Normalization master (authoritative predictor_names / in_channels)")
-    ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+    ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4],
+                    help="Replicate seeds to check splits for (v3 default: R=5)")
     ap.add_argument("--leakage-guard", choices=["huc12", "coord"], default=None,
                     help="Split regime to validate (default: dl_experiment_config.LEAKAGE_GUARD)")
     ap.add_argument("--modes", nargs="+", default=["multiclass", "binary"],

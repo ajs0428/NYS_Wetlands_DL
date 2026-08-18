@@ -17,7 +17,7 @@ this file is the operational walkthrough.
 cd /ibstorage/anthony/NYS_Wetlands_DL
 python Python_Code_Analysis/DL_Pipeline_v2/dl_experiment_config.py      # sanity: channel matrix
 python Python_Code_Analysis/DL_Pipeline_v2/dl_make_config_stats.py --all  # 8 per-config stats (if not present)
-python Python_Code_Analysis/DL_Pipeline_v2/dl_preflight_check.py --require-all-labels  # must be green
+python Python_Code_Analysis/DL_Pipeline_v2/dl_preflight_check.py            # must be green
 
 # --- stage repo + data onto the GPU node's local /workdir (rsync over ssh) ---
 # Run FROM the CPU node. The GPU node is NOT directly connected to the CPU
@@ -37,7 +37,7 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 
 # --- pull results back to /ibstorage for analysis ------------------------
 SERVER="$USER@cbsugpu09.biohpc.cornell.edu:" \
-REMOTE_RESULTS="/workdir/$USER/nys_wetlands/results" \
+REMOTE_RESULTS="/workdir/$USER/nys_wetlands/Models/factorial_results_v3" \
 LOCAL_DEST="/ibstorage/anthony/NYS_Wetlands_DL/Models/factorial_results_v3" \
   Shell_Scripts/rsync_results.sh --metrics-only   # add no flag for full weights
 ```
@@ -117,7 +117,7 @@ source of truth.
 | `dl_merge_nwi_labels.py` | Phase 0: writes `MOD_CLASS_NWI` band into each patch (already done → `merge_manifest.json`). |
 | `dl_degrade_labels.py` | Phase 1.3: writes `MOD_CLASS_FLDDEG` (field wetland→UPL down to NWI prevalence, seeded). Already done → `degrade_manifest.json`. |
 | `dl_make_config_stats.py` | Phase 1.4: subsets the master stats into the 8 per-config stats files. `--all` writes all of them. |
-| `dl_preflight_check.py` | Phase 0 gate: same patch set, identical footprints, predictor parity, label-value sanity, channel sanity. `--require-all-labels` insists all three label bands exist. **Must be green before any GPU time.** |
+| `dl_preflight_check.py` | Phase 0 gate: directory counts, predictor parity, field↔NWI pairing + footprint identity, label-value sanity, split/leakage, per-config channels + stats files, and **[9]** the fusion branch partition. Flags: `--modes` / `--seeds` (default `0 1 2 3 4`) / `--leakage-guard` / `--sample`. **Must be green before any GPU time.** |
 | `dl_04_train_lightning.py` | Training (called by the runner). |
 | `dl_05_evaluate.py` | Test-set metrics + confusion matrix (called by the runner; auto-detects arch from the checkpoint). |
 | `dl_08_aggregate_factorial.py` | **Phase 3 aggregation (CPU).** Walks `results/<config>/seed*/metrics.json` into the factorial table + paired-by-seed contrasts (LiDAR tiers, leaf-off main effect, LiDAR×leaf-off interaction, label gradient). Pure pandas; safe to run on a partial tree (reports coverage). |
@@ -189,7 +189,7 @@ python $PIPE/dl_01_compute_statistics.py \
 python $PIPE/dl_make_config_stats.py --all      # -> Data/Training_Data/stats/*.json
 
 # 4. Preflight — HARD GATE before any GPU time
-python $PIPE/dl_preflight_check.py --require-all-labels   # expect 0 failures / 0 warnings
+python $PIPE/dl_preflight_check.py            # expect 0 failures (warnings are advisory)
 ```
 
 **Stats chain (who feeds whom).** The per-config files are pure subsets of one
@@ -414,7 +414,7 @@ analyze):
 ```bash
 cd /ibstorage/anthony/NYS_Wetlands_DL
 SERVER="$USER@cbsugpu09.biohpc.cornell.edu:" \
-REMOTE_RESULTS="/workdir/$USER/nys_wetlands/results" \
+REMOTE_RESULTS="/workdir/$USER/nys_wetlands/Models/factorial_results_v3" \
 LOCAL_DEST="/ibstorage/anthony/NYS_Wetlands_DL/Models/factorial_results" \
   Shell_Scripts/rsync_results.sh --metrics-only      # fast: JSON/CSV/PNG only
   # drop --metrics-only to also pull the ~500 MB checkpoints
@@ -578,7 +578,7 @@ not feed `dl_08`); §4a/§4b pick up the new outputs automatically.
 - [ ] `dl_experiment_config.py` self-check passes (channel matrix OK)
 - [ ] master `multiclass_normalization_stats_wp0.5.json` current (rebuilt via `dl_01 --global-stats` if the R scan / bands / patches changed)
 - [ ] `Data/Training_Data/stats/` has all 8 `..._wp0.5.json` files (re-derived from the master)
-- [ ] `dl_preflight_check.py --require-all-labels` is green (0 fail / 0 warn)
+- [ ] `dl_preflight_check.py` is green (0 fail; warnings are advisory)
 - [ ] repo + `Data/` rsynced over ssh to `/workdir/$USER/nys_wetlands`; image loaded (`docker1 images`)
 - [ ] `run_factorial.sh` launched inside `tmux`; mount only under `/workdir/$USER`
 - [ ] `rsync_results.sh -n` dry-run round-trips before the first real pull
@@ -953,7 +953,7 @@ python $PIPE/dl_01_compute_statistics.py \
   --global-stats Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json \
   --weight-power 0.5                          # -> ..._wp0.5.json master (prior version copied aside first)
 python $PIPE/dl_make_config_stats.py --all                                           # regenerates Data/Training_Data/stats/
-python $PIPE/dl_preflight_check.py --require-all-labels                              # must be GREEN
+python $PIPE/dl_preflight_check.py                                                   # must be GREEN
 ```
 
 **Flavor 2 — new predictor band(s) (schema change).** Invasive; edit code
