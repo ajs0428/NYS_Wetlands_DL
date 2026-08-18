@@ -364,8 +364,18 @@ python dl_01_compute_statistics.py \
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--patches-dir` | `Data/Training_Data/R_Patches` | Directory containing GeoTIFF training patches |
-| `--output` | `Data/Training_Data/normalization_stats.json` | Output path for the stats JSON |
+| `--output` | derived (see below) | Output path for the stats JSON |
 | `--config` | Auto-detected | Path to `dl_band_config.json` |
+| `--global-stats` | none | `HUC_DL_Stacks_Extracted_Values.json` from the R full-raster scan; overrides patch min/max so normalization covers the full inference range |
+| `--weight-power` | `1.0` | Exponent for inverse-frequency class weights, `(1/freq)**power`. `1.0` = pure inverse-freq, `0.5` = sqrt-inverse (what the factorial fixes), `0.0` = uniform |
+
+`--output` is resolved **after** parsing, from the active `classification_mode`
+plus `--weight-power`: `Data/Training_Data/<mode>_normalization_stats[_wp<power>].json`.
+Omitting `--weight-power` keeps the legacy un-suffixed name; passing a value adds
+the matching suffix, so `--weight-power 0.5` writes
+`multiclass_normalization_stats_wp0.5.json`. `dl_01` prints
+`[dl_01] writing -> <path>` before the scan so the target is visible up front.
+Pass `--output` only to override.
 
 ### What It Computes
 

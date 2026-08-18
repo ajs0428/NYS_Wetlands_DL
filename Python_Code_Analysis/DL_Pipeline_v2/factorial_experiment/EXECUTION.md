@@ -169,11 +169,12 @@ python $PIPE/dl_degrade_labels.py --seed 0      # adds MOD_CLASS_FLDDEG (target 
 python $PIPE/dl_experiment_config.py            # prints the 8 configs; ends "All channel counts match"
 
 # 2. Build the MASTER stats (only when the master is stale -- see below)
+#    Output path is derived from the mode + --weight-power, so this writes
+#    Data/Training_Data/multiclass_normalization_stats_wp0.5.json
 python $PIPE/dl_01_compute_statistics.py \
-  --patches-dir   Data/Training_Data/R_Patches_Merged \
+  --patches-dir   Data/Training_Data/R_Patches \
   --global-stats  Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json \
-  --weight-power  0.5 \
-  --output        Data/Training_Data/multiclass_normalization_stats_wp0.5.json
+  --weight-power  0.5
 
 # 3. Derive the 8 per-config stats files from the master (no raster rescan)
 python $PIPE/dl_make_config_stats.py --all      # -> Data/Training_Data/stats/*.json
@@ -223,13 +224,17 @@ changed the training patches. Otherwise the existing master already has the
 global min/max baked in (its `min_max` bands read
 `"note": "Maps to [0, 1] (global raster min/max)"`), and you start at step 3.
 
-> Two gotchas on step 2 (see `dl_01_compute_statistics.py`'s docstring): pass
-> `--output` explicitly (its default is resolved before `--weight-power`, so it
-> would write the un-suffixed `multiclass_normalization_stats.json` and leave the
-> real master stale), and pass `--weight-power 0.5` (default is `1.0`). On
-> success stdout shows `Overrode min/max with global stats for: [...]`; a
-> `Warning: No global stats for min_max bands: [...]` instead means the global
-> JSON's band-name keys did not match and the override did **not** apply.
+> One gotcha on step 2: pass `--weight-power 0.5` (the default is `1.0`). The
+> output path follows from it — `dl_01` prints `[dl_01] writing -> <path>` before
+> the scan, so check that line says `..._wp0.5.json`. On success stdout also shows
+> `Overrode min/max with global stats for: [...]`; a `Warning: No global stats for
+> min_max bands: [...]` instead means the global JSON's band-name keys did not
+> match and the override did **not** apply.
+>
+> *(Fixed 2026-08-17: `--output` used to be mandatory here, because its default was
+> resolved before `--weight-power` was parsed and a `--weight-power 0.5` run would
+> silently write the un-suffixed file while leaving the real master stale. It is now
+> resolved after parsing. Passing `--output` still works and still overrides.)*
 
 > As of the last session steps 1, 3, 4 were satisfied (554 merged 20-band
 > patches, 8 stats files, preflight green) on the prior master. Re-run step 2
@@ -797,7 +802,7 @@ export OUT_DIR="$PWD/Data/HUC_DL_Predictions_${EXP_VERSION}"        # run_predic
 |---|---|---|
 | Trained cells | `RESULTS_DIR` | ✅ env knob today |
 | Merged patches | `PATCHES_DIR` | ✅ env knob today |
-| Master stats | `dl_01 --output` / `dl_make_config_stats --master-stats` | ✅ flags |
+| Master stats | `dl_01 --weight-power` (path derived) or `--output` / `dl_make_config_stats --master-stats` | ✅ flags |
 | Predictions | `OUT_DIR` (predict) | ✅ env knob today |
 | Aggregation | `dl_08*.py --results-dir` | ✅ flag |
 | **Per-config stats dir** | `STATS_DIR` in `run_config.sh` | ⚠️ **hardcoded** to `Data/Training_Data/stats` (line 42) — see §11.5 |
@@ -822,10 +827,9 @@ PIPE=Python_Code_Analysis/DL_Pipeline_v2
 python $PIPE/dl_merge_nwi_labels.py && python $PIPE/dl_degrade_labels.py --seed 0   # rebuild R_Patches_Merged
 python $PIPE/dl_experiment_config.py                                                 # channel matrix self-check
 python $PIPE/dl_01_compute_statistics.py \
-  --patches-dir  Data/Training_Data/R_Patches_Merged \
+  --patches-dir  Data/Training_Data/R_Patches \
   --global-stats Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json \
-  --weight-power 0.5 \
-  --output       Data/Training_Data/multiclass_normalization_stats_wp0.5.json        # master (v1 already copied aside)
+  --weight-power 0.5                          # -> ..._wp0.5.json master (prior version copied aside first)
 python $PIPE/dl_make_config_stats.py --all                                           # regenerates Data/Training_Data/stats/
 python $PIPE/dl_preflight_check.py --require-all-labels                              # must be GREEN
 ```

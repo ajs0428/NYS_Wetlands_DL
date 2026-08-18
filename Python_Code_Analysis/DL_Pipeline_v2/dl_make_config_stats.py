@@ -12,7 +12,7 @@ exactly that subset. `band_names` is kept as the FULL raster band list so band
 indices and the dataset's band-count filter still resolve against the real
 patches.
 
-Normalization master: the MULTICLASS production file (all 17 predictors, 26
+Normalization master: the MULTICLASS production file (all 20 predictors, 29
 channels, weight_power 0.5) is the single normalization source for BOTH modes --
 its min/max come from a global raster scan (predictor-only, so mode-invariant),
 verified to cover the current patches. `--mode` only sets class metadata
@@ -273,8 +273,9 @@ def main():
     band_config = load_band_config(args.config_json)
     wp = master.get("weight_power", 0.5)
 
-    # band_names tracks the ACTUAL v2 patches; all label dirs share the 18-band
-    # schema, so the field dir is the reference.
+    # band_names tracks the ACTUAL patches; all label dirs share one schema
+    # (v3: 21 bands), so the field dir is the reference. Preflight [2] is what
+    # enforces that they really do agree.
     band_ref = args.data_root / args.band_ref_dir
     ref_files = sorted(band_ref.glob("*.tif"))
     if not ref_files:
@@ -286,8 +287,13 @@ def main():
     # Sanity: the master must be the wp0.5 multiclass full-feature file.
     if wp != 0.5:
         print(f"[warn] master weight_power={wp} (expected 0.5)")
-    if master.get("in_channels") != 26:
-        print(f"[warn] master in_channels={master.get('in_channels')} (expected 26 for full set)")
+    # Anchor against the registry rather than a literal: v3 moved the full set
+    # from 26 -> 29 channels (three added terrain metrics) and a hardcoded 26
+    # would have warned on every correct run.
+    full_set_channels = CONFIGS["fld_chmret_leafoff"]["channels"]
+    if master.get("in_channels") != full_set_channels:
+        print(f"[warn] master in_channels={master.get('in_channels')} "
+              f"(expected {full_set_channels} for full set)")
     if master.get("classification_mode") != "multiclass":
         print(f"[warn] norm-master classification_mode={master.get('classification_mode')} "
               f"(expected multiclass -- it is the normalization source for both modes)")

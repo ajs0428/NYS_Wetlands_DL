@@ -1,18 +1,23 @@
 """
-dl_preflight_check.py  (factorial v2, plan Phase 0)
+dl_preflight_check.py  (factorial v3, plan Phase 0)
 
-Hard gate run on the CPU node BEFORE any GPU time: fails if the v2 patch set is
-not wired the way the experiment needs. v2 stores each label source in its OWN
+Hard gate run on the CPU node BEFORE any GPU time: fails if the patch set is
+not wired the way the experiment needs. Each label source lives in its OWN
 directory (Decision 4.1) -- R_Patches (field), R_Patches_NWI (paired), and
 R_Patches_NWIextra (new locations) -- each with a single MOD_CLASS band, so the
-checks are rewritten around directory-aware keys and the field-anchored pools:
+checks are built around directory-aware keys and the field-anchored pools:
 
   [0] Directory presence + counts (every dir any config needs).
   [1] Off-size patches (WARN): flags non-256x256 patches -- the dataset silently
       skips them (modal-size filter), so they should be known, not surprising.
-  [2] Predictor parity: all 17 predictors + MOD_CLASS present & identically named
+  [2] Predictor parity: every predictor + MOD_CLASS present & identically named
       in every patch of every dir (authoritative set = stats predictor_names).
-  [3] Field<->NWI pairing (1:1 via nwi_field_twin) + NWIextra HUC12s subset field.
+      This is also the cross-directory band-set guard: v3 added three terrain
+      metrics (21-band patches), and a dir left at the old schema would other-
+      wise be dropped SILENTLY by the dataset's band-count filter rather than
+      raising -- see dl_02_dataset.py's "Skipping ...: N bands" path.
+  [3] Field<->NWI pairing (every field patch twinned; reverse orphans WARN only)
+      + NWIextra HUC12s subset field.
   [4] Footprint identity per paired twin: field & NWI share CRS/transform/H/W/
       nodata (pixel-aligned) -- the paired nwi-vs-fld contrast depends on it.
   [5] Label values in {0,1,2,3,255} per dir + wetland prevalence (flddeg target).
@@ -21,6 +26,11 @@ checks are rewritten around directory-aware keys and the field-anchored pools:
       (it self-asserts no test footprint reaches train/val) and the test set is
       identical across all 8 configs and drawn only from field.
   [8] Per-config channel counts + per-config/per-mode stats files present.
+  [9] Fusion branch partition (--arch mbfusion): branch slices are disjoint,
+      cover every channel exactly once, and keep the Geomorph one-hot block
+      contiguous inside the terrain branch. Derived from the STATS file's
+      predictor_names (what the dataset indexes by), so it also catches drift
+      between the stats files and the config registry.
 
 Pixel-level checks ([4]-[6]) accept --sample N to bound I/O on slow storage
 (default: all). Exit 0 = all required checks green; 1 = a required check failed.
@@ -44,6 +54,7 @@ from dl_experiment_config import (
     CONFIGS, config_bands, config_patch_dirs, config_pool_rule,
     FIELD_TEST_DIR, LEAKAGE_GUARD,
     field_key, nwi_field_twin, huc12_of, stats_basename,
+    verify_branch_partition,
 )
 import dl_patch_pools as P
 
@@ -139,7 +150,7 @@ def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
     rep = Report()
     guard = leakage_guard or LEAKAGE_GUARD
     band_config = load_band_config()
-    print(f"\n=== Factorial v2 preflight ===")
+    print(f"\n=== Factorial v3 preflight ===")
     print(f"data_root={data_root}  stats_dir={stats_dir}  leakage_guard={guard}  "
           f"modes={list(modes)}  sample={sample or 'all'}\n")
 
@@ -180,7 +191,8 @@ def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
                   required=False)
 
     # ---[2] Predictor parity ---
-    print("\n[2] Predictor parity (all 17 predictors + MOD_CLASS, identically named)")
+    print(f"\n[2] Predictor parity (all {len(expected_predictors)} predictors + "
+          f"MOD_CLASS, identically named in every dir)")
     for d in needed_dirs:
         missing = {}
         for name, h in headers_by_dir[d].items():
@@ -199,10 +211,23 @@ def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
     fld_keys = {field_key(f) for f in files_by_dir[FIELD_TEST_DIR]}
     if "R_Patches_NWI" in files_by_dir:
         twin_keys = {nwi_field_twin(f) for f in files_by_dir["R_Patches_NWI"]}
-        rep.check(twin_keys == fld_keys, "field<->NWI 1:1 pairing",
-                  detail_ok=f"{len(fld_keys)} paired footprints",
-                  detail_fail=f"field\\nwi={len(fld_keys - twin_keys)}, "
-                              f"nwi\\field={len(twin_keys - fld_keys)}")
+        # REQUIRED direction: every field patch has an NWI twin. The `paired` pool
+        # rule maps field train/val basenames -> NWI, so a field patch without a
+        # twin silently shrinks the nwi arm's pool relative to fld and confounds
+        # the label contrast with training quantity.
+        rep.check(fld_keys <= twin_keys, "field<->NWI pairing (every field patch twinned)",
+                  detail_ok=f"{len(fld_keys)} field footprints all have NWI twins",
+                  detail_fail=f"{len(fld_keys - twin_keys)} field patch(es) lack a twin, "
+                              f"e.g. {sorted(fld_keys - twin_keys)[:3]}")
+        # NOT required in reverse: NWI patches with no field twin are never
+        # selected by `paired` (the map runs field->NWI), so they are inert.
+        # Surfaced as a WARN so the dir-count difference is explained, not mysterious.
+        orphans = sorted(twin_keys - fld_keys)
+        rep.check(not orphans, "NWI orphans (no field twin)",
+                  detail_ok="none",
+                  detail_fail=f"{len(orphans)} inert NWI patch(es) never selected by "
+                              f"the paired rule, e.g. {orphans[:3]}",
+                  required=False)
     if "R_Patches_NWIextra" in files_by_dir:
         fld_hucs = {huc12_of(f) for f in files_by_dir[FIELD_TEST_DIR]}
         ext_hucs = {huc12_of(f) for f in files_by_dir["R_Patches_NWIextra"]}
@@ -320,9 +345,12 @@ def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
                   detail_ok=f"{n} (label={cfg['label']})",
                   detail_fail=f"got {n}, expected {cfg['channels']}")
     if expected_channels is not None:
-        rep.check(expected_channels == 26, "norm-master in_channels",
-                  detail_ok="26 (full feature set)",
-                  detail_fail=f"{expected_channels} in {norm_master.name}")
+        # Anchored on the registry, not a literal: v3's full set is 29 (v2 was 26).
+        full_set = CONFIGS["fld_chmret_leafoff"]["channels"]
+        rep.check(expected_channels == full_set, "norm-master in_channels",
+                  detail_ok=f"{full_set} (full feature set)",
+                  detail_fail=f"{expected_channels} in {norm_master.name}, "
+                              f"expected {full_set}")
     missing_stats = []
     for name in CONFIGS:
         for mode in modes:
@@ -332,6 +360,42 @@ def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
               detail_ok=f"all {len(CONFIGS) * len(modes)} config x mode stats found",
               detail_fail=f"{len(missing_stats)} missing, e.g. {missing_stats[:3]} "
                           f"(run dl_make_config_stats.py --all --mode <mode>)")
+
+    # ---[9] Fusion branch partition (arch_fusion/PLAN.md Section 4.3) ---
+    # The guard against the one silent failure mode in --arch mbfusion: a wrong
+    # branch->channel map trains fine and reports plausible metrics while feeding
+    # each encoder the wrong bands. Validated here, on CPU, before any GPU time.
+    #
+    # Checked against the STATS FILE's predictor_names, not config_bands(), because
+    # the stats file is what WetlandPatchDataset actually indexes the raster by --
+    # so this also catches a stats/registry drift that config_bands alone cannot.
+    print("\n[9] Fusion branch partition (post-expansion channel space)")
+    import json as _json
+    for name, cfg in CONFIGS.items():
+        stats_p = stats_dir / stats_basename(name, mode=modes[0])
+        if not stats_p.exists():
+            rep.check(False, f"branch partition '{name}'",
+                      detail_fail=f"stats file absent: {stats_p.name}")
+            continue
+        with open(stats_p) as f:
+            preds = _json.load(f)["predictor_names"]
+        drift = preds != config_bands(cfg)
+        try:
+            idx = verify_branch_partition(preds, band_config)
+        except (AssertionError, ValueError) as e:
+            rep.check(False, f"branch partition '{name}'", detail_fail=str(e))
+            continue
+        total = sum(len(v) for v in idx.values())
+        desc = " ".join(f"{b}:{len(v)}" for b, v in idx.items())
+        rep.check(total == cfg["channels"], f"branch partition '{name}'",
+                  detail_ok=f"{desc} = {total} ch",
+                  detail_fail=f"branches cover {total} ch, config expects {cfg['channels']}")
+        rep.check(not drift, f"stats/registry band order '{name}'",
+                  detail_ok="stats predictor_names == config_bands()",
+                  detail_fail="stats predictor_names differ from config_bands(); "
+                              "branch_indices MUST be derived from the stats file "
+                              "(re-run dl_make_config_stats.py if unintended)",
+                  required=False)
 
     # --- Summary ---
     print("\n=== Summary ===")

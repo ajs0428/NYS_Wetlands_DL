@@ -4,9 +4,32 @@ Third architecture arm for the factorial paper's architecture comparison. A mult
 encoder that extracts features separately per input category and fuses them with a
 per-pixel, softmax-normalized gate at every encoder scale.
 
-**Status:** design settled, not yet implemented.
+**Status:** design settled; Phase 0 (data) complete, implementation in progress.
 **Sibling docs:** `factorial_experiment/EXECUTION.md` (node ritual, transfer pattern),
 `production_model/PLAN.md` (the shipped recipe — *not* to be modified by this work).
+
+### v3 context (added 2026-08-17)
+
+This arm lands inside **factorial v3**, not alongside v2. The three terrain metrics
+`TPI_local`, `meanc_local`, `dmv_local` were added upstream in `NYS_Wetlands_Data/`, so the
+patch stacks went 18/20 bands → **21 bands** and the full feature set went 26 → **29
+channels** — which is what makes this plan's four-branch, 29-channel partition land exactly.
+
+Verified data state (2026-08-17): `R_Patches` 1007 · `R_Patches_NWI` 1012 ·
+`R_Patches_NWIextra` 1014, all 21-band with identical band order; field↔NWI pairing is
+1007/1007 (5 NWI patches in `cluster_198/huc_043001081603` have no field twin and are simply
+never selected by the `paired` pool rule). `HUC_DL_Stacks_Extracted_Values.json` carries all
+19 continuous bands (`Geomorph_local` is one-hot and needs no min/max).
+
+Consequences for this document:
+
+- **No comparison arm is pre-trained.** §5 previously said the U-Net and UNet3+ arms already
+  existed. They do, but in `Models/factorial_results_v2/` and `Models/results_arch_v2/` — 26
+  channels, 689 field patches. Under v3 **all three arches retrain from scratch** on the
+  29-channel stack.
+- **Both classification modes** (`multiclass` and `binary`) are in scope for v3, matching v2.
+- The patch-count learning curve is **dropped from v3 entirely** (was already out of scope
+  here; see §8).
 
 ---
 
@@ -38,7 +61,7 @@ resolution (SAR and Sentinel-2 are excluded from this stack).
 
 | Branch | Bands | Channels | Encoder width |
 |---|---|---|---|
-| terrain | DEM, slp_local, TPI_local, Geomorph_local, meanc_local, dmv_local, flowacc, twi | 17 | 48 |
+| terrain | DEM, slope_local, TPI_local, Geomorph_local, meanc_local, dmv_local, flowacc, twi | 17 | 48 |
 | lidar | CHM, pct_below_1m, pct_1m_to_5m, pct_above_5m | 4 | 32 |
 | leafon | r, g, b, nir | 4 | 32 |
 | leafoff | r_lo, g_lo, b_lo, nir_lo | 4 | 32 |
@@ -50,7 +73,7 @@ Both constants live in `dl_experiment_config.py`, alongside the existing config 
 
 ```python
 BRANCH_BANDS = {
-    "terrain":  ["DEM", "slp_local", "TPI_local", "Geomorph_local",
+    "terrain":  ["DEM", "slope_local", "TPI_local", "Geomorph_local",
                  "meanc_local", "dmv_local", "flowacc", "twi"],
     "lidar":    ["CHM", "pct_below_1m", "pct_1m_to_5m", "pct_above_5m"],
     "leafon":   ["r", "g", "b", "nir"],
@@ -94,6 +117,23 @@ shared decoder.
 
 **Cost.** Conv params scale with the square of width, so four narrow parallel branches are
 `(48² + 3·32²) / 64² ≈ 1.31×` a single width-64 encoder — not 4×. Lighter than UNet3+.
+
+That 1.31× covers the **branch convolutions only**. Measured against the real U-Net
+(bf64 / d5 / in=29, 125.3 M params total: 76.2 M encoder+bottleneck, 49.1 M decoder+head),
+the fusion modules add on top of the ~100 M of branch encoders:
+
+| piece | params |
+|---|---|
+| 6 × `proj` 1×1 (dominated by the bottleneck's 4608→2048 = 9.4 M) | 12.6 M |
+| 6 × `gate` 3×3 | 0.33 M |
+
+So the honest statement is **encoder side ≈1.5×, whole model ≈1.3×** — the headline survives
+at model level, but the word "encoder" does not. Write it as "~1.3× total params" and let
+§6's cost table carry the detail.
+
+**Params are not the binding constraint — activations are.** At level 0 the concatenated
+fused tensor is 144 channels at 256² against the U-Net's 64: **2.25× the finest-scale
+activation**. That, not parameter count, is what sets the batch size (see §5).
 
 **Interaction caveat, accepted.** Isolated branches cannot represent cross-modal
 interactions (low-lying **and** canopy present **and** wet ground visible leaf-off) inside
@@ -170,12 +210,22 @@ model slices it per branch with `x[:, idx]`. `build_net()` gains a
 
 ### Hard requirements
 
-1. **`branch_indices` must be built in post-expansion channel space.** Geomorph_local
-   expands 1 band → 10 channels *before* the tensor reaches the model, so terrain's 17
-   indices include that contiguous one-hot block. Build the map from the expansion-aware
-   channel utilities in `dl_band_utils.py`, never from raw band order. Getting this wrong
-   silently mis-slices: the model trains and reports plausible numbers while reading the
-   wrong bands.
+1. **`branch_indices` must be built in post-expansion channel space, from the stats file's
+   `predictor_names`.** Geomorph_local expands 1 band → 10 channels *before* the tensor
+   reaches the model, so terrain's 17 indices include that contiguous one-hot block.
+
+   The authoritative channel order is **`stats["predictor_names"]`**, because that is what
+   `WetlandPatchDataset` indexes the raster by (`dl_02_dataset.py`: `predictor_indices =
+   [band_names.index(n) for n in predictor_names]`, then `normalize_and_expand` walks that
+   same list appending 1 channel per band and 10 for the one-hot). It is *not* raster band
+   order — `dl_make_config_stats.py` writes `predictor_names = config_bands(cfg)`, i.e.
+   BASE + LIDAR + SPECTRAL, which puts CHM after `r,g,b,nir` where the raster puts it before.
+   The two happen to coincide today only for the base bands.
+
+   So: build the map by walking `stats["predictor_names"]` with the expansion rules from
+   `dl_band_utils.get_normalization_method` / `compute_in_channels`. Never from raw raster
+   order, and never from `BRANCH_BANDS` order. Getting this wrong silently mis-slices: the
+   model trains and reports plausible numbers while reading the wrong bands.
 
 2. **Serialize `branch_indices` *and* `branch_widths`** into Lightning `hyper_parameters`
    and the `.meta.json` sidecar. `load_model()` auto-detects architecture on load, and both
@@ -197,25 +247,38 @@ Mirrors `run_arch_compare.sh`; introduces no new patterns.
 
 | Piece | Value |
 |---|---|
-| Results root | `Models/results_arch_fusion/` |
-| Cell path | `<config>_mbfusion/seed<k>/` |
+| Results root | `Models/results_arch_fusion_v3/` |
+| Cell path | `<mode>/<config>_mbfusion/seed<k>/` |
 | Driver | `Shell_Scripts/run_arch_fusion.sh` |
-| Config | `fld_chmret_leafoff` (all four branches present) |
+| Config | `fld_chmret_leafoff` (29 ch — all four branches present) |
+| Modes | `multiclass` and `binary` |
 | Seeds | 0 1 2 3 4 |
 | Held | bf64 / d5 / 50 epochs / 16-mixed — same as factorial |
 
-Comparison arms are already trained: U-Net in
-`Models/factorial_results/fld_chmret_leafoff/`, UNet3+ in `Models/results_arch/`. Three
-architectures, same config, same 5 seeds, same held hyperparameters.
+Note the `<mode>/` level in the cell path: `run_config.sh` inserts it
+(`$RESULTS_DIR/$MODE/$CELL_NAME/seed$SEED`), so every results root in this repo is
+`<root>/{multiclass,binary}/<cell>/seed<k>`. Earlier drafts of this table omitted it.
+
+**Comparison arms are NOT pre-trained.** The v2 arms — U-Net in
+`Models/factorial_results_v2/<mode>/fld_chmret_leafoff/` and UNet3+ in
+`Models/results_arch_v2/<mode>/fld_chmret_leafoff_unet3plus/` — are 26-channel runs on the
+old 689-patch field pool and are **not comparable** to a v3 fusion cell. All three arches
+retrain on the 29-channel v3 stack, at **the same 5 seeds** (v2 ran 3; a 5-seed fusion arm
+paired against 3-seed baselines yields only 3 paired seeds), in **both modes**. The v3 roots
+are `Models/factorial_results_v3/` (U-Net) and `Models/results_arch_v3/` (UNet3+).
 
 **Two deltas from the arch-compare template:**
 
 - **`BATCH_SIZE` as an env knob, default 8.** UNet3+ already needed 8→4 on the A6000. The
   fusion encoder is ~1.3× the U-Net's plus six fusion modules — lighter than UNet3+, but
   expect one OOM-and-halve iteration on first launch.
-- **Gate export.** Gate rasters are a deliverable, not a debug artifact. During eval, run a
-  fixed set of held-out patches and write per-scale gate maps to `seed<k>/gates/` — six
-  arrays of `(n_branch, H, W)` per patch, small enough to sync back with `--metrics-only`.
+- **Gate export.** Gate rasters are a deliverable, not a debug artifact. Run a fixed set of
+  held-out patches and write per-scale gate maps to `seed<k>/gates/` — six arrays of
+  `(n_branch, H, W)` per patch, small enough to sync back with `--metrics-only`.
+
+  Do this in a **separate script** that loads the checkpoint and does its own forward pass,
+  not as an edit to `dl_05_evaluate.py`. §1 puts `dl_05` out of scope, and a standalone
+  exporter also re-runs against any archived cell without re-evaluating it.
 
 > **Agent boundary (unchanged):** Claude *prepares* these scripts; **the user runs** all
 > GPU/long jobs. Nothing here auto-launches training, containers, or rsync.
@@ -230,11 +293,14 @@ count follows from the CLI:
 
 ```bash
 python dl_08b_aggregate_patchcurve.py --arch-compare \
-  --config fld_chmret_leafoff \
-  --arch-dir unet=Models/factorial_results \
-  --arch-dir unet3plus=Models/results_arch \
-  --arch-dir mbfusion=Models/results_arch_fusion
+  --config fld_chmret_leafoff --mode multiclass \
+  --arch-dir unet=Models/factorial_results_v3/multiclass \
+  --arch-dir unet3plus=Models/results_arch_v3/multiclass \
+  --arch-dir mbfusion=Models/results_arch_fusion_v3/multiclass
 ```
+
+Keep `--unet-dir` / `--unet3plus-dir` working as deprecated aliases so the v2 arch-compare
+output still reproduces from the same script.
 
 **Report paired per-seed deltas, not only mean ± sd.** Same seed ⇒ same test patches, so
 each seed gives all three arches an identical evaluation set. At n=5, consistency of sign

@@ -266,7 +266,7 @@ if __name__ == "__main__":
     device = get_device()
     print(f"Using device: {device}\n")
 
-    in_channels = 26  # current project: 17 predictors, Geomorph one-hot -> 26 channels
+    in_channels = 29  # v3 full set: 20 predictors, Geomorph one-hot -> 29 channels
 
     print("=== UNet3+ (bf=32, depth=4, no deep supervision) ===")
     model = create_unet3plus(in_channels=in_channels, base_filters=32, depth=4, device=device)

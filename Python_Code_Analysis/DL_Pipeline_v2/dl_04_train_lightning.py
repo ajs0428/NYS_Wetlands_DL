@@ -33,12 +33,39 @@ from dl_losses import HybridLoss
 from dl_model_utils import export_safetensors
 
 
+def _mbfusion_kwargs(arch: str, stats: dict, gate_kernel: int = 3) -> dict:
+    """Branch args for --arch mbfusion, derived from the STATS file. Empty otherwise.
+
+    The channel order the model must slice by is stats["predictor_names"] --
+    that is what WetlandPatchDataset indexes the raster by, and what
+    normalize_and_expand() walks when it expands Geomorph_local 1 band -> 10
+    channels. Deriving the map from anywhere else (raw raster order, the
+    BRANCH_BANDS declaration order) silently mis-slices: the model trains and
+    reports plausible numbers while each encoder reads the wrong bands.
+
+    verify_branch_partition re-asserts disjointness/coverage here even though
+    dl_preflight_check [9] already gated it, because training can be launched
+    without the preflight and this is the last cheap place to catch it.
+    """
+    if arch != "mbfusion":
+        return {}
+    from dl_experiment_config import verify_branch_partition, branch_widths_for
+    branch_indices = verify_branch_partition(stats["predictor_names"])
+    return {
+        "branch_indices": branch_indices,
+        "branch_widths": branch_widths_for(branch_indices),
+        "gate_kernel": gate_kernel,
+    }
+
+
 def _arch_label(arch: str, use_aspp: bool, aspp_rates, deep_supervision: bool) -> str:
     """Human-readable architecture string for logs."""
     if arch == "unet":
         return "UNet" + (f" + ASPP(rates={aspp_rates})" if use_aspp else "")
     if arch == "unet3plus":
         return "UNet3+" + (" + deep supervision" if deep_supervision else "")
+    if arch == "mbfusion":
+        return "MBFusion (multi-branch encoder + per-scale gated fusion)"
     return arch
 
 
@@ -221,6 +248,14 @@ class WetlandSegmentationModule(L.LightningModule):
         aspp_rates: tuple = (6, 12, 18),
         cat_channels: int = 64,
         deep_supervision: bool = False,
+        # MBFusionNet params. Serialized into hyper_parameters because they are
+        # CONFIG-DEPENDENT (a nolidar cell has three branches, not four), so
+        # load_model() cannot reconstruct the network without them. branch_widths
+        # is stored even though BRANCH_WIDTHS is a module constant -- otherwise an
+        # equal-width control arm would be indistinguishable from this one later.
+        branch_indices: Optional[dict] = None,
+        branch_widths: Optional[dict] = None,
+        gate_kernel: int = 3,
         # Training params
         class_weights: Optional[torch.Tensor] = None,
         class_names: Optional[list] = None,
@@ -306,6 +341,15 @@ class WetlandSegmentationModule(L.LightningModule):
 
         self.log(f"{stage}/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(f"{stage}/acc", acc, on_step=False, on_epoch=True, prog_bar=True)
+
+        # Gate-collapse monitor (mbfusion only). A healthy softmax gate spreads
+        # weight across branches; a collapsed one saturates one branch near 1.0
+        # everywhere and drives entropy toward 0 in the first few epochs. If that
+        # happens, a temperature on the gate logits is the standard fix -- not
+        # built in speculatively (arch_fusion/PLAN.md Section 3).
+        if stage == "train" and hasattr(self.net, "gate_entropies"):
+            for key, val in self.net.gate_entropies().items():
+                self.log(f"train/{key}", val, on_step=False, on_epoch=True)
         return loss
 
     def _compute_and_log_iou(self, stage: str):
@@ -396,6 +440,7 @@ def train(
     arch: str = "unet",
     cat_channels: int = 64,
     deep_supervision: bool = False,
+    gate_kernel: int = 3,
     n_patches: Optional[int] = None,
     # Factorial v2: when `config` is set, data comes from the field-anchored pools
     # (WetlandPoolsDataModule) instead of a single patches_dir. stats_path must be
@@ -441,6 +486,13 @@ def train(
     with open(stats_path) as f:
         stats = json.load(f)
     in_channels = stats["in_channels"]
+    # mbfusion needs the per-branch channel map. Derived from THIS stats file, so
+    # it always matches the tensor the dataset will actually hand the model.
+    mb_kwargs = _mbfusion_kwargs(arch, stats, gate_kernel=gate_kernel)
+    if mb_kwargs:
+        print("Branches: " + "  ".join(
+            f"{b}:{len(v)}ch@w{mb_kwargs['branch_widths'][b]}"
+            for b, v in mb_kwargs["branch_indices"].items()))
     num_classes = len(stats["class_names"])
     class_names = stats["class_names"]
     ignore_index = stats.get("ignore_index", 255)
@@ -491,6 +543,7 @@ def train(
         aspp_rates=aspp_rates,
         cat_channels=cat_channels,
         deep_supervision=deep_supervision,
+        **mb_kwargs,
     )
 
     # Lightning module
@@ -506,6 +559,7 @@ def train(
         aspp_rates=aspp_rates,
         cat_channels=cat_channels,
         deep_supervision=deep_supervision,
+        **mb_kwargs,
         class_weights=class_weights,
         class_names=class_names,
         classification_mode=mode,
@@ -662,6 +716,10 @@ def train(
             "aspp_rates": list(aspp_rates),
             "cat_channels": cat_channels,
             "deep_supervision": deep_supervision,
+            # mbfusion: config-dependent, so recorded per run (empty for other arches)
+            "branch_indices": mb_kwargs.get("branch_indices"),
+            "branch_widths": mb_kwargs.get("branch_widths"),
+            "gate_kernel": mb_kwargs.get("gate_kernel"),
             "dropout": dropout,
             "learning_rate": learning_rate,
             "weight_decay": weight_decay,
@@ -737,6 +795,7 @@ def train_kfold(
     arch: str = "unet",
     cat_channels: int = 64,
     deep_supervision: bool = False,
+    gate_kernel: int = 3,
     n_patches: Optional[int] = None,
 ):
     """
@@ -761,6 +820,13 @@ def train_kfold(
     with open(stats_path) as f:
         stats = json.load(f)
     in_channels = stats["in_channels"]
+    # mbfusion needs the per-branch channel map. Derived from THIS stats file, so
+    # it always matches the tensor the dataset will actually hand the model.
+    mb_kwargs = _mbfusion_kwargs(arch, stats, gate_kernel=gate_kernel)
+    if mb_kwargs:
+        print("Branches: " + "  ".join(
+            f"{b}:{len(v)}ch@w{mb_kwargs['branch_widths'][b]}"
+            for b, v in mb_kwargs["branch_indices"].items()))
     num_classes = len(stats["class_names"])
     class_names = stats["class_names"]
     ignore_index = stats.get("ignore_index", 255)
@@ -816,6 +882,7 @@ def train_kfold(
             aspp_rates=aspp_rates,
             cat_channels=cat_channels,
             deep_supervision=deep_supervision,
+            **mb_kwargs,
         )
 
         # Lightning module
@@ -831,6 +898,7 @@ def train_kfold(
             aspp_rates=aspp_rates,
             cat_channels=cat_channels,
             deep_supervision=deep_supervision,
+            **mb_kwargs,
             class_weights=dm.class_weights,
             class_names=class_names,
             classification_mode=mode,
@@ -1029,6 +1097,10 @@ def train_kfold(
             "aspp_rates": list(aspp_rates),
             "cat_channels": cat_channels,
             "deep_supervision": deep_supervision,
+            # mbfusion: config-dependent, so recorded per run (empty for other arches)
+            "branch_indices": mb_kwargs.get("branch_indices"),
+            "branch_widths": mb_kwargs.get("branch_widths"),
+            "gate_kernel": mb_kwargs.get("gate_kernel"),
             "dropout": dropout,
             "learning_rate": learning_rate,
             "weight_decay": weight_decay,
@@ -1123,6 +1195,9 @@ if __name__ == "__main__":
                         help="[unet3plus] Unified channels per skip branch (default: 64)")
     parser.add_argument("--deep-supervision", action="store_true",
                         help="[unet3plus] Attach a loss head to every decoder stage + bottleneck")
+    parser.add_argument("--gate-kernel", type=int, default=3,
+                        help="[mbfusion] Spatial kernel of the per-scale branch gate "
+                             "(default: 3; 1 gives speckled, hard-to-read gate rasters)")
     parser.add_argument("--kfold", type=int, default=0,
                         help="Number of cross-validation folds (0=disabled, default: 0). "
                              "When set (e.g. --kfold 5), runs k-fold CV instead of a single train/val/test split.")
@@ -1179,6 +1254,7 @@ if __name__ == "__main__":
         arch=args.arch,
         cat_channels=args.cat_channels,
         deep_supervision=args.deep_supervision,
+        gate_kernel=args.gate_kernel,
         n_patches=args.n_patches,
     )
 

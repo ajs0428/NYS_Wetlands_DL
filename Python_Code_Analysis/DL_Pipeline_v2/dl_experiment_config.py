@@ -20,15 +20,29 @@ import os
 import re
 from typing import Dict, List, Optional
 
-from dl_band_utils import load_band_config, compute_in_channels, stats_filename
+from dl_band_utils import (
+    load_band_config,
+    compute_in_channels,
+    get_normalization_method,
+    stats_filename,
+)
 
 
 # --- Band matrix --------------------------------------------------------------
 
 # Constant base present in EVERY config. Geomorph_local one-hot expands 1 -> 10,
-# so these 9 names resolve to 18 input channels (8 single + 10 one-hot).
+# so these 12 names resolve to 21 input channels (11 single + 10 one-hot).
+#
+# v3 (2026-08-17) added TPI_local, meanc_local, dmv_local -- three terrain metrics
+# produced upstream in NYS_Wetlands_Data (step_terrain.sh /
+# terrain_metrics_filter_singleVect_CMD.R). This is what moved every config up by
+# 3 channels (v2: 18/22/26 -> v3: 21/25/29) and what makes the arch_fusion
+# terrain branch 17 channels wide. The terrain block is listed in raster band
+# order; note config_bands() as a whole is NOT raster order (CHM sorts after
+# r,g,b,nir here but before them in the raster) -- see branch_indices_from_predictors.
 BASE_BANDS: List[str] = [
-    "DEM", "slope_local", "Geomorph_local", "flowacc", "twi",
+    "DEM", "slope_local", "TPI_local", "Geomorph_local", "meanc_local", "dmv_local",
+    "flowacc", "twi",
     "r", "g", "b", "nir",
 ]
 
@@ -130,16 +144,42 @@ _HUC12_RE = re.compile(r"huc_(\d+)")
 
 CONFIGS: Dict[str, dict] = {
     # Field-verified feature factorial (2 LiDAR x 2 spectral)
-    "fld_nolidar_leafon":     {"lidar": "nolidar", "spectral": "leafon",  "label": "fld",      "channels": 18},
-    "fld_nolidar_leafoff":    {"lidar": "nolidar", "spectral": "leafoff", "label": "fld",      "channels": 22},
-    "fld_chmret_leafon":      {"lidar": "chmret",  "spectral": "leafon",  "label": "fld",      "channels": 22},
-    "fld_chmret_leafoff":     {"lidar": "chmret",  "spectral": "leafoff", "label": "fld",      "channels": 26},  # full feature set / channel anchor
+    "fld_nolidar_leafon":     {"lidar": "nolidar", "spectral": "leafon",  "label": "fld",      "channels": 21},
+    "fld_nolidar_leafoff":    {"lidar": "nolidar", "spectral": "leafoff", "label": "fld",      "channels": 25},
+    "fld_chmret_leafon":      {"lidar": "chmret",  "spectral": "leafon",  "label": "fld",      "channels": 25},
+    "fld_chmret_leafoff":     {"lidar": "chmret",  "spectral": "leafoff", "label": "fld",      "channels": 29},  # full feature set / channel anchor
     # Label block (full feature set only -- scope control)
-    "nwi_chmret_leafoff":     {"lidar": "chmret",  "spectral": "leafoff", "label": "nwi",      "channels": 26},
-    "nwiextra_chmret_leafoff":{"lidar": "chmret",  "spectral": "leafoff", "label": "nwiextra", "channels": 26},
-    "nwifield_chmret_leafoff":{"lidar": "chmret",  "spectral": "leafoff", "label": "nwifield", "channels": 26},
-    "flddeg_chmret_leafoff":  {"lidar": "chmret",  "spectral": "leafoff", "label": "flddeg",   "channels": 26},
+    "nwi_chmret_leafoff":     {"lidar": "chmret",  "spectral": "leafoff", "label": "nwi",      "channels": 29},
+    "nwiextra_chmret_leafoff":{"lidar": "chmret",  "spectral": "leafoff", "label": "nwiextra", "channels": 29},
+    "nwifield_chmret_leafoff":{"lidar": "chmret",  "spectral": "leafoff", "label": "nwifield", "channels": 29},
+    "flddeg_chmret_leafoff":  {"lidar": "chmret",  "spectral": "leafoff", "label": "flddeg",   "channels": 29},
 }
+
+
+# --- Multi-branch fusion partition (arch_fusion/PLAN.md Section 2) -------------
+# Which bands feed which encoder branch in `--arch mbfusion`, and how wide each
+# branch's encoder is at level 0. Drawn by physical process / sensing modality;
+# all inputs are native 1 m (SAR and Sentinel-2 are not in this stack).
+#
+# Every band in BASE_BANDS + LIDAR_TIERS + SPECTRAL_TIERS must appear in exactly
+# one branch -- verify_branch_partition() enforces that, so adding a band to the
+# factorial without assigning it to a branch fails loudly here rather than
+# silently dropping it from the fusion model's input.
+BRANCH_BANDS: Dict[str, List[str]] = {
+    "terrain":  ["DEM", "slope_local", "TPI_local", "Geomorph_local",
+                 "meanc_local", "dmv_local", "flowacc", "twi"],   # 17 ch (Geomorph 1->10)
+    "lidar":    ["CHM", "pct_below_1m", "pct_1m_to_5m", "pct_above_5m"],  # 4 ch
+    "leafon":   ["r", "g", "b", "nir"],                                   # 4 ch
+    "leafoff":  ["r_lo", "g_lo", "b_lo", "nir_lo"],                       # 4 ch
+}
+
+# Encoder width per branch at level 0; level L is width * 2**L. Deliberately NOT
+# proportional to channel count: proportional allocation would hand terrain ~59%
+# of the width largely because geomorphon happens to be one-hot encoded into 10
+# channels carrying ~3.3 bits, starving the LiDAR and leaf-off branches -- the two
+# meant to resolve the UPL->FSW confusion. Terrain leads because wetland
+# occurrence is terrain-driven; the other three lead the vegetation-class split.
+BRANCH_WIDTHS: Dict[str, int] = {"terrain": 48, "lidar": 32, "leafon": 32, "leafoff": 32}
 
 
 # --- Helpers ------------------------------------------------------------------
@@ -244,6 +284,145 @@ def stats_basename(name: str, mode: str = "multiclass", weight_power: float = 0.
     return base.replace("_normalization_stats", f"_normalization_stats_{name}")
 
 
+# --- Multi-branch fusion helpers (arch_fusion/PLAN.md Section 4) --------------
+
+def _band_to_branch() -> Dict[str, str]:
+    """Reverse BRANCH_BANDS into band -> branch, rejecting duplicate assignments."""
+    rev: Dict[str, str] = {}
+    for branch, bands in BRANCH_BANDS.items():
+        for b in bands:
+            if b in rev:
+                raise ValueError(
+                    f"band '{b}' assigned to two branches: '{rev[b]}' and '{branch}'")
+            rev[b] = branch
+    return rev
+
+
+def branch_indices_from_predictors(
+    predictor_names: List[str],
+    band_config: Optional[dict] = None,
+) -> Dict[str, List[int]]:
+    """Map each fusion branch to its channel indices in the model's input tensor.
+
+    THE ONE THING THAT MUST BE RIGHT (PLAN Section 4.1). Indices are in
+    POST-EXPANSION channel space: Geomorph_local occupies 10 contiguous channels,
+    not 1, because dl_02_dataset.normalize_and_expand() one-hots it before the
+    tensor reaches the model.
+
+    `predictor_names` must be the dataset's channel order -- i.e.
+    stats["predictor_names"], which dl_make_config_stats writes as
+    config_bands(cfg) = BASE + LIDAR + SPECTRAL. It is NOT raster band order
+    (dl_02 re-indexes the raster by name), and it is NOT BRANCH_BANDS order.
+    Passing the wrong list here mis-slices silently: the model trains fine and
+    reports plausible metrics while reading the wrong bands.
+
+    Branches whose bands the active config does not supply are omitted entirely,
+    so a `nolidar` or `leafon` config yields 3 branches and the fusion gate
+    softmaxes over 3 rather than erroring.
+
+    Args:
+        predictor_names: Ordered predictor band names (stats["predictor_names"]).
+        band_config: dl_band_config.json contents; loaded if None.
+
+    Returns:
+        {branch: [channel indices]}, in BRANCH_BANDS declaration order, omitting
+        branches with no bands present. Indices within a branch are ascending.
+
+    Raises:
+        ValueError: If a predictor belongs to no branch.
+    """
+    if band_config is None:
+        band_config = load_band_config()
+
+    rev = _band_to_branch()
+    out: Dict[str, List[int]] = {b: [] for b in BRANCH_BANDS}
+
+    offset = 0
+    for name in predictor_names:
+        norm = get_normalization_method(name, band_config)
+        width = norm["num_classes"] if norm["method"] == "one_hot" else 1
+        branch = rev.get(name)
+        if branch is None:
+            raise ValueError(
+                f"predictor '{name}' is not assigned to any fusion branch. "
+                f"Add it to BRANCH_BANDS (branches: {sorted(BRANCH_BANDS)})."
+            )
+        out[branch].extend(range(offset, offset + width))
+        offset += width
+
+    return {b: idx for b, idx in out.items() if idx}
+
+
+def branch_widths_for(branch_indices: Dict[str, List[int]]) -> Dict[str, int]:
+    """Level-0 encoder width per PRESENT branch, matching branch_indices' keys.
+
+    Serialized into the checkpoint alongside branch_indices (PLAN Section 4.2):
+    BRANCH_WIDTHS being a module constant is not a reason to skip it, since an
+    equal-width control arm would otherwise be indistinguishable after the fact.
+    """
+    return {b: BRANCH_WIDTHS[b] for b in branch_indices}
+
+
+def verify_branch_partition(
+    predictor_names: List[str],
+    band_config: Optional[dict] = None,
+) -> Dict[str, List[int]]:
+    """Assert the branch slices exactly partition the input tensor.
+
+    The CPU-side guard from PLAN Section 4.3, called by dl_preflight_check before
+    any GPU time and again by the model at construction. Checks that the branch
+    index sets are disjoint, that their union is exactly range(in_channels), and
+    that Geomorph_local's one-hot block is contiguous and inside the terrain
+    branch.
+
+    Returns the validated branch_indices so callers can use it directly.
+    """
+    if band_config is None:
+        band_config = load_band_config()
+
+    idx = branch_indices_from_predictors(predictor_names, band_config)
+    total = compute_in_channels(predictor_names, band_config)
+
+    flat = [i for v in idx.values() for i in v]
+    if len(flat) != len(set(flat)):
+        dupes = sorted({i for i in flat if flat.count(i) > 1})
+        raise AssertionError(f"branch slices overlap at channel(s) {dupes}")
+    if set(flat) != set(range(total)):
+        missing = sorted(set(range(total)) - set(flat))
+        extra = sorted(set(flat) - set(range(total)))
+        raise AssertionError(
+            f"branch slices do not cover the input: missing={missing} extra={extra} "
+            f"(in_channels={total})"
+        )
+
+    # Geomorph one-hot block: contiguous, correct width, and in the terrain branch.
+    onehot = [n for n in predictor_names
+              if get_normalization_method(n, band_config)["method"] == "one_hot"]
+    for name in onehot:
+        width = get_normalization_method(name, band_config)["num_classes"]
+        start = compute_in_channels(predictor_names[:predictor_names.index(name)], band_config)
+        block = list(range(start, start + width))
+        branch = _band_to_branch()[name]
+        if not set(block).issubset(idx.get(branch, [])):
+            raise AssertionError(
+                f"one-hot band '{name}' block {block[0]}..{block[-1]} is not fully "
+                f"inside branch '{branch}'"
+            )
+
+    return idx
+
+
+def config_branch_indices(name: str, band_config: Optional[dict] = None) -> Dict[str, List[int]]:
+    """branch_indices for a config, derived from config_bands().
+
+    Convenience for preflight and self-checks. TRAINING must instead derive the
+    map from the loaded stats file's predictor_names -- the two agree only so long
+    as dl_make_config_stats keeps writing predictor_names = config_bands(cfg),
+    and the stats file is what the dataset actually indexes by.
+    """
+    return verify_branch_partition(config_bands(get_config(name)), band_config)
+
+
 def verify_channel_matrix(band_config: Optional[dict] = None) -> None:
     """Assert every config resolves to its plan-specified channel count.
 
@@ -311,3 +490,11 @@ if __name__ == "__main__":
                   f"{len(config_bands(cfg)):5d} {n:8d}  {flag}")
         verify_channel_matrix(bc)
         print("\nAll channel counts match the plan matrix.")
+
+        # Branch partition (arch_fusion): every config must slice cleanly.
+        print(f"\n{'config':24s} {'branches (channels)':52s} {'total':>5s}")
+        for name in CONFIGS:
+            idx = config_branch_indices(name, bc)
+            desc = "  ".join(f"{b}:{len(v)}" for b, v in idx.items())
+            print(f"{name:24s} {desc:52s} {sum(len(v) for v in idx.values()):5d}")
+        print("\nAll configs partition cleanly into fusion branches.")

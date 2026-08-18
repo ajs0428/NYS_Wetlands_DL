@@ -29,6 +29,14 @@ BAND_CONFIG="Python_Code_Analysis/DL_Pipeline_v2/dl_band_config.json"
 GLOBAL_STATS="Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json"
 SCRIPT_DIR="Python_Code_Analysis/DL_Pipeline_v2"
 
+# Class-weight power: dl_01 builds the stats with this power and every downstream
+# step reads the matching <mode>_normalization_stats[_wp<p>].json (empty "" = base).
+# ONE knob -- STATS_PATH below is derived from it rather than restating "wp0.5",
+# so the flag and the filename cannot drift apart.
+WEIGHT_POWER="0.5"
+WP_FLAG=""
+[ -n "$WEIGHT_POWER" ] && WP_FLAG="--weight-power $WEIGHT_POWER"
+
 # Build optional flags
 ASPP_FLAGS=""
 if [ "$USE_ASPP" = true ]; then
@@ -43,10 +51,15 @@ if [ "$ARCH" = "unet3plus" ]; then
     [ "$DEEP_SUPERVISION" = true ] && ARCH_FLAGS="$ARCH_FLAGS --deep-supervision"
 fi
 
-# Read classification mode from band config
+# Read classification mode from band config (display only -- default_stats_path
+# reads the same field, so STATS_PATH stays correct if this lookup ever fails).
 CLASS_MODE=$(python -c "import json; print(json.load(open('$BAND_CONFIG'))['classification_mode'])" 2>/dev/null || echo "multiclass")
 
-STATS_PATH="Data/Training_Data/${CLASS_MODE}_normalization_stats_wp0.5.json"
+# Resolve the active mode's stats file: <mode>_normalization_stats[_wp<p>].json.
+# Same helper dl_01 uses to derive its own default, so --output below is a
+# restatement, not an override -- kept explicit because the downstream steps in
+# this script read STATS_PATH too, and one in-script definition beats two.
+STATS_PATH=$(python -c "import sys; sys.path.insert(0,'$SCRIPT_DIR'); from dl_band_utils import default_stats_path; print(default_stats_path(weight_power=${WEIGHT_POWER:-None}))")
 
 echo "=== NYS Wetlands DL Pipeline (HPC) ==="
 echo "Classification: $CLASS_MODE"
@@ -61,8 +74,8 @@ python $SCRIPT_DIR/dl_01_compute_statistics.py \
         --patches-dir $PATCHES_DIR \
         --output $STATS_PATH \
         --config $BAND_CONFIG \
-        --weight-power 0.5 \
-        --global-stats $GLOBAL_STATS
+        --global-stats $GLOBAL_STATS \
+        $WP_FLAG
 
 # Build k-fold flag
 KFOLD_FLAG=""

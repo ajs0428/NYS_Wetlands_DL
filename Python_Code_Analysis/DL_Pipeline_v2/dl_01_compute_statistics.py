@@ -23,18 +23,21 @@ channels), sqrt-inverse class weights, min/max overridden by the global
 full-raster stats from R (NYS_Wetlands_Data/DL_Extract_Normalize_Stats_FullRasters.R):
 
     python Python_Code_Analysis/DL_Pipeline_v2/dl_01_compute_statistics.py \
-      --patches-dir   Data/Training_Data/R_Patches_Merged \
+      --patches-dir   Data/Training_Data/R_Patches \
       --global-stats  Data/Training_Data/HUC_DL_Stacks_Extracted_Values.json \
-      --weight-power  0.5 \
-      --output        Data/Training_Data/multiclass_normalization_stats_wp0.5.json
+      --weight-power  0.5
 
-Two gotchas:
-  * Pass --output explicitly. Its default (default_stats_path()) is evaluated
-    BEFORE --weight-power is parsed, so it resolves to the un-suffixed
-    multiclass_normalization_stats.json and would silently write the wrong file,
-    leaving the real _wp0.5 master stale.
-  * --weight-power defaults to 1.0 (legacy pure inverse-freq); pass 0.5 for the
-    sqrt-inverse weighting the experiment fixes across every run.
+The output path is derived from the active mode and --weight-power, so the above
+writes Data/Training_Data/multiclass_normalization_stats_wp0.5.json -- the file
+dl_make_config_stats.py reads as its master. Pass --output only to override it.
+
+Note on --weight-power: it defaults to 1.0 (legacy pure inverse-freq), but
+OMITTING it and passing 1.0 differ in the output filename -- omitted keeps the
+un-suffixed legacy name, explicit 1.0 writes _wp1. Pass 0.5 for the sqrt-inverse
+weighting the experiment fixes across every run.
+(Fixed 2026-08-17: --output's default used to be evaluated before --weight-power
+was parsed, so a --weight-power 0.5 run silently wrote the un-suffixed file and
+left the real _wp0.5 master stale. It is now resolved after parsing.)
 
 Success check: stdout should show "Overrode min/max with global stats for: [...]"
 listing the min_max bands. "Warning: No global stats for min_max bands: [...]"
@@ -380,8 +383,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output",
         type=Path,
-        default=default_stats_path(),
-        help="Output path for statistics JSON (default: mode-specific name from dl_band_config.json)"
+        default=None,
+        help="Output path for statistics JSON. Default is derived AFTER parsing from "
+             "the active mode and --weight-power, e.g. "
+             "Data/Training_Data/multiclass_normalization_stats_wp0.5.json"
     )
     parser.add_argument(
         "--config",
@@ -398,21 +403,35 @@ if __name__ == "__main__":
     parser.add_argument(
         "--weight-power",
         type=float,
-        default=1.0,
+        default=None,
         help="Exponent for inverse-frequency class weights: (1/freq)**power. "
              "1.0=pure inverse-freq (legacy), 0.5=sqrt-inverse, 0.0=uniform. "
-             "Lower values reduce minority over-prediction (default: 1.0)"
+             "Lower values reduce minority over-prediction. Omitted = 1.0 and an "
+             "un-suffixed output filename; passing a value adds the matching "
+             "_wp<power> suffix to the default filename (default: 1.0)"
     )
     args = parser.parse_args()
+
+    # --weight-power carries a None sentinel so "omitted" is distinguishable from
+    # "explicitly 1.0": the former keeps the legacy un-suffixed filename, the
+    # latter writes _wp1. The computation itself always gets a real float.
+    weight_power = 1.0 if args.weight_power is None else args.weight_power
+
+    # Resolve the default output AFTER parsing. Evaluating default_stats_path() in
+    # add_argument() ran before --weight-power existed, so it always produced the
+    # un-suffixed name and a --weight-power 0.5 run silently wrote the wrong file
+    # while leaving the real _wp0.5 master stale.
+    out_arg = args.output or default_stats_path(args.config, weight_power=args.weight_power)
 
     # Handle relative paths from project root
     project_root = Path(__file__).parent.parent.parent
     patches_dir = project_root / args.patches_dir if not args.patches_dir.is_absolute() else args.patches_dir
-    output_path = project_root / args.output if not args.output.is_absolute() else args.output
+    output_path = project_root / out_arg if not out_arg.is_absolute() else out_arg
 
     global_stats_path = None
     if args.global_stats is not None:
         global_stats_path = project_root / args.global_stats if not args.global_stats.is_absolute() else args.global_stats
 
+    print(f"[dl_01] writing -> {output_path}")
     compute_statistics(patches_dir, output_path, args.config, global_stats_path,
-                        weight_power=args.weight_power)
+                        weight_power=weight_power)

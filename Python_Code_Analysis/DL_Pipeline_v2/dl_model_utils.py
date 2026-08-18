@@ -33,6 +33,11 @@ def _extract_hparams(checkpoint: dict) -> dict:
         "aspp_rates": hparams.get("aspp_rates"),
         "cat_channels": hparams.get("cat_channels"),
         "deep_supervision": hparams.get("deep_supervision"),
+        # mbfusion: REQUIRED to rebuild the net. Config-dependent (a nolidar cell
+        # has three branches), so it cannot be defaulted -- see arch_fusion/PLAN.md 4.2.
+        "branch_indices": hparams.get("branch_indices"),
+        "branch_widths": hparams.get("branch_widths"),
+        "gate_kernel": hparams.get("gate_kernel"),
     }
 
 
@@ -87,6 +92,9 @@ def export_safetensors(
     arch: Optional[str] = None,
     cat_channels: Optional[int] = None,
     deep_supervision: Optional[bool] = None,
+    branch_indices: Optional[dict] = None,
+    branch_widths: Optional[dict] = None,
+    gate_kernel: Optional[int] = None,
 ) -> Path:
     """
     Export a Lightning .ckpt to .safetensors + .meta.json sidecar.
@@ -96,6 +104,9 @@ def export_safetensors(
         output_dir: Directory for output files (default: same as ckpt_path)
         in_channels..aspp_rates: Manual overrides; used when checkpoint
             lacks hyper_parameters (pre-hparam checkpoints)
+        branch_indices, branch_widths, gate_kernel: [mbfusion] Manual overrides
+            for the branch map. Required in the sidecar for mbfusion checkpoints
+            -- export raises rather than guessing.
 
     Returns:
         Path to the .safetensors file
@@ -118,6 +129,9 @@ def export_safetensors(
     hparams = _extract_hparams(checkpoint)
     overrides = {
         "arch": arch,
+        "branch_indices": branch_indices,
+        "branch_widths": branch_widths,
+        "gate_kernel": gate_kernel,
         "in_channels": in_channels,
         "num_classes": num_classes,
         "base_filters": base_filters,
@@ -134,8 +148,12 @@ def export_safetensors(
             hparams[key] = val
 
     # Validate that we have the required architecture params
-    missing = [k for k in ("in_channels", "num_classes", "base_filters", "depth")
-               if hparams.get(k) is None]
+    required = ["in_channels", "num_classes", "base_filters", "depth"]
+    if hparams.get("arch") == "mbfusion":
+        # No sensible default exists for these -- guessing would rebuild a model
+        # that loads weights "successfully" while slicing the wrong bands.
+        required += ["branch_indices", "branch_widths"]
+    missing = [k for k in required if hparams.get(k) is None]
     if missing:
         raise ValueError(
             f"Cannot export: missing architecture params {missing}. "
@@ -147,13 +165,31 @@ def export_safetensors(
     if hparams.get("aspp_rates") is not None:
         hparams["aspp_rates"] = list(hparams["aspp_rates"])
 
-    # Set defaults for optional params
-    hparams.setdefault("arch", "unet")
-    hparams.setdefault("dropout", 0.0)
-    hparams.setdefault("use_aspp", False)
-    hparams.setdefault("aspp_rates", [6, 12, 18])
-    hparams.setdefault("cat_channels", 64)
-    hparams.setdefault("deep_supervision", False)
+    # Normalize the branch map for JSON (index lists, int widths). Branch ORDER is
+    # significant -- it fixes the gate's channel order -- and dict order survives
+    # the JSON round-trip, so it is preserved rather than sorted.
+    if hparams.get("branch_indices") is not None:
+        hparams["branch_indices"] = {
+            b: [int(i) for i in idx] for b, idx in hparams["branch_indices"].items()
+        }
+    if hparams.get("branch_widths") is not None:
+        hparams["branch_widths"] = {
+            b: int(w) for b, w in hparams["branch_widths"].items()
+        }
+
+    # Set defaults for optional params.
+    # NB: setdefault would be wrong -- _extract_hparams inserts EVERY key, using
+    # None for the ones an arch does not use, so the key is present and
+    # setdefault never fires. That wrote "aspp_rates": null into the sidecar and
+    # blew up on load with tuple(None). Fill on None, not on absence.
+    for key, default in (("arch", "unet"), ("dropout", 0.0), ("use_aspp", False),
+                         ("aspp_rates", [6, 12, 18]), ("cat_channels", 64),
+                         ("deep_supervision", False), ("gate_kernel", 3)):
+        if hparams.get(key) is None:
+            hparams[key] = default
+    # NOTE: no setdefault for branch_indices/branch_widths on purpose -- for
+    # mbfusion they are validated as required above, and for other arches they
+    # must stay absent rather than be invented.
 
     # Also carry over non-architecture metadata if available
     ckpt_hparams = checkpoint.get("hyper_parameters", {})
@@ -208,11 +244,16 @@ def _load_from_safetensors(
         num_classes=meta["num_classes"],
         base_filters=meta["base_filters"],
         depth=meta["depth"],
-        dropout=meta.get("dropout", 0.0),
-        use_aspp=meta.get("use_aspp", False),
-        aspp_rates=tuple(meta.get("aspp_rates", (6, 12, 18))),
-        cat_channels=meta.get("cat_channels", 64),
-        deep_supervision=meta.get("deep_supervision", False),
+        dropout=meta.get("dropout") or 0.0,
+        use_aspp=bool(meta.get("use_aspp")),
+        # `or` (not a .get default) so an explicit null in an older sidecar
+        # still falls back instead of raising tuple(None).
+        aspp_rates=tuple(meta.get("aspp_rates") or (6, 12, 18)),
+        cat_channels=meta.get("cat_channels") or 64,
+        deep_supervision=bool(meta.get("deep_supervision")),
+        branch_indices=meta.get("branch_indices"),
+        branch_widths=meta.get("branch_widths"),
+        gate_kernel=meta.get("gate_kernel") or 3,
     )
 
     state_dict = load_safetensors(str(model_path), device=str(device))
@@ -317,6 +358,9 @@ def load_model(
     arch: str = "unet",
     cat_channels: int = 64,
     deep_supervision: bool = False,
+    branch_indices: Optional[dict] = None,
+    branch_widths: Optional[dict] = None,
+    gate_kernel: int = 3,
 ) -> nn.Module:
     """
     Construct a model and load weights from checkpoint.
@@ -385,6 +429,13 @@ def load_model(
             detected.append(f"aspp={use_aspp}")
         if hp.get("aspp_rates") is not None:
             aspp_rates = tuple(hp["aspp_rates"])
+        if hp.get("branch_indices") is not None:
+            branch_indices = hp["branch_indices"]
+            detected.append(f"branches={len(branch_indices)}")
+        if hp.get("branch_widths") is not None:
+            branch_widths = hp["branch_widths"]
+        if hp.get("gate_kernel") is not None:
+            gate_kernel = hp["gate_kernel"]
         if detected:
             print(f"Auto-detected architecture from checkpoint: {', '.join(detected)}")
 
@@ -399,6 +450,9 @@ def load_model(
         aspp_rates=aspp_rates,
         cat_channels=cat_channels,
         deep_supervision=deep_supervision,
+        branch_indices=branch_indices,
+        branch_widths=branch_widths,
+        gate_kernel=gate_kernel,
     )
 
     _load_weights_into_net(checkpoint, net)
