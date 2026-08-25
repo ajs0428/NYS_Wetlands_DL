@@ -1,7 +1,7 @@
 # Production Model — Execution Guide
 
 Operational walkthrough for training the single deployable model. The node ritual
-is **identical** to the factorial's (`../factorial_experiment/EXECUTION_v2.md`) —
+is **identical** to the factorial's (`../factorial_experiment/EXECUTION.md`) —
 this guide only states what differs. Read that one first if the two-node split is
 unfamiliar.
 
@@ -155,5 +155,5 @@ the `webmap/` viewer. Architecture is auto-detected from the checkpoint, so no
 
 - Recipe / source of truth: `dl_prod_config.py`
 - Rationale + open decisions: `PLAN.md`
-- Node ritual in full: `../factorial_experiment/EXECUTION_v2.md`
+- Node ritual in full: `../factorial_experiment/EXECUTION.md`
 - Branching policy: root `CLAUDE.md` § "Repo & branching"

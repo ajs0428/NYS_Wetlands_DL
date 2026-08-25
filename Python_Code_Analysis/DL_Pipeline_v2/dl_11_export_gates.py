@@ -4,12 +4,12 @@ dl_11_export_gates.py
 Export per-scale branch-gate rasters from a trained `--arch mbfusion` cell.
 
 Gate maps are a DELIVERABLE of the fusion study, not a debug artifact
-(arch_fusion/PLAN.md Section 5): they are the scale-resolved, per-pixel answer to
+(factorial_experiment/PLAN.md Section 6.7): the scale-resolved, per-pixel answer to
 "how much does the model weight each input modality here?", and they pair with
 SHAP in the writeup.
 
 Standalone by design. It loads the checkpoint and runs its own forward pass
-rather than hooking dl_05_evaluate, because (a) PLAN Section 1 puts dl_05 out of
+rather than hooking dl_05_evaluate, because (a) PLAN Section 6.1 puts dl_05 out of
 scope, and (b) this way gates can be re-exported from any archived cell without
 re-running evaluation.
 

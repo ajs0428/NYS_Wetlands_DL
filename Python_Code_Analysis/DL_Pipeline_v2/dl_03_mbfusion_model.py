@@ -3,7 +3,7 @@ dl_03_mbfusion_model.py
 
 Multi-branch fusion encoder ("mbfusion") -- the third architecture arm of the
 factorial's architecture comparison. Design and rationale live in
-arch_fusion/PLAN.md; this module implements Section 3 ("Design A").
+factorial_experiment/PLAN.md; this module implements Section 6.3 ("Design A").
 
 Shape of the idea
 -----------------

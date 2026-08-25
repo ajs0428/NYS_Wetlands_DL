@@ -21,7 +21,7 @@
 # both the v2 nested test_metrics schema and the flat v1 one).
 #
 # v3: cells live under Models/factorial_results_v3/<MODE>/<config>/seed<k> and
-# predictions land in Data/HUC_DL_Predictions_v2 as DLpred_<mode>_cluster_..._huc_....tif
+# predictions land in Data/HUC_DL_Predictions_v3 as DLpred_<mode>_cluster_..._huc_....tif
 # (dl_06b names by the stats' classification_mode and asserts it matches the model).
 #
 # Usage:    run_predict_factorial.sh <config> <cluster> <huc> [seed]

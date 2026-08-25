@@ -34,7 +34,7 @@ def _extract_hparams(checkpoint: dict) -> dict:
         "cat_channels": hparams.get("cat_channels"),
         "deep_supervision": hparams.get("deep_supervision"),
         # mbfusion: REQUIRED to rebuild the net. Config-dependent (a nolidar cell
-        # has three branches), so it cannot be defaulted -- see arch_fusion/PLAN.md 4.2.
+        # has three branches), so it cannot be defaulted -- see factorial_experiment/PLAN.md 6.5.
         "branch_indices": hparams.get("branch_indices"),
         "branch_widths": hparams.get("branch_widths"),
         "gate_kernel": hparams.get("gate_kernel"),

@@ -2,7 +2,7 @@
 # run_arch_fusion.sh -- train ONE config under the multi-branch fusion encoder
 # (--arch mbfusion), the THIRD arm of the v3 architecture comparison.
 #
-# Design + rationale: Python_Code_Analysis/DL_Pipeline_v2/arch_fusion/PLAN.md.
+# Design + rationale: DL_Pipeline_v2/factorial_experiment/PLAN.md Section 6.
 # Mirrors run_arch_compare.sh exactly; introduces no new patterns. Each seed
 # defers to the shared idempotent run_config.sh with:
 #   ARCH=mbfusion  GATE_KERNEL=3

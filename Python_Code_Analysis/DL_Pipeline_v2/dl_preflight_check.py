@@ -371,7 +371,7 @@ def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
               detail_fail=f"{len(missing_stats)} missing, e.g. {missing_stats[:3]} "
                           f"(run dl_make_config_stats.py --all --mode <mode>)")
 
-    # ---[9] Fusion branch partition (arch_fusion/PLAN.md Section 4.3) ---
+    # ---[9] Fusion branch partition (factorial_experiment/PLAN.md 6.5, req. 3) ---
     # The guard against the one silent failure mode in --arch mbfusion: a wrong
     # branch->channel map trains fine and reports plausible metrics while feeding
     # each encoder the wrong bands. Validated here, on CPU, before any GPU time.

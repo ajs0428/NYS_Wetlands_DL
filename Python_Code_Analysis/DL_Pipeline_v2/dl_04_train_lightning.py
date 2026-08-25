@@ -347,7 +347,7 @@ class WetlandSegmentationModule(L.LightningModule):
         # weight across branches; a collapsed one saturates one branch near 1.0
         # everywhere and drives entropy toward 0 in the first few epochs. If that
         # happens, a temperature on the gate logits is the standard fix -- not
-        # built in speculatively (arch_fusion/PLAN.md Section 3).
+        # built in speculatively (factorial_experiment/PLAN.md Section 6.6).
         if stage == "train" and hasattr(self.net, "gate_entropies"):
             for key, val in self.net.gate_entropies().items():
                 self.log(f"train/{key}", val, on_step=False, on_epoch=True)

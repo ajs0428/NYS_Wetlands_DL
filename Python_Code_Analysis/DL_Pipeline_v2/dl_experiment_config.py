@@ -156,7 +156,7 @@ CONFIGS: Dict[str, dict] = {
 }
 
 
-# --- Multi-branch fusion partition (arch_fusion/PLAN.md Section 2) -------------
+# --- Multi-branch fusion partition (factorial_experiment/PLAN.md 6.2) ---------
 # Which bands feed which encoder branch in `--arch mbfusion`, and how wide each
 # branch's encoder is at level 0. Drawn by physical process / sensing modality;
 # all inputs are native 1 m (SAR and Sentinel-2 are not in this stack).
@@ -284,7 +284,7 @@ def stats_basename(name: str, mode: str = "multiclass", weight_power: float = 0.
     return base.replace("_normalization_stats", f"_normalization_stats_{name}")
 
 
-# --- Multi-branch fusion helpers (arch_fusion/PLAN.md Section 4) --------------
+# --- Multi-branch fusion helpers (factorial_experiment/PLAN.md 6.5) -----------
 
 def _band_to_branch() -> Dict[str, str]:
     """Reverse BRANCH_BANDS into band -> branch, rejecting duplicate assignments."""
