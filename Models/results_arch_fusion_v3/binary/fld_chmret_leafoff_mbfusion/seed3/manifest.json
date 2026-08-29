@@ -1,0 +1,85 @@
+{
+  "config": "fld_chmret_leafoff",
+  "mode": "binary",
+  "cell_name": "fld_chmret_leafoff_mbfusion",
+  "seed": 3,
+  "label_source": "fld",
+  "pool_rule": "anchored",
+  "leakage_guard": "huc12",
+  "patch_dirs": [
+    "R_Patches"
+  ],
+  "in_channels": 29,
+  "predictor_names": [
+    "DEM",
+    "slope_local",
+    "TPI_local",
+    "Geomorph_local",
+    "meanc_local",
+    "dmv_local",
+    "flowacc",
+    "twi",
+    "r",
+    "g",
+    "b",
+    "nir",
+    "CHM",
+    "pct_below_1m",
+    "pct_1m_to_5m",
+    "pct_above_5m",
+    "r_lo",
+    "g_lo",
+    "b_lo",
+    "nir_lo"
+  ],
+  "class_names": [
+    "WET",
+    "UPL"
+  ],
+  "ignore_index": 255,
+  "weight_power": 0.5,
+  "class_weights": {
+    "WET": 1.3539,
+    "UPL": 1.0
+  },
+  "loss": {
+    "ce_weight": 1.0,
+    "dice_weight": 0.0,
+    "focal_gamma": 0.0
+  },
+  "arch": "mbfusion",
+  "base_filters": 64,
+  "depth": 5,
+  "cat_channels": null,
+  "deep_supervision": null,
+  "gate_kernel": 3,
+  "branches": {
+    "terrain": {
+      "channels": 17,
+      "width": 48
+    },
+    "lidar": {
+      "channels": 4,
+      "width": 32
+    },
+    "leafon": {
+      "channels": 4,
+      "width": 32
+    },
+    "leafoff": {
+      "channels": 4,
+      "width": 32
+    }
+  },
+  "epochs": 50,
+  "batch_size": 8,
+  "n_patches": null,
+  "precision": "16-mixed",
+  "train_stats": "binary_normalization_stats_fld_chmret_leafoff_wp0.5.json",
+  "eval_stats": "binary_normalization_stats_fld_chmret_leafoff_wp0.5.json",
+  "eval_config": "fld_chmret_leafoff",
+  "checkpoint": "best_binary_mbfusion_bf64_d5_20260829_0628.safetensors",
+  "data_root": "/app/Data/Training_Data",
+  "git_commit": "cad2392-dirty",
+  "degrade": null
+}

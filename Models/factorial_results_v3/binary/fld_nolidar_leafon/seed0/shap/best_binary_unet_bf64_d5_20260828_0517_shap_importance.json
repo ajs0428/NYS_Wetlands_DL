@@ -1,0 +1,143 @@
+{
+  "model": "/app/Models/factorial_results_v3/binary/fld_nolidar_leafon/seed0/best_binary_unet_bf64_d5_20260828_0517.safetensors",
+  "model_stem": "best_binary_unet_bf64_d5_20260828_0517",
+  "class_names": [
+    "WET",
+    "UPL"
+  ],
+  "predictor_names": [
+    "DEM",
+    "slope_local",
+    "TPI_local",
+    "Geomorph_local",
+    "meanc_local",
+    "dmv_local",
+    "flowacc",
+    "twi",
+    "r",
+    "g",
+    "b",
+    "nir"
+  ],
+  "n_background": 49,
+  "n_test": 20,
+  "crop_size": 128,
+  "seed": 0,
+  "split_source": "pools",
+  "n_channels": {
+    "DEM": 1,
+    "slope_local": 1,
+    "TPI_local": 1,
+    "Geomorph_local": 10,
+    "meanc_local": 1,
+    "dmv_local": 1,
+    "flowacc": 1,
+    "twi": 1,
+    "r": 1,
+    "g": 1,
+    "b": 1,
+    "nir": 1
+  },
+  "importance_overall": {
+    "DEM": 1.1230305797869888e-05,
+    "slope_local": 1.6333184199232935e-05,
+    "TPI_local": 4.806738287875443e-06,
+    "Geomorph_local": 0.00033209318352076336,
+    "meanc_local": 4.610169272951601e-06,
+    "dmv_local": 4.248501942403717e-06,
+    "flowacc": 4.088493307566249e-05,
+    "twi": 1.830723001913821e-05,
+    "r": 4.6242740181275086e-05,
+    "g": 4.129858545874306e-05,
+    "b": 1.572734405263623e-05,
+    "nir": 3.59898488262451e-05
+  },
+  "importance_per_class": {
+    "WET": {
+      "DEM": 1.2148290913535038e-05,
+      "slope_local": 1.807888845719256e-05,
+      "TPI_local": 5.233157365511706e-06,
+      "Geomorph_local": 0.00035550969674569044,
+      "meanc_local": 5.019617742495128e-06,
+      "dmv_local": 4.6158219638811625e-06,
+      "flowacc": 4.431959628892189e-05,
+      "twi": 1.9883309018131656e-05,
+      "r": 4.991709610726732e-05,
+      "g": 4.487402768364394e-05,
+      "b": 1.6929222134824325e-05,
+      "nir": 3.861923745350353e-05
+    },
+    "UPL": {
+      "DEM": 1.0312320682204738e-05,
+      "slope_local": 1.4587479941273306e-05,
+      "TPI_local": 4.3803192102391795e-06,
+      "Geomorph_local": 0.0003086766702958362,
+      "meanc_local": 4.200720803408072e-06,
+      "dmv_local": 3.88118192092627e-06,
+      "flowacc": 3.745026986240308e-05,
+      "twi": 1.673115102014476e-05,
+      "r": 4.2568384255282856e-05,
+      "g": 3.772314323384217e-05,
+      "b": 1.4525465970448137e-05,
+      "nir": 3.336046019898667e-05
+    }
+  },
+  "importance_overall_per_channel": {
+    "DEM": 1.1230305797869888e-05,
+    "slope_local": 1.6333184199232935e-05,
+    "TPI_local": 4.806738287875443e-06,
+    "Geomorph_local": 3.3209318352076336e-05,
+    "meanc_local": 4.610169272951601e-06,
+    "dmv_local": 4.248501942403717e-06,
+    "flowacc": 4.088493307566249e-05,
+    "twi": 1.830723001913821e-05,
+    "r": 4.6242740181275086e-05,
+    "g": 4.129858545874306e-05,
+    "b": 1.572734405263623e-05,
+    "nir": 3.59898488262451e-05
+  },
+  "importance_per_class_per_channel": {
+    "WET": {
+      "DEM": 1.2148290913535038e-05,
+      "slope_local": 1.807888845719256e-05,
+      "TPI_local": 5.233157365511706e-06,
+      "Geomorph_local": 3.5550969674569044e-05,
+      "meanc_local": 5.019617742495128e-06,
+      "dmv_local": 4.6158219638811625e-06,
+      "flowacc": 4.431959628892189e-05,
+      "twi": 1.9883309018131656e-05,
+      "r": 4.991709610726732e-05,
+      "g": 4.487402768364394e-05,
+      "b": 1.6929222134824325e-05,
+      "nir": 3.861923745350353e-05
+    },
+    "UPL": {
+      "DEM": 1.0312320682204738e-05,
+      "slope_local": 1.4587479941273306e-05,
+      "TPI_local": 4.3803192102391795e-06,
+      "Geomorph_local": 3.086766702958362e-05,
+      "meanc_local": 4.200720803408072e-06,
+      "dmv_local": 3.88118192092627e-06,
+      "flowacc": 3.745026986240308e-05,
+      "twi": 1.673115102014476e-05,
+      "r": 4.2568384255282856e-05,
+      "g": 3.772314323384217e-05,
+      "b": 1.4525465970448137e-05,
+      "nir": 3.336046019898667e-05
+    }
+  },
+  "ranking": [
+    "Geomorph_local",
+    "r",
+    "g",
+    "flowacc",
+    "nir",
+    "twi",
+    "slope_local",
+    "b",
+    "DEM",
+    "TPI_local",
+    "meanc_local",
+    "dmv_local"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "config": "fld_nolidar_leafoff",
+  "mode": "binary",
+  "seed": 3,
+  "class_names": [
+    "WET",
+    "UPL"
+  ],
+  "test_metrics": {
+    "overall_accuracy": 0.8513,
+    "mean_iou": 0.6876,
+    "macro_f1": 0.8079,
+    "per_class": {
+      "WET": {
+        "precision": 0.834,
+        "recall": 0.6282,
+        "f1": 0.7166,
+        "iou": 0.5583,
+        "support": 4511978
+      },
+      "UPL": {
+        "precision": 0.8563,
+        "recall": 0.9466,
+        "f1": 0.8992,
+        "iou": 0.8168,
+        "support": 10561302
+      }
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "WET",
+      "UPL"
+    ],
+    "matrix": [
+      [
+        2834234,
+        1677744
+      ],
+      [
+        564235,
+        9997067
+      ]
+    ]
+  },
+  "best_val_loss": 0.3472,
+  "best_epoch": 38,
+  "checkpoint": "best_binary_unet_bf64_d5_20260828_1944.safetensors"
+}

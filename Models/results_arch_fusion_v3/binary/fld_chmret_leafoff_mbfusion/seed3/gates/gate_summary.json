@@ -1,0 +1,62 @@
+{
+  "config": "fld_chmret_leafoff",
+  "mode": "binary",
+  "seed": 3,
+  "checkpoint": "best_binary_mbfusion_bf64_d5_20260829_0628.safetensors",
+  "branches": [
+    "terrain",
+    "lidar",
+    "leafon",
+    "leafoff"
+  ],
+  "n_patches": 8,
+  "patches": [
+    "ADK_WCT_AJS_cluster_123_huc_043001010103_patch_10_256m.tif",
+    "ADK_WCT_AJS_cluster_123_huc_043001010103_patch_11_256m.tif",
+    "ADK_WCT_AJS_cluster_123_huc_043001010103_patch_12_256m.tif",
+    "ADK_WCT_AJS_cluster_123_huc_043001010103_patch_13_256m.tif",
+    "ADK_WCT_AJS_cluster_123_huc_043001010103_patch_14_256m.tif",
+    "ADK_WCT_AJS_cluster_123_huc_043001010103_patch_15_256m.tif",
+    "ADK_WCT_AJS_cluster_123_huc_043001010103_patch_16_256m.tif",
+    "ADK_WCT_AJS_cluster_123_huc_043001010103_patch_17_256m.tif"
+  ],
+  "mean_gate": {
+    "level0": {
+      "terrain": 0.261042,
+      "lidar": 0.254696,
+      "leafon": 0.206118,
+      "leafoff": 0.278144
+    },
+    "level1": {
+      "terrain": 0.369962,
+      "lidar": 0.154684,
+      "leafon": 0.155661,
+      "leafoff": 0.319693
+    },
+    "level2": {
+      "terrain": 0.260636,
+      "lidar": 0.102403,
+      "leafon": 0.197497,
+      "leafoff": 0.439465
+    },
+    "level3": {
+      "terrain": 0.272702,
+      "lidar": 0.329558,
+      "leafon": 0.147451,
+      "leafoff": 0.25029
+    },
+    "level4": {
+      "terrain": 0.481561,
+      "lidar": 0.046625,
+      "leafon": 0.284252,
+      "leafoff": 0.187562
+    },
+    "level5": {
+      "terrain": 0.46514,
+      "lidar": 0.338163,
+      "leafon": 0.025495,
+      "leafoff": 0.171202
+    }
+  },
+  "note": "Means are provenance, NOT a branch-importance ranking: proj is a 1x1 conv, so a branch with modest gates but large weights can still dominate. Compare gates WITHIN a branch across space; take overall branch importance from SHAP."
+}

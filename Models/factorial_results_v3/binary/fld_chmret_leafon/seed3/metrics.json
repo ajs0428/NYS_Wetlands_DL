@@ -1,0 +1,49 @@
+{
+  "config": "fld_chmret_leafon",
+  "mode": "binary",
+  "seed": 3,
+  "class_names": [
+    "WET",
+    "UPL"
+  ],
+  "test_metrics": {
+    "overall_accuracy": 0.8568,
+    "mean_iou": 0.7011,
+    "macro_f1": 0.8184,
+    "per_class": {
+      "WET": {
+        "precision": 0.8246,
+        "recall": 0.6626,
+        "f1": 0.7348,
+        "iou": 0.5808,
+        "support": 4511978
+      },
+      "UPL": {
+        "precision": 0.867,
+        "recall": 0.9398,
+        "f1": 0.9019,
+        "iou": 0.8214,
+        "support": 10561302
+      }
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "WET",
+      "UPL"
+    ],
+    "matrix": [
+      [
+        2989845,
+        1522133
+      ],
+      [
+        636162,
+        9925140
+      ]
+    ]
+  },
+  "best_val_loss": 0.4096,
+  "best_epoch": 36,
+  "checkpoint": "best_binary_unet_bf64_d5_20260828_1951.safetensors"
+}

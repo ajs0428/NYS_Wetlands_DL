@@ -218,22 +218,13 @@ scp nys-wetlands-dl.tar.gz $USER@cbsugpu10.biohpc.cornell.edu:/workdir/$USER/   
 docker1 load -i /workdir/$USER/nys-wetlands-dl.tar.gz                            # docker1, never docker
 ```
 
-**3 · Push repo + data CPU → GPU** (FROM the CPU node — stage the **whole repo**, since the runner reads edited shell/Python and the per-config `stats/` and writes results):
+**3 · Push repo + data CPU → GPU** — use **`Shell_Scripts/rsync_push_v3.sh`** (FROM the CPU node), never a blanket `rsync -av` of the repo:
 ```bash
-ssh $USER@cbsugpu10.biohpc.cornell.edu 'mkdir -p /workdir/$USER/nys_wetlands /workdir/$USER/tmp'
-rsync -av --exclude '.git' --exclude '.venv' \
-  /ibstorage/anthony/NYS_Wetlands_DL/ \
-  $USER@cbsugpu10.biohpc.cornell.edu:/workdir/$USER/nys_wetlands/
+GPU_NODE=cbsugpu10.biohpc.cornell.edu bash Shell_Scripts/rsync_push_v3.sh -n   # preview
+GPU_NODE=cbsugpu10.biohpc.cornell.edu bash Shell_Scripts/rsync_push_v3.sh      # ~14 GB
+GPU_NODE=... bash Shell_Scripts/rsync_push_v3.sh --with-image                  # + the image tarball
 ```
-*Lean push* (skip the `.ckpt`; code + stats + the **three** patch dirs is everything a fresh v3 run needs):
-```bash
-GPU_NODE=cbsugpu10.biohpc.cornell.edu
-rsync -avhP --relative --exclude='*.ckpt' --exclude='__pycache__' \
-  Python_Code_Analysis/DL_Pipeline_v2 Shell_Scripts Data/Training_Data/stats \
-  Data/Training_Data/R_Patches Data/Training_Data/R_Patches_NWI Data/Training_Data/R_Patches_NWIextra \
-  "$USER@$GPU_NODE:/workdir/$USER/nys_wetlands/"
-```
-**Always restage** even if `/workdir/$USER/nys_wetlands` survived the last reservation, or you run stale wrappers.
+It stages exactly what a v3 run reads — `DL_Pipeline_v2`, `Shell_Scripts`, `Data/Training_Data/stats`, and the **three** patch dirs (`R_Patches`, `R_Patches_NWI`, `R_Patches_NWIextra`) — plus a `.git_commit` stamp so manifests keep provenance without shipping `.git`. **A blanket `rsync -av --exclude .git --exclude .venv` moves ~458 GB**: `Models/` (276 GB of v1/v2/patchcurve/arch checkpoints) and `Data/HUC_DL_Predictions_v2/` (154 GB of GeoTIFFs), **none of which a v3 run reads** — `run_config.sh` touches only `$STATS_DIR` + the patch dirs, and writes fresh cells under `Models/factorial_results_v3/`. The image tarball belongs in `/workdir/$USER/`, not inside the repo copy. **Always restage** even if `/workdir/$USER/nys_wetlands` survived the last reservation, or you run stale wrappers.
 
 **4 · Launch on the GPU node** (inside `tmux`, via `docker1`):
 ```bash

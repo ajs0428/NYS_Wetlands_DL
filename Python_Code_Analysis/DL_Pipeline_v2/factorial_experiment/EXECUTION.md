@@ -53,11 +53,10 @@ python $PIPE/dl_make_config_stats.py --all --mode binary
 python $PIPE/dl_preflight_check.py                         # MUST be green
 
 # --- CPU node: push the tree to the GPU node's local /workdir -----------
+# Narrow push (~14 GB). NOT `rsync -av` of the repo -- that moves ~458 GB of
+# v1/v2 checkpoints and prediction rasters a v3 run never reads. See §5.
 GPU_NODE=cbsugpu10.biohpc.cornell.edu
-ssh $USER@$GPU_NODE 'mkdir -p /workdir/$USER/nys_wetlands /workdir/$USER/tmp'
-rsync -av --exclude '.git' --exclude '.venv' \
-      /ibstorage/anthony/NYS_Wetlands_DL/ \
-      $USER@$GPU_NODE:/workdir/$USER/nys_wetlands/
+bash Shell_Scripts/rsync_push_v3.sh -n          # preview, then drop -n
 
 # --- GPU node: load image, launch the grid inside tmux ------------------
 docker1 load -i /workdir/$USER/nys-wetlands-dl.tar.gz      # first time only
@@ -315,37 +314,60 @@ docker1 images | grep nys-wetlands-dl        # confirm
 
 ## 5. Stage repo + data onto `/workdir`
 
-Containers may only mount under `/workdir/$USER`, and the runner reads edited
-shell/Python *and* the per-config `stats/` *and* writes results — so stage the
-**whole repo**, not just `Data/`. Push from the CPU node:
-
-```bash
-GPU_NODE=cbsugpu10.biohpc.cornell.edu
-ssh $USER@$GPU_NODE 'mkdir -p /workdir/$USER/nys_wetlands /workdir/$USER/tmp'
-rsync -av --exclude '.git' --exclude '.venv' \
-  /ibstorage/anthony/NYS_Wetlands_DL/ \
-  $USER@$GPU_NODE:/workdir/$USER/nys_wetlands/
-```
-
-**Lean push** — skips the GBs of `.ckpt`; code + stats + the **three** patch
-directories, which is everything a fresh v3 training run needs:
+Containers may only mount under `/workdir/$USER`, so the tree has to be pushed to
+the GPU node. **Use the narrow push — not `rsync -av` of the whole repo.**
 
 ```bash
 cd /ibstorage/anthony/NYS_Wetlands_DL
-rsync -avhP --relative --exclude='*.ckpt' --exclude='__pycache__' \
-  Python_Code_Analysis/DL_Pipeline_v2 Shell_Scripts \
-  Data/Training_Data/stats \
-  Data/Training_Data/R_Patches \
-  Data/Training_Data/R_Patches_NWI \
-  Data/Training_Data/R_Patches_NWIextra \
-  "$USER@$GPU_NODE:/workdir/$USER/nys_wetlands/"
+GPU_NODE=cbsugpu10.biohpc.cornell.edu bash Shell_Scripts/rsync_push_v3.sh -n   # preview
+GPU_NODE=cbsugpu10.biohpc.cornell.edu bash Shell_Scripts/rsync_push_v3.sh      # ~14 GB
 ```
 
-`--relative` recreates each path under the destination, so the node mirrors the local
-tree and `…/nys_wetlands/X` becomes `/app/X` once mounted. Re-run the same rsync
-before a later reservation to push code/stats edits — it only transfers what changed.
-**Always restage even if `/workdir/$USER/nys_wetlands` survived the previous
-reservation**, or you will run stale wrappers.
+**Why not the whole repo.** A blanket `rsync -av --exclude .git --exclude .venv`
+moves **~458 GB**, because the repo root accumulates every previous generation's
+outputs: `Models/` is 276 GB of v1/v2/patchcurve/arch checkpoints and
+`Data/HUC_DL_Predictions_v2/` is 154 GB of inference GeoTIFFs. **A v3 run reads
+none of it** — `run_config.sh` touches only `$STATS_DIR` and the three patch
+directories, and every cell it produces is created fresh under
+`Models/factorial_results_v3/`. The blanket push also sweeps the 3.6 GB Docker
+image tarball *into* the repo copy, where the container would see it through
+`/app` for no reason.
+
+What the script sends, and why each is load-bearing:
+
+| Path | Size | Read by |
+|---|---|---|
+| `Python_Code_Analysis/DL_Pipeline_v2` | 34 MB | the whole pipeline; `dl_experiment_config.py --emit` |
+| `Shell_Scripts` | <1 MB | every `run_*.sh` driver |
+| `Data/Training_Data/stats` | 264 KB | `run_config.sh` → `$TRAIN_STATS` / `$EVAL_STATS` |
+| `Data/Training_Data/R_Patches` | 4.5 GB | field labels — **TEST for every cell** |
+| `Data/Training_Data/R_Patches_NWI` | 4.5 GB | `nwi`/`nwifield`/`flddeg` train pools |
+| `Data/Training_Data/R_Patches_NWIextra` | 4.7 GB | `nwiextra`/`nwifield` train pools |
+| `.git_commit` | 12 B | manifest provenance (see below) |
+
+Deliberately left behind: all of `Models/`, both `HUC_DL_Predictions_*` roots,
+`R_Patches_Merged*` (the v1/v2 pools), `stats_v1/` + `stats_v2/`, the master
+`*_normalization_stats_wp0.5.json` (consumed by `dl_make_config_stats.py` on the
+**CPU** node only), `.venv`, `.git`, and `__pycache__` / `.ipynb_checkpoints`.
+
+**Provenance.** `.git` is not pushed, so `git rev-parse` on the node fails and
+`run_config.sh` would stamp `git_commit: "unknown"` into all 100 manifests. The
+script writes a `.git_commit` file (short SHA, `-dirty` suffix if the tree is
+modified) and stages it; `run_config.sh` prefers `$GIT_COMMIT`, then that file,
+then `git`. Nothing else to do — but note that a `-dirty` stamp in a manifest
+means the grid ran on uncommitted code.
+
+**The Docker image** goes to `/workdir/$USER/`, one level *above* the repo copy:
+
+```bash
+GPU_NODE=cbsugpu10.biohpc.cornell.edu bash Shell_Scripts/rsync_push_v3.sh --with-image
+```
+
+`--relative` recreates each path under the destination, so the node mirrors the
+local tree and `…/nys_wetlands/X` becomes `/app/X` once mounted. **Re-run before
+every reservation** even if `/workdir/$USER/nys_wetlands` survived the last one —
+rsync moves only what changed, and running stale wrappers is the classic silent
+failure here.
 
 ---
 
@@ -588,15 +610,38 @@ bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff
 
 Worked example — the fusion arm, binary mode, all 5 seeds:
 
+# Run them one at a time — each wants the whole GPU. 
 ```bash
-tmux new -s fusion_binary
-docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
-  -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \
-  -e MODE=binary -e SEEDS="0 1 2 3 4" \
-  nys-wetlands-dl \
-  bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff
-# expect "mode=binary" and the 5-cell plan in the header.
-# OOM? add -e BATCH_SIZE=4 and rerun -- completed seeds are skipped.
+  cd /workdir/$USER/nys_wetlands                                                                                                                                        
+  tmux new -s arch_v3     # Ctrl-b d to detach                                                                                                                          
+                                                                                                                                                                        
+  1 · UNet3+ multiclass                                                                                                                                                 
+  docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \                                                                                                  
+    -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \                                                                                                            
+    nys-wetlands-dl \                                                                                                                                                   
+    bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff                                                                                                           
+                                                                                                                                                                        
+  2 · UNet3+ binary                                                                                                                                                     
+  docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \                                                                                                  
+    -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \                                                                                                            
+    -e MODE=binary \                                                                                                                                                    
+    nys-wetlands-dl \                                                                                                                                                   
+    bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff                                                                                                           
+                                                                                                                                                                        
+  3 · mbfusion multiclass                                                                                                                                               
+  docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \                                                                                                  
+    -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \                                                                                                            
+    nys-wetlands-dl \                                                                                                                                                   
+    bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff                                                                                                            
+                                                                                                                                                                        
+  4 · mbfusion binary                                                                                                                                                   
+  docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \                                                                                                  
+    -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \                                                                                                            
+    -e MODE=binary \                                                                                                                                                    
+    nys-wetlands-dl \                                                                                                                                                   
+    bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff                                                                                                            
+                                                                                                                                                                        
+  
 ```
 
 **Memory.** Both arms default to `BATCH_SIZE=8`. For `mbfusion`, params are ~1.3×

@@ -1,0 +1,49 @@
+{
+  "config": "fld_nolidar_leafon",
+  "mode": "binary",
+  "seed": 4,
+  "class_names": [
+    "WET",
+    "UPL"
+  ],
+  "test_metrics": {
+    "overall_accuracy": 0.8802,
+    "mean_iou": 0.7466,
+    "macro_f1": 0.8512,
+    "per_class": {
+      "WET": {
+        "precision": 0.7657,
+        "recall": 0.8063,
+        "f1": 0.7855,
+        "iou": 0.6467,
+        "support": 3994168
+      },
+      "UPL": {
+        "precision": 0.9261,
+        "recall": 0.9078,
+        "f1": 0.9169,
+        "iou": 0.8465,
+        "support": 10685896
+      }
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "WET",
+      "UPL"
+    ],
+    "matrix": [
+      [
+        3220616,
+        773552
+      ],
+      [
+        985703,
+        9700193
+      ]
+    ]
+  },
+  "best_val_loss": 0.3336,
+  "best_epoch": 50,
+  "checkpoint": "best_binary_unet_bf64_d5_20260828_2057.safetensors"
+}

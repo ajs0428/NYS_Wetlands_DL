@@ -1,0 +1,100 @@
+[
+  {
+    "timestamp": "2026-08-28T16:46:36",
+    "checkpoint": "best_binary_unet_bf64_d5_20260828_1636.ckpt",
+    "kfold": false,
+    "best_epoch": 42,
+    "cost": {
+      "params": 125266498,
+      "trainable_params": 125266498,
+      "epochs_run": 42,
+      "fit_seconds": 596.8,
+      "sec_per_epoch": 14.21,
+      "batch_size": 16,
+      "precision": "16-mixed"
+    },
+    "best_val_loss": 0.3694,
+    "architecture": "unet",
+    "config": {
+      "arch": "unet",
+      "in_channels": 29,
+      "num_classes": 2,
+      "class_names": [
+        "WET",
+        "UPL"
+      ],
+      "base_filters": 64,
+      "depth": 5,
+      "use_aspp": false,
+      "aspp_rates": [
+        6,
+        12,
+        18
+      ],
+      "cat_channels": 64,
+      "deep_supervision": false,
+      "branch_indices": null,
+      "branch_widths": null,
+      "gate_kernel": null,
+      "dropout": 0.2,
+      "learning_rate": 0.0001,
+      "weight_decay": 0.0001,
+      "ce_weight": 1.0,
+      "dice_weight": 0.0,
+      "focal_gamma": 0.0,
+      "label_smoothing": 0.0,
+      "batch_size": 16,
+      "seed": 0,
+      "early_stopping_patience": 15,
+      "lr_patience": 5,
+      "precision": "16-mixed",
+      "gradient_clip_val": 1.0,
+      "n_patches": null,
+      "factorial_config": "flddeg_chmret_leafoff",
+      "classification_mode": "binary",
+      "leakage_guard": "huc12"
+    },
+    "data_split": {
+      "train": 785,
+      "val": 203,
+      "test": 134
+    },
+    "test_metrics": {
+      "overall_accuracy": 0.8231,
+      "mean_iou": 0.6692,
+      "macro_f1": 0.7975,
+      "per_class": {
+        "WET": {
+          "precision": 0.649,
+          "recall": 0.8221,
+          "f1": 0.7253,
+          "iou": 0.569,
+          "support": 2494572
+        },
+        "UPL": {
+          "precision": 0.9211,
+          "recall": 0.8236,
+          "f1": 0.8696,
+          "iou": 0.7693,
+          "support": 6287252
+        }
+      }
+    },
+    "confusion_matrix": {
+      "labels": [
+        "WET",
+        "UPL"
+      ],
+      "matrix": [
+        [
+          2050739,
+          443833
+        ],
+        [
+          1109263,
+          5177989
+        ]
+      ]
+    }
+  }
+]

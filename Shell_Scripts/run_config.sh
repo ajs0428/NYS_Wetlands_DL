@@ -132,7 +132,13 @@ run "$PYTHON" "$PIPE/dl_04_train_lightning.py" \
 if [[ "${DRY_RUN:-0}" != "1" ]]; then
     CKPT="$(ls -t "$CELL"/best_*.safetensors 2>/dev/null | head -1 || true)"
     [[ -z "$CKPT" ]] && CKPT="$(ls -t "$CELL"/best_*.ckpt 2>/dev/null | head -1 || true)"
-    GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    # Commit stamp: prefer an explicit env override, then the .git_commit file
+    # staged by rsync_push_v3.sh (the GPU-node copy has no .git), then git itself.
+    GIT_COMMIT="${GIT_COMMIT:-}"
+    if [[ -z "$GIT_COMMIT" && -f "$REPO_ROOT/.git_commit" ]]; then
+        GIT_COMMIT="$(<"$REPO_ROOT/.git_commit")"
+    fi
+    [[ -n "$GIT_COMMIT" ]] || GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
     CONFIG="$CONFIG" SEED="$SEED" MODE="$MODE" CELL="$CELL" CELL_NAME="$CELL_NAME" \
     LABEL_SOURCE="$LABEL_SOURCE" POOL_RULE="$POOL_RULE" LEAKAGE_GUARD="$LEAKAGE_GUARD" \
