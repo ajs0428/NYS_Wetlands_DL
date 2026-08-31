@@ -1,0 +1,4 @@
+config,mode,arch,params,gflops,sec_per_epoch,epochs_run,fit_seconds,params_x_baseline
+fld_chmret_leafoff,binary,unet,125266498.0,122.0,12.844,46.2,591.24,1.0
+fld_chmret_leafoff,binary,unet3plus,99789580.0,533.0,21.796,36.8,808.0,0.7966182626100077
+fld_chmret_leafoff,binary,mbfusion,162012730.0,143.0,13.228,40.0,533.58,1.2933444503254174

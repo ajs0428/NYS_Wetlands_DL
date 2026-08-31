@@ -10,26 +10,28 @@ Design and rationale live in [`PLAN.md`](PLAN.md). Commands live here.
 > **Agent boundary (`AGENTS.md`).** Claude Code *prepares* these scripts; **you run
 > them.** Nothing here auto-launches training, containers, or rsync.
 
-> **Status (2026-08-25): v3 has not run yet.** All code is built and CPU-tested. The
-> blocking item is CPU prep — the master stats are stale (§3, and it is a hard gate,
-> not a nicety). Everything from §4 on is ready to execute.
+> **Status (2026-08-31): the v3 run is complete.** All 100 cells trained and
+> SHAP'd, gates exported, and all three arms predicted over the 30 HUCs in
+> `Shell_Scripts/huc.txt`. What remains is CPU-side: the three-arm aggregation
+> (§9.3) and the figures (§12). Numbers marked *(measured)* below come from that
+> run; everything else is the recipe for repeating it.
 
 ---
 
 ## 0. The v3 flow, one map
 
-| # | Stage | Node | § | Status |
+| # | Stage | Node | § | 2026-08 run |
 |---|---|---|---|---|
-| 1 | Prep: config self-check → **rebuild stats masters** → per-config stats → preflight GREEN | CPU | §3 | ⏳ **required** |
-| 2 | Build/load the Docker image | Docker host → GPU | §4 | ⏳ |
-| 3 | Stage repo + 3 patch dirs onto `/workdir` | CPU → GPU | §5 | ⏳ |
-| 4 | Base grid: 8 configs × 2 modes × 5 seeds = **80 cells** | GPU | §6–§7 | ⏳ |
-| 5 | SHAP per cell, in-container, before teardown | GPU | §8 | ⏳ |
-| 6 | Arch arm 2 — UNet3+ (2 modes × 5 seeds = 10 cells) | GPU | §9 | ⏳ |
-| 7 | Arch arm 3 — `mbfusion` (10 cells) + gate export | GPU | §9 | ⏳ |
-| 8 | HUC inference maps | GPU | §10 | ⏳ |
-| 9 | End-of-reservation sync-back: metrics, weights, GeoTIFFs → `/ibstorage` | CPU | §11 | ⏳ |
-| 10 | Aggregation + viz | CPU | §8, §12 | ⏳ |
+| 1 | Prep: config self-check → rebuild stats masters → per-config stats → preflight GREEN | CPU | §3 | ✅ |
+| 2 | Build/load the Docker image | Docker host → GPU | §4 | ✅ |
+| 3 | Stage repo + 3 patch dirs onto `/workdir` | CPU → GPU | §5 | ✅ |
+| 4 | Base grid: 8 configs × 2 modes × 5 seeds = **80 cells** | GPU | §6–§7 | ✅ |
+| 5 | SHAP per cell, in-container, before teardown | GPU | §8 | ✅ 100/100 |
+| 6 | Arch arm 2 — UNet3+ (2 modes × 5 seeds = 10 cells) | GPU | §9 | ✅ |
+| 7 | Arch arm 3 — `mbfusion` (10 cells) + gate export | GPU | §9 | ✅ 10/10 gates |
+| 8 | HUC inference maps, 3 arms × 2 modes × 30 HUCs | GPU | §10 | ✅ |
+| 9 | End-of-reservation sync-back: **code**, metrics, weights, GeoTIFFs → `/ibstorage` | CPU | §11 | ✅ |
+| 10 | Aggregation + viz | CPU | §8, §12 | ⏳ arch aggregation + figures |
 
 Invariants at every stage: every driver is **idempotent** (a completed cell is
 skipped, so stop at a reservation's end and rerun next session);
@@ -66,7 +68,14 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
   nys-wetlands-dl bash Shell_Scripts/run_factorial.sh
 # Ctrl-b then d to detach; tmux attach -t factorial_v3 to return
 
-# --- CPU node: pull results back ---------------------------------------
+# --- CPU node: drain the reservation (full checklist in §11) ------------
+# STEP 0 FIRST -- code/notebooks/logs you edited on the node are NOT in git and
+# are NOT covered by rsync_results.sh. They die with the reservation.
+rsync -nic --update -r --exclude='__pycache__' --exclude='.local' \
+  "$USER@$GPU_NODE:/workdir/$USER/nys_wetlands/Python_Code_Analysis/" \
+  Python_Code_Analysis/                                    # drop -n, then repeat
+                                                           # for Shell_Scripts/
+# then the results
 SERVER="$USER@$GPU_NODE:" \
 REMOTE_RESULTS="/workdir/$USER/nys_wetlands/Models/factorial_results_v3" \
 LOCAL_DEST="/ibstorage/anthony/NYS_Wetlands_DL/Models/factorial_results_v3" \
@@ -171,7 +180,9 @@ by evaluating with the matching `fld_*` stats. Same seed ⇒ same test patches.
 | `run_factorial.sh` | **Top-level driver.** Walks (mode × config × seed), finishing one mode fully before the next. Resumable. |
 | `run_arch_compare.sh <config>` | UNet3+ arm → `Models/results_arch_v3/`. |
 | `run_arch_fusion.sh <config>` | **`mbfusion` arm** → `Models/results_arch_fusion_v3/`. Prints a seed-coverage table across all three arms when it finishes. |
-| `run_predict_factorial.sh <config> <cluster> <huc> [seed]` | HUC inference from the best-macro-F1 seed. |
+| `run_predict_factorial.sh <config> <cluster> <huc> [seed]` | HUC inference from the best-macro-F1 seed. Defaults to the **U-Net base grid**; reach an arch arm with `CELL_NAME` + `RESULTS_DIR` (§10). |
+| `run_predict_arms.sh <unet\|unet3plus\|mbfusion> [mode] [seed]` | **Batch HUC inference for one arm × one mode.** Host-side wrapper: sets the arm's `CELL_NAME`/`RESULTS_DIR`/`OUT_DIR`, preflights the cell + image, loops `huc.txt`, skips finished HUCs. `DRY_RUN=1` to resolve only. |
+| `run_after.sh <cmd...>` | **Queue a job behind the running one.** Snapshots the currently-running `nys-wetlands-dl` containers, waits for them to exit, then runs `<cmd>`. Lets you queue arm 2 after arm 1 has already started (the GPU takes one at a time). Runs immediately if nothing is up. |
 | `rsync_huc_sources.sh <cluster> <huc>` | Pull the ~7 per-HUC source rasters. |
 | `run_shap_factorial.sh` | SHAP wrapper (handles the container's `HOME`/`MPLCONFIGDIR` and a missing `shap`). |
 | `run_aggregate.sh` | Wraps `dl_08` → `<RESULTS_DIR>/analysis/`. |
@@ -231,17 +242,23 @@ python $PIPE/dl_preflight_check.py              # expect 0 failures
 #          / --data-root / --stats-dir / --norm-master
 ```
 
-> ### ⚠️ The master stats are stale — step 2 is not optional for v3
+> ### ⚠️ Step 2 is not optional when the pool changes
 >
-> `multiclass_normalization_stats_wp0.5.json` was built over **1007** patches;
-> `R_Patches` now holds **1012**. The patch count feeds the field class weights, so
-> the master *and* all 16 per-config files are stale. Rebuild (steps 2→3), then
+> The patch count feeds the field class weights, so a master built over a different
+> number of patches silently mis-weights every cell. **Rebuild the master whenever
+> the R full-raster scan, the predictor bands, or the patch count changed** — all
+> three changed at v2→v3 — then re-derive the 16 per-config files (step 3) and
 > re-run the preflight.
 >
-> Also check: `binary_normalization_stats_wp0.5.json` is currently a **26-channel
-> file dated 2026-06-05** (v2 vintage). `dl_make_config_stats.py` derives *both*
-> modes' normalization from the multiclass master and recomputes binary class
-> weights from disk, so this file may be vestigial — confirm rather than assume.
+> Check what you have before trusting it:
+>
+> ```bash
+> python -c "import json;d=json.load(open('Data/Training_Data/stats/multiclass_normalization_stats_fld_chmret_leafoff_wp0.5.json'));print(d['num_patches'], d['in_channels'], len(d['predictor_names']))"
+> ls Data/Training_Data/R_Patches/*.tif | wc -l      # must match num_patches
+> ```
+>
+> The v3 run trained against `num_patches = 1126`, `in_channels = 29`, 20
+> predictor names *(measured)*.
 >
 > Cosmetic: `Data/Training_Data/stats/` still holds v1-vintage `fld_chm_*` files for
 > a LiDAR tier that no longer exists. Nothing resolves them; they only confuse a
@@ -596,52 +613,44 @@ variable is the network. Design in `PLAN.md` §6.
 
 ### 9.1 Run the two extra arms
 
-Drop each into the §6 `docker1` wrapper's final slot, inside `tmux`:
+Each arm is one `docker1` run per mode — four runs total. **Run them one at a
+time; each wants the whole GPU.** All four use the §6 wrapper unchanged, differing
+only in the driver script and the `-e MODE` knob.
 
 ```bash
-# UNet3+ (deep supervision ON, cat_channels 64):
-bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff
-# binary: add  -e MODE=binary  to the docker1 line
+cd /workdir/$USER/nys_wetlands
+tmux new -s arch_v3          # Ctrl-b then d to detach
 
-# Multi-branch fusion:
-bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff
-# binary: add  -e MODE=binary
+# 1 - UNet3+ multiclass
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \
+  nys-wetlands-dl bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff
+
+# 2 - UNet3+ binary          (same, plus -e MODE=binary)
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp -e MODE=binary \
+  nys-wetlands-dl bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff
+
+# 3 - mbfusion multiclass
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \
+  nys-wetlands-dl bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff
+
+# 4 - mbfusion binary
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp -e MODE=binary \
+  nys-wetlands-dl bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff
 ```
 
-Worked example — the fusion arm, binary mode, all 5 seeds:
+To queue one behind another without babysitting the terminal, wrap it in
+`run_after.sh` — it waits for the running container to exit first (§10):
 
-# Run them one at a time — each wants the whole GPU. 
 ```bash
-  cd /workdir/$USER/nys_wetlands                                                                                                                                        
-  tmux new -s arch_v3     # Ctrl-b d to detach                                                                                                                          
-                                                                                                                                                                        
-  1 · UNet3+ multiclass                                                                                                                                                 
-  docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \                                                                                                  
-    -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \                                                                                                            
-    nys-wetlands-dl \                                                                                                                                                   
-    bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff                                                                                                           
-                                                                                                                                                                        
-  2 · UNet3+ binary                                                                                                                                                     
-  docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \                                                                                                  
-    -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \                                                                                                            
-    -e MODE=binary \                                                                                                                                                    
-    nys-wetlands-dl \                                                                                                                                                   
-    bash Shell_Scripts/run_arch_compare.sh fld_chmret_leafoff                                                                                                           
-                                                                                                                                                                        
-  3 · mbfusion multiclass                                                                                                                                               
-  docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \                                                                                                  
-    -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \                                                                                                            
-    nys-wetlands-dl \                                                                                                                                                   
-    bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff                                                                                                            
-                                                                                                                                                                        
-  4 · mbfusion binary                                                                                                                                                   
-  docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \                                                                                                  
-    -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \                                                                                                            
-    -e MODE=binary \                                                                                                                                                    
-    nys-wetlands-dl \                                                                                                                                                   
-    bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff                                                                                                            
-                                                                                                                                                                        
-  
+tmux new -s arch_binary "bash Shell_Scripts/run_after.sh \
+  docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+    -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp -e MODE=binary \
+    nys-wetlands-dl bash Shell_Scripts/run_arch_fusion.sh fld_chmret_leafoff \
+  2>&1 | tee -a /workdir/$USER/arch_fusion_binary.log"
 ```
 
 **Memory.** Both arms default to `BATCH_SIZE=8`. For `mbfusion`, params are ~1.3×
@@ -664,12 +673,27 @@ temperature on the gate logits — deliberately not built in speculatively.
 
 ### 9.2 Export gate rasters (a deliverable, not a debug artifact)
 
-Run before teardown, per cell you want maps for:
+Run **on the GPU node, inside the container** (it loads the trained model), before
+teardown. All 10 fusion cells in one pass:
 
 ```bash
-python $PIPE/dl_11_export_gates.py \
-  --cell Models/results_arch_fusion_v3/multiclass/fld_chmret_leafoff_mbfusion/seed0 \
-  --config fld_chmret_leafoff --seed 0 --mode multiclass
+tmux new -s gates
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \
+  nys-wetlands-dl bash -c '
+    for MODE in multiclass binary; do
+      for S in 0 1 2 3 4; do
+        python Python_Code_Analysis/DL_Pipeline_v2/dl_11_export_gates.py \
+          --cell Models/results_arch_fusion_v3/$MODE/fld_chmret_leafoff_mbfusion/seed$S \
+          --config fld_chmret_leafoff --seed $S --mode $MODE
+      done
+    done'
+```
+
+Confirm the sweep landed — 10 summaries, one per cell:
+
+```bash
+find Models/results_arch_fusion_v3 -name gate_summary.json | wc -l    # expect 10
 ```
 
 Writes `<cell>/gates/<patch>.npz` (six float16 `(n_branch, H, W)` arrays, ~0.5 MB per
@@ -772,12 +796,89 @@ Output: `Data/HUC_DL_Predictions_v3/DLpred_<mode>_cluster_<C>_huc_<H>.tif` (clas
 and `..._probs.tif` (per-class softmax). `RESULTS_DIR` defaults to
 `Models/factorial_results_v3/<MODE>`, falling back to `_v2`, then the v1 root, then
 `results/`. Append a seed argument to pin one; otherwise the best-macro-F1 seed is
-chosen. Architecture is auto-detected from the checkpoint, so UNet3+ and `mbfusion`
-cells work unchanged.
+chosen.
 
-**Batch over many HUCs:** list them in `Shell_Scripts/huc.txt`, one
-`<cluster>:<huc>` per line (blank lines ignored), then loop inside a single two-mount
-container under `tmux`:
+#### Predicting from an architecture arm
+
+The bare command above is the **U-Net**, because `RESULTS_DIR` resolves into the base
+grid. The arch arms live in their own roots under a *suffixed cell directory*, and
+`<config>` cannot simply absorb that suffix — `<config>` is the key into
+`dl_experiment_config.py` (the stats/predictor contract), and
+`fld_chmret_leafoff_mbfusion` is not a config, so `--emit` would `KeyError`. So the
+cell directory is its own knob, **`CELL_NAME`**:
+
+| Arm | `CELL_NAME` | `RESULTS_DIR` |
+|---|---|---|
+| U-Net (default) | *(unset)* | *(unset — resolves to `Models/factorial_results_v3/<mode>`)* |
+| UNet3+ | `<config>_unet3plus` | `Models/results_arch_v3/<mode>` |
+| `mbfusion` | `<config>_mbfusion` | `Models/results_arch_fusion_v3/<mode>` |
+
+The **network** is still auto-detected — `load_model()` reads `arch` and the
+`mbfusion` branch map from the checkpoint's `.meta.json` sidecar, so no `--arch` is
+ever passed. Only the *path* needs pointing.
+
+> **Output collision.** `dl_06b_predict_huc.py` names its output
+> `DLpred_<mode>_cluster_<C>_huc_<H>.tif` with **no arch token**, so two arms sharing
+> one `OUT_DIR` overwrite each other silently. `run_predict_factorial.sh` therefore
+> defaults each non-`unet` arm to its own root, `Data/HUC_DL_Predictions_v3_<arch>/`.
+> An explicit `OUT_DIR` still wins — if you set one, make it arm-specific.
+
+Both knobs must go through **`-e`** into the container, and `RESULTS_DIR` is a
+*container* path (`/app/...`):
+
+```bash
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app \
+  -v /workdir/$USER/NYS_Wetlands_Data:/data \
+  -e DATA_ROOT=/data -e TMPDIR=/app/tmp \
+  -e CELL_NAME=fld_chmret_leafoff_mbfusion \
+  -e RESULTS_DIR=/app/Models/results_arch_fusion_v3/multiclass \
+  nys-wetlands-dl \
+  bash Shell_Scripts/run_predict_factorial.sh fld_chmret_leafoff <cluster> <huc>
+#   -> Data/HUC_DL_Predictions_v3_mbfusion/
+```
+
+Each arm picks its **own** best seed by macro-F1, so the arms will generally not
+agree (measured on the v3 multiclass grid: unet seed2, unet3plus seed1, mbfusion
+seed2). For a like-for-like visual comparison of the same split, pin the seed with
+the 4th positional argument on every arm.
+
+**Batch over many HUCs — use `run_predict_arms.sh`.** List the HUCs in
+`Shell_Scripts/huc.txt`, one `<cluster>:<huc>` per line (blank lines ignored). The
+wrapper builds the two-mount `docker1` call, sets the arm's `CELL_NAME` /
+`RESULTS_DIR` / `OUT_DIR` from the table above, loops the file, and **skips any HUC
+whose `_probs.tif` already exists** — so an interrupted pass resumes where it
+stopped. Run it on the host, inside `tmux`, one arm at a time:
+
+```bash
+cd /workdir/$USER/nys_wetlands
+tmux new -s predict
+
+DRY_RUN=1 bash Shell_Scripts/run_predict_arms.sh mbfusion binary   # resolve only
+bash Shell_Scripts/run_predict_arms.sh unet      multiclass
+bash Shell_Scripts/run_predict_arms.sh unet3plus multiclass
+bash Shell_Scripts/run_predict_arms.sh mbfusion  multiclass
+#   arm  in {unet, unet3plus, mbfusion};  mode defaults to multiclass;  seed to 2
+#   knobs: SEED  CONFIG  HUC_LIST  DATA_DIR  DRY_RUN
+```
+
+**Queue the next arm behind the running one** with `run_after.sh`. It snapshots the
+`nys-wetlands-dl` containers running *right now*, waits for them to exit, then runs
+your command — so you can line up arm 2 at any point after arm 1 has started, and it
+runs immediately if nothing is up. Always `tee` to a log; that file is the only
+record of the run:
+
+```bash
+tmux new -s armB "bash Shell_Scripts/run_after.sh \
+  bash Shell_Scripts/run_predict_arms.sh mbfusion binary \
+  2>&1 | tee -a /workdir/$USER/predict_mbfusion_binary.log"
+```
+
+Source rasters for every listed HUC must already be pulled (step 2). Start with 2–3
+demo HUCs to validate before scaling up.
+
+<details>
+<summary>Equivalent hand-rolled loop, if you need to vary something the wrapper does not expose</summary>
 
 ```bash
 docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
@@ -793,8 +894,69 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 ```
 
 The `|| echo [FAILED]` keeps the loop going past a HUC with missing source tiles —
-grep the scrollback for `FAILED` afterwards. Source rasters for every listed HUC must
-already be pulled. Start with 2–3 demo HUCs to validate before scaling up.
+grep the scrollback for `FAILED` afterwards.
+</details>
+
+**Measured wall-clock** for the 30 HUCs in `huc.txt` (6,358 Mpx), one arm × one
+mode, RTX A6000 *(2026-08-30/31)*:
+
+| Arm | multiclass | binary |
+|---|---|---|
+| U-Net | — | 2h 47m |
+| UNet3+ | 4h 03m | 3h 44m |
+| `mbfusion` | ~10h¹ | 4h 33m |
+
+¹ The mbfusion multiclass pass ran under a superseded one-off driver and its log has
+no summary line; treat it as unverified. Budget **3–5 h per arm-mode** and run the
+six passes across two reservations.
+
+#### Disk budget — check before a batch
+
+**`--probs` is hardcoded in `run_predict_factorial.sh`, and the probability raster is
+~500× the class raster.** Both are written at the HUC's native 1 m DEM grid, LZW —
+but 4-band float32 softmax is nearly incompressible, so it lands at **~9.7 bytes per
+pixel** against the class raster's 0.019.
+
+Measured on cluster 208 / HUC 041402011002 (16614 × 10553 = 175 Mpx):
+
+| Output | Bands | Size | Rate |
+|---|---|---|---|
+| `..._probs.tif` | 4 × Float32 | **1.58 GB** | 9.67 B/px |
+| `...tif` (class) | 1 × Byte | 3.4 MB | 0.019 B/px |
+
+The 30 HUCs currently in `Shell_Scripts/huc.txt` total **6,358 Mpx** — 36× that one
+sample, and they vary 5× among themselves (73 Mpx for `56:020301020101` up to 461 Mpx
+for `123:043001010103`).
+
+**The completed v3 run, all three arms × both modes** *(measured 2026-08-31)*. Each
+arm's root holds 120 GeoTIFFs — 30 HUCs × 2 modes × (class + probs):
+
+| Root | Size |
+|---|---|
+| `HUC_DL_Predictions_v3` (U-Net) | **97 GB** |
+| `HUC_DL_Predictions_v3_unet3plus` | **99 GB** |
+| `HUC_DL_Predictions_v3_mbfusion` | **99 GB** |
+| **total** | **295 GB** |
+| **class rasters only** (drop `--probs`) | ~0.3 GB per arm-mode — 120–152 MB measured |
+
+Rule of thumb for a new HUC list: **~11 B/px** for multiclass probs (range 9.2–12.8),
+about half that for binary, and the class raster is ~500× smaller than its
+probability sibling. So if downstream work only needs the maps — `dl_10b`'s HUC
+prevalence counts, for instance — pulling `DLpred_*[0-9].tif` alone turns a 295 GB
+transfer into well under a gigabyte.
+
+Size the HUC list against free space *before* launching, and remember this lands on
+the GPU node's **local** `/workdir` — it does not follow you to the next reservation,
+so it must also fit on the CPU node when you rsync it back.
+
+```bash
+df -h /workdir/$USER          # free space on the GPU node's local disk
+du -sh Data/HUC_DL_Predictions_v3*   # what a run has produced so far
+```
+
+If you only need the maps (not per-class uncertainty), dropping `--probs` from the
+`dl_06b` invocation in `run_predict_factorial.sh` makes the whole exercise
+effectively free on disk.
 
 ---
 
@@ -810,8 +972,67 @@ GPU="$USER@cbsugpu09.biohpc.cornell.edu"     # whichever node held the reservati
 WD="/workdir/$USER/nys_wetlands"
 ```
 
-**1 · Base grid** (both modes ride along — the root is mode-tokened; SHAP JSON/PNG
-live inside the cells, so they come with `--metrics-only`):
+### 0 · Code, docs, and logs — do this one FIRST
+
+> **The `/workdir` copy is not a git clone**, so nothing here is under version
+> control and `rsync_results.sh` only ever touches `Models/`. Any script you edited,
+> notebook you ran, or log you `tee`'d during the reservation exists **only on the
+> GPU node** and dies with it. In the 2026-08 run this was nine files including a
+> day's work on `dl_10_factorial_viz.ipynb` and two new wrappers
+> (`run_predict_arms.sh`, `run_after.sh`) — all of it nearly lost, because steps 1–4
+> below sail right past it.
+
+Find what changed, then pull it. `--update` protects newer CPU-side edits, and
+`-nic` shows the itemized list without moving bytes:
+
+```bash
+# What did the node change? (adjust the date to your reservation's start)
+ssh "$GPU" "find $WD/Python_Code_Analysis $WD/Shell_Scripts -type f \
+  -newermt '2026-08-27' | grep -vE '__pycache__|\.html$'"
+
+# Preview, review the list, then re-run without -n
+rsync -nic --update -r --exclude='__pycache__' --exclude='.local' \
+  "$GPU:$WD/Python_Code_Analysis/" Python_Code_Analysis/
+rsync -nic --update -r --exclude='__pycache__' \
+  "$GPU:$WD/Shell_Scripts/" Shell_Scripts/
+```
+
+> **`--update` can silently skip the file you care most about.** It compares mtimes
+> and keeps whichever side is newer, so a CPU-side autosave or `touch` on a notebook
+> blocks the GPU version from landing. Verify the ones that matter by checksum:
+> ```bash
+> ssh "$GPU" "md5sum $WD/Python_Code_Analysis/DL_Pipeline_v2/dl_10_factorial_viz.ipynb"
+> md5sum Python_Code_Analysis/DL_Pipeline_v2/dl_10_factorial_viz.ipynb
+> ```
+
+**Run logs.** Anything you `tee`'d lands wherever you were standing — often
+`/workdir/$USER/`, *outside* the repo, where no rsync in this section reaches it.
+Park logs inside a results root so step 1 carries them automatically, and give them
+truthful names:
+
+```bash
+# ON the GPU node, before teardown:
+D=/workdir/$USER/nys_wetlands/Models/factorial_results_v3/predict_logs
+mkdir -p "$D"
+cp /workdir/$USER/*.log "$D"/          # then rename per arm/mode
+```
+
+`predict_logs/` sits inside the root `rsync_results.sh` pulls, but outside
+`analysis/`, so the logs sync without inflating the git-tracked payload (§12).
+
+**Logs that were never `tee`'d** survive only in tmux scrollback. Capture before
+killing the session — `-S -` takes the full history, capped by `history-limit`, so
+check the head of the file for the run banner:
+
+```bash
+tmux ls
+tmux capture-pane -p -t <session> -S - > "$D/<name>.log"
+```
+
+### 1 · Base grid
+
+Both modes ride along — the root is mode-tokened. SHAP JSON/PNG live inside the
+cells, so they come with `--metrics-only`:
 
 ```bash
 SERVER="$GPU:" REMOTE_RESULTS="$WD/Models/factorial_results_v3" \
@@ -819,7 +1040,13 @@ LOCAL_DEST=Models/factorial_results_v3 \
   Shell_Scripts/rsync_results.sh --metrics-only        # -n first to preview
 ```
 
-**2 · Architecture arms** (same script, different roots):
+`--metrics-only` pulls `*.json`, `*.csv`, `*.png`, `*.npz`, `*.log` — no weights.
+Keep the `.log`: Lightning's model summary in `train.log` is the **only** source of
+the GFLOPs column in `arch_cost.csv`.
+
+### 2 · Architecture arms
+
+Same script, different roots:
 
 ```bash
 for tree in results_arch_v3 results_arch_fusion_v3; do
@@ -828,28 +1055,58 @@ for tree in results_arch_v3 results_arch_fusion_v3; do
 done
 ```
 
-**3 · Model weights** (once, before teardown). `--metrics-only` excludes
-`.ckpt`/`.safetensors`; rerun 1–2 **without** the flag — already-synced metrics are
-skipped, only weights move. Keep just the safetensors (~50 MB/cell vs ~500 MB) with:
+### 3 · Model weights (once, before teardown)
+
+Steps 1–2 excluded the weights. Rerun them **without** `--metrics-only` — already-
+synced metrics are skipped, so only weights move. `RSYNC_OPTS` *replaces* the
+script's defaults, so restate `-avz --progress` alongside the exclude:
 
 ```bash
-SERVER="$GPU:" REMOTE_RESULTS="$WD/Models/factorial_results_v3" \
-LOCAL_DEST=Models/factorial_results_v3 \
-RSYNC_OPTS="-avz --progress --exclude=*.ckpt" \
-  Shell_Scripts/rsync_results.sh
-# repeat per arch tree if those weights are wanted
+for tree in factorial_results_v3 results_arch_v3 results_arch_fusion_v3; do
+  SERVER="$GPU:" REMOTE_RESULTS="$WD/Models/$tree" LOCAL_DEST="Models/$tree" \
+  RSYNC_OPTS="-avz --progress --exclude=*.ckpt" \
+    Shell_Scripts/rsync_results.sh
+done
 ```
 
-**4 · HUC prediction GeoTIFFs** (plain rsync — flat dir, no config/seed layout;
-multi-GB and gitignored):
+Excluding `.ckpt` keeps the self-describing `.safetensors` (~50 MB/cell) and drops
+the ~5× larger Lightning checkpoint. Measured on the v3 run: base grid 37 GB of
+safetensors vs 112 GB of ckpt; the two arch arms are 9.7 GB of safetensors combined.
+The `mbfusion` safetensors are the only copy of the branch-map-carrying weights —
+pull them even if you think you are done predicting.
+
+### 4 · HUC prediction GeoTIFFs
+
+Plain rsync — flat dirs, no config/seed layout, multi-GB and gitignored. One per
+arm you ran:
 
 ```bash
-rsync -avhP "$GPU:$WD/Data/HUC_DL_Predictions_v3/" Data/HUC_DL_Predictions_v3/
+for root in HUC_DL_Predictions_v3 HUC_DL_Predictions_v3_unet3plus \
+            HUC_DL_Predictions_v3_mbfusion; do
+  rsync -avhP "$GPU:$WD/Data/$root/" "Data/$root/"
+done
 ```
 
-**5 · Close the loop on CPU:** aggregate (§8 per mode) → three-arm aggregation (§9.3
-per mode) → rerun the viz notebooks (§12) → `git add -A` so the whitelisted analysis
-JSON/CSV sync to the local Mac via git.
+295 GB for all three *(measured)*. If downstream work only needs the class maps,
+`--include='DLpred_*[0-9].tif' --include='*/' --exclude='*'` cuts it to well under a
+gigabyte (§10).
+
+### 5 · Verify, then tear down
+
+```bash
+# on the CPU node, after every pass above
+find Models/factorial_results_v3 -name metrics.json | wc -l          # expect 80
+find Models/results_arch_v3 Models/results_arch_fusion_v3 -name metrics.json | wc -l   # 20
+find Models -name '*shap_importance.json' | wc -l                    # 100
+find Models/results_arch_fusion_v3 -name gate_summary.json | wc -l   # 10
+for d in Data/HUC_DL_Predictions_v3*; do echo "$d $(ls $d/*.tif | wc -l)"; done  # 120 each
+```
+
+### 6 · Close the loop on CPU
+
+Aggregate (§8, per mode) → three-arm aggregation (§9.3, per mode) → rerun the viz
+notebooks (§12) → `git add -A` so the whitelisted analysis JSON/CSV and the code from
+step 0 are committed.
 
 ---
 
@@ -900,8 +1157,8 @@ EMW/FSW/SSW→WET and compare against the native-binary WET — the fair "collap
 
 - [ ] Patch dirs current: `R_Patches`, `R_Patches_NWI`, `R_Patches_NWIextra`
 - [ ] `python $PIPE/dl_experiment_config.py` self-check passes (21/25/29)
-- [ ] **Master stats rebuilt** over the current patch count (§3 — currently stale:
-      master says 1007, disk has 1012)
+- [ ] **Master stats rebuilt** over the current patch count (§3 — `num_patches` in
+      the per-config stats must equal the `R_Patches` file count)
 - [ ] `dl_make_config_stats.py --all` run for **both** modes (16 files)
 - [ ] `dl_preflight_check.py` GREEN for 8 configs × 2 modes — including the leakage
       guard and **[9]** the fusion branch partition
@@ -912,6 +1169,8 @@ EMW/FSW/SSW→WET and compare against the native-binary WET — the fair "collap
 - [ ] Driver launched inside `tmux`; mount only under `/workdir/$USER`; knobs passed
       via `-e`
 - [ ] `rsync_results.sh -n` dry-run round-trips before the first real pull
+- [ ] **Before teardown:** §11 step 0 — pull back edited code, notebooks, and
+      `tee`'d logs. Nothing else in §11 covers them, and `/workdir` is not a git clone.
 - [ ] Heavy jobs run by **the user** — the agent does not auto-execute
 
 ---
@@ -936,7 +1195,7 @@ patches:
 | Trained cells | `Models/factorial_results_<v>/<mode>/<config>/seed<k>/` | The idempotent skip sees the old `metrics.json` and **skips every cell** — old results masquerade as a fresh run. Deleting to force destroys them. |
 | Per-config stats | `Data/Training_Data/stats/*_<config>_wp0.5.json` | `dl_make_config_stats --all` overwrites them, and the master too. Old metrics survive, but old **SHAP / predict** (which reload stats) can no longer be reproduced. |
 | Patches | `Data/Training_Data/R_Patches*/` | If predictors changed, the band schema changes and old checkpoints no longer load against them. |
-| HUC predictions | `Data/HUC_DL_Predictions_<v>/DLpred_...tif` | Filename has no version token — same HUC overwrites. |
+| HUC predictions | `Data/HUC_DL_Predictions_<v>[_<arch>]/DLpred_...tif` | Filename has no version **or arch** token — same HUC overwrites. The arch is separated by the *directory* only (`_unet3plus` / `_mbfusion` suffix), not the filename. |
 | Viz notebooks | hardcoded roots | Re-running repoints at whatever is on disk and overwrites rendered figures. |
 
 ### 14.2 The ritual
@@ -972,8 +1231,10 @@ commit** before prep so the preflight stays the guardrail:
 3. Rebuild the global raster scan in the sibling `NYS_Wetlands_Data` project so the
    new band has global min/max.
 4. Update the channel tables in `PLAN.md` §3.5 and §2a here.
-5. Bump the default `RESULTS_DIR` in `run_config.sh` and the arm drivers, and
-   `OUT_DIR` in `run_predict_factorial.sh`.
+5. Bump the default `RESULTS_DIR` in `run_config.sh` and the arm drivers, and the
+   `OUT_DIR` defaults in `run_predict_factorial.sh` — note there are **two**, the
+   `unet` root and the `_$MARCH`-suffixed root for the arch arms, plus the
+   `factorial_results_v<n>` / `factorial_results_v<n-1>` probe chain above them.
 6. Then run the §3 prep block and the preflight.
 
 > **`in_channels` changing means old checkpoints are incompatible** — no warm-start;
@@ -990,7 +1251,6 @@ that the resolved cell paths carry the new version token.
 - **Flow map:** §0 (the one table to read first)
 - **Design / rationale / settled decisions:** [`PLAN.md`](PLAN.md)
 - **Source of truth for the matrix:** `../dl_experiment_config.py`
-- **Draining a reservation:** §11
+- **Draining a reservation:** §11 — **start with step 0 (code + logs), not step 1**
 - **Schema gotchas for new analysis code:** §12
 - **Superseded runbooks (v1, v2) and the original fusion plan:** `archive/`
-- **Production model (separate project):** `../production_model/`

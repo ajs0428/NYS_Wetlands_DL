@@ -16,13 +16,13 @@ one tile, and coarse layers are never inflated onto disk.
 
 The band recipe (which layers, what transforms, what names) mirrors huc_stack.R
 exactly, so the bands this produces match the training chips the model saw:
-    DEM, terrain (TPI dropped), hydro (log flowacc), CHM,
+    DEM, terrain (all bands), hydro (log flowacc), CHM,
     NAIP (ndvi/ndwi dropped), ortho (_lo suffix), lidar
 
 Band SELECTION is by name downstream (validate_prediction_bands), so this module
 does not hardcode which source carries `twi` or `Geomorph_local`; it carries every
 source band through under its native description and lets the predictor-name
-contract pick the 17 it needs.
+contract pick the 20 it needs.
 
 Usage (inspect the contract before predicting -- no model needed):
     python dl_huc_stack.py --huc 041402011002 --cluster 208 \
@@ -214,13 +214,12 @@ class VirtualHucStack:
         keep_idx = list(range(1, src.count + 1))
         out_names = list(names)
 
-        if key == "terr":
-            # drop TPI_* (mirrors subset(..., grep("^TPI_", invert=TRUE)))
-            keep = [(n, i) for n, i in zip(names, keep_idx)
-                    if not re.match(r"^TPI_", n)]
-            out_names = [n for n, _ in keep]
-            keep_idx = [i for _, i in keep]
-        elif key == "naip":
+        # NOTE: `terr` passes through unfiltered. Through v2 this branch dropped
+        # every ^TPI_ band, mirroring the old huc_stack.R subset(); v3 promoted
+        # TPI_local to a predictor (with meanc_local / dmv_local), so dropping it
+        # here left the stack one band short of the 20-name contract and
+        # validate_prediction_bands raised on it.
+        if key == "naip":
             # drop ndvi/ndwi (subset(c("ndvi","ndwi"), negate=TRUE))
             keep = [(n, i) for n, i in zip(names, keep_idx)
                     if n not in ("ndvi", "ndwi")]
