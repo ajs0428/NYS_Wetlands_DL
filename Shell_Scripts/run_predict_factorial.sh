@@ -24,11 +24,22 @@
 # predictions land in Data/HUC_DL_Predictions_v3 as DLpred_<mode>_cluster_..._huc_....tif
 # (dl_06b names by the stats' classification_mode and asserts it matches the model).
 #
+# Architecture arms: <config> always names the FACTORIAL config (it is the
+# predictor/stats contract). The arch arms live in their own results roots under
+# a suffixed CELL dir, so point the script at them with CELL_NAME + RESULTS_DIR:
+#   unet       (default)  Models/factorial_results_v3/<mode>/<config>/
+#   unet3plus  CELL_NAME=<config>_unet3plus RESULTS_DIR=Models/results_arch_v3/<mode>
+#   mbfusion   CELL_NAME=<config>_mbfusion  RESULTS_DIR=Models/results_arch_fusion_v3/<mode>
+# The network itself is auto-detected from the checkpoint's .meta.json sidecar
+# (arch + mbfusion branch map), so no --arch flag is ever passed.
+#
 # Usage:    run_predict_factorial.sh <config> <cluster> <huc> [seed]
 # Example:  DATA_ROOT=/scratch/NYS_Wetlands_Data \
 #             run_predict_factorial.sh fld_chmret_leafoff 208 041402011002
 #           MODE=binary run_predict_factorial.sh fld_chmret_leafoff 208 041402011002
 # Knobs (env): MODE(multiclass|binary)
+#              CELL_NAME (default <config>; the cell DIRECTORY name -- set this
+#                for the arch arms, whose dirs carry an _unet3plus/_mbfusion suffix)
 #              RESULTS_DIR (default Models/factorial_results_v3/<MODE>, falling
 #                back to the v1 Models/factorial_results, then results/)
 #              DATA_ROOT / NYS_WETLANDS_DATA_ROOT  OUT_DIR  PATCH_SIZE  OVERLAP
@@ -46,7 +57,10 @@ PIPE="$REPO_ROOT/Python_Code_Analysis/DL_Pipeline_v2"
 STATS_DIR="$REPO_ROOT/Data/Training_Data/stats"
 PYTHON="${PYTHON:-python}"
 MODE="${MODE:-multiclass}"
-OUT_DIR="${OUT_DIR:-$REPO_ROOT/Data/HUC_DL_Predictions_v3}"
+# The cell DIRECTORY name. Equals <config> for the base U-Net grid; the arch arms
+# suffix it (<config>_unet3plus / <config>_mbfusion). Kept separate from $CONFIG
+# because $CONFIG must stay a valid dl_experiment_config key (the stats contract).
+CELL_NAME="${CELL_NAME:-$CONFIG}"
 PATCH_SIZE="${PATCH_SIZE:-128}"
 OVERLAP="${OVERLAP:-64}"
 
@@ -54,11 +68,11 @@ OVERLAP="${OVERLAP:-64}"
 # fallbacks. v3 before v2 so a fresh grid is picked up without an env override.
 if [[ -n "${RESULTS_DIR:-}" ]]; then
     : # honor explicit override (point it at the tree holding <config>/seed<k>)
-elif [[ -d "$REPO_ROOT/Models/factorial_results_v3/$MODE/$CONFIG" ]]; then
+elif [[ -d "$REPO_ROOT/Models/factorial_results_v3/$MODE/$CELL_NAME" ]]; then
     RESULTS_DIR="$REPO_ROOT/Models/factorial_results_v3/$MODE"
-elif [[ -d "$REPO_ROOT/Models/factorial_results_v2/$MODE/$CONFIG" ]]; then
+elif [[ -d "$REPO_ROOT/Models/factorial_results_v2/$MODE/$CELL_NAME" ]]; then
     RESULTS_DIR="$REPO_ROOT/Models/factorial_results_v2/$MODE"
-elif [[ -d "$REPO_ROOT/Models/factorial_results/$CONFIG" ]]; then
+elif [[ -d "$REPO_ROOT/Models/factorial_results/$CELL_NAME" ]]; then
     RESULTS_DIR="$REPO_ROOT/Models/factorial_results"
 else
     RESULTS_DIR="$REPO_ROOT/results"
@@ -74,7 +88,7 @@ STATS_PATH="$STATS_DIR/$TRAIN_STATS"
 
 # --- Pick the cell (best macro_f1 seed unless one was given). ---
 if [[ -z "$SEED" ]]; then
-    SEED="$("$PYTHON" - "$RESULTS_DIR/$CONFIG" <<'PY'
+    SEED="$("$PYTHON" - "$RESULTS_DIR/$CELL_NAME" <<'PY'
 import json, sys
 from pathlib import Path
 root = Path(sys.argv[1])
@@ -96,7 +110,7 @@ PY
 )"
     echo "selected best seed by macro_f1: seed$SEED"
 fi
-CELL="$RESULTS_DIR/$CONFIG/seed$SEED"
+CELL="$RESULTS_DIR/$CELL_NAME/seed$SEED"
 [[ -d "$CELL" ]] || { echo "[error] no cell: $CELL"; exit 1; }
 
 # --- Locate the best checkpoint (prefer self-describing safetensors). ---
@@ -112,8 +126,19 @@ print(m.get("base_filters", 64), m.get("depth", 5), m.get("arch", "unet"))
 PY
 )
 
+# --- Output dir (resolved AFTER the arch is known). dl_06b names its output
+# DLpred_<mode>_cluster_<C>_huc_<H>.tif with NO arch token, so two arms writing
+# into one dir silently overwrite each other. Give each non-unet arm its own
+# root by default; an explicit OUT_DIR always wins.
+if [[ "$MARCH" == "unet" ]]; then
+    OUT_DIR="${OUT_DIR:-$REPO_ROOT/Data/HUC_DL_Predictions_v3}"
+else
+    OUT_DIR="${OUT_DIR:-$REPO_ROOT/Data/HUC_DL_Predictions_v3_$MARCH}"
+fi
+
 echo "=============================================================="
 echo " predict:   $CONFIG  seed$SEED  mode=$MODE   (arch: $MARCH, auto-detected from checkpoint)"
+echo " cell:      $CELL_NAME"
 echo " huc:       cluster $CLUSTER / huc $HUC"
 echo " model:     $CKPT  (bf$BF d$DEPTH)"
 echo " stats:     $TRAIN_STATS"

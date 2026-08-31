@@ -121,10 +121,28 @@ def huc_sources_ready(paths: Dict[str, List[Path]], huc: str) -> bool:
     return True
 
 
+# Ortho is the one source with real vintage ambiguity: a HUC can carry several
+# flights (..._ortho_2023.tif, ..._ortho_2024.tif) and first-sorted would silently
+# take the oldest. Prefer the newest year so the leaf-off bands come from the most
+# recent imagery (2024 in the current tree).
+_ORTHO_YEAR_RE = re.compile(r"ortho_(\d{4})")
+
+
+def _ortho_year(path: Path) -> int:
+    m = _ORTHO_YEAR_RE.search(path.name)
+    return int(m.group(1)) if m else -1
+
+
 def _pick1(files: List[Path], label: str) -> Path:
+    """Choose one source file, reporting the choice whenever it was ambiguous.
+
+    `ortho` picks the newest year in the filename; every other source keeps the
+    first-sorted file (they have no meaningful vintage axis).
+    """
+    chosen = max(files, key=_ortho_year) if label == "ortho" else files[0]
     if len(files) > 1:
-        print(f"Multiple {label} files; using first: {files[0].name}")
-    return files[0]
+        print(f"Multiple {label} files; using: {chosen.name}")
+    return chosen
 
 
 # --- Per-source band recipe (mirrors huc_layers() transforms) -----------------
