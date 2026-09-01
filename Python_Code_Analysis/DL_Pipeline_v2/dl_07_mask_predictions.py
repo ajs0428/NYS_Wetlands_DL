@@ -126,16 +126,20 @@ def already_masked(path):
         return False
 
 
-def mask_one(src_path, dst_path, geoms_by_crs, poly, dry_run):
+def mask_one(src_path, dst_path, geom_cache, huc, poly, dry_run):
     """Stream src -> dst, writing nodata outside the polygon. Returns kept %."""
     with rasterio.open(src_path) as src:
         is_float = src.dtypes[0].startswith("float")
         nodata = float("nan") if is_float else 255
 
-        geoms = geoms_by_crs.get(src.crs)
+        # Cache the reprojected geometry per (HUC, CRS) -- keying on CRS alone
+        # silently reuses the first HUC's polygon for every later raster, which
+        # masks them to nothing.
+        key = (huc, src.crs.to_string() if src.crs else None)
+        geoms = geom_cache.get(key)
         if geoms is None:
             geoms = list(poly.to_crs(src.crs).geometry)
-            geoms_by_crs[src.crs] = geoms
+            geom_cache[key] = geoms
 
         itemsize = np.dtype(src.dtypes[0]).itemsize
         rows = max(1, min(src.height,
@@ -202,7 +206,7 @@ def main(argv=None):
     if args.out_dir and not args.dry_run:
         args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    geoms_by_crs = {}
+    geom_cache = {}
     written = skipped = failed = 0
 
     for src_path in rasters:
@@ -232,7 +236,7 @@ def main(argv=None):
 
         tmp = dst_final.with_suffix(".dl07tmp.tif")
         try:
-            kept = mask_one(src_path, tmp, geoms_by_crs, poly, args.dry_run)
+            kept = mask_one(src_path, tmp, geom_cache, huc, poly, args.dry_run)
         except Exception as exc:                      # noqa: BLE001
             if tmp.exists():
                 tmp.unlink()
