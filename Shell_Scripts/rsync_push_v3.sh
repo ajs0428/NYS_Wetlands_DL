@@ -23,6 +23,7 @@ set -euo pipefail
 #   Data/Training_Data/R_Patches          field labels (TEST for every cell)
 #   Data/Training_Data/R_Patches_NWI      NWI paired 1:1 to field
 #   Data/Training_Data/R_Patches_NWIextra NWI at extra same-HUC12 locations
+#   Data/NY_HUCS                          HUC12 boundaries for dl_07 masking
 #
 # WHAT STAYS: Models/ (all of it -- v3 cells are written on the node), the
 # HUC_DL_Predictions_* roots, R_Patches_Merged* (v1/v2 pools), the *_v1/_v2
@@ -73,6 +74,13 @@ PATHS=(
     Data/Training_Data/R_Patches
     Data/Training_Data/R_Patches_NWI
     Data/Training_Data/R_Patches_NWIextra
+    # HUC12 boundaries (36 MB). Not a training input -- run_predict_factorial.sh
+    # hands this to dl_07_mask_predictions.py to clip each prediction raster to
+    # its watershed. Copied from the sibling NYS_Wetlands_Data project, which
+    # stays canonical; refresh with:
+    #   cp ../NYS_Wetlands_Data/Data/NY_HUCS/NY_Cluster_Zones_250_CROP_NAomit_6347.gpkg \
+    #      Data/NY_HUCS/
+    Data/NY_HUCS
 )
 
 EXCLUDES=(

@@ -44,6 +44,13 @@
 #                back to the v1 Models/factorial_results, then results/)
 #              DATA_ROOT / NYS_WETLANDS_DATA_ROOT  OUT_DIR  PATCH_SIZE  OVERLAP
 #              PYTHON  DRY_RUN
+#              MASK (default 1) -- clip the outputs to the HUC12 boundary with
+#                dl_07_mask_predictions.py. dl_06b predicts over the whole DEM
+#                bounding box, ~54% of which falls OUTSIDE the watershed on
+#                out-of-domain stack values, so an unmasked raster is unusable
+#                for any area statistic. Set MASK=0 only to inspect raw output.
+#              HUC_GPKG -- boundary vector (default: Data/NY_HUCS/ in the repo,
+#                falling back to the sibling NYS_Wetlands_Data copy)
 set -euo pipefail
 
 CONFIG="${1:?usage: run_predict_factorial.sh <config> <cluster> <huc> [seed]}"
@@ -63,6 +70,7 @@ MODE="${MODE:-multiclass}"
 CELL_NAME="${CELL_NAME:-$CONFIG}"
 PATCH_SIZE="${PATCH_SIZE:-128}"
 OVERLAP="${OVERLAP:-64}"
+MASK="${MASK:-1}"
 
 # Where the trained cells live: newest mode-tokened tree first, then older
 # fallbacks. v3 before v2 so a fresh grid is picked up without an env override.
@@ -144,6 +152,7 @@ echo " model:     $CKPT  (bf$BF d$DEPTH)"
 echo " stats:     $TRAIN_STATS"
 echo " data-root: $DATA_ROOT"
 echo " out:       $OUT_DIR"
+echo " mask:      $([[ "$MASK" == "1" ]] && echo "yes (clip to HUC12 boundary)" || echo "NO -- raw bbox, not usable for area stats")"
 echo "=============================================================="
 
 run() { echo "+ $*"; [[ "${DRY_RUN:-0}" == "1" ]] || "$@"; }
@@ -157,5 +166,21 @@ run "$PYTHON" "$PIPE/dl_06b_predict_huc.py" \
     --patch-size "$PATCH_SIZE" --overlap "$OVERLAP" \
     --probs \
     --out-dir "$OUT_DIR"
+
+# --- Clip to the HUC12 boundary, in place. ---
+# dl_06b writes the whole DEM bounding box; roughly half of it is outside the
+# watershed, on stack values the model was never meant to see. Masking here --
+# rather than as a later sweep -- means an unmasked raster never reaches an
+# analysis notebook. Idempotent: a raster already tagged DL_MASKED is skipped,
+# so re-running a HUC costs nothing.
+if [[ "$MASK" == "1" ]]; then
+    MASK_ARGS=(--in-dir "$OUT_DIR" --in-place
+               --pattern "DLpred_${MODE}_cluster_${CLUSTER}_huc_${HUC}*.tif")
+    [[ -n "${HUC_GPKG:-}" ]] && MASK_ARGS+=(--gpkg "$HUC_GPKG")
+    run "$PYTHON" "$PIPE/dl_07_mask_predictions.py" "${MASK_ARGS[@]}"
+else
+    echo "[warn] MASK=0 -- output covers the full DEM bbox, ~54% of it outside"
+    echo "       the HUC. Do not compute area statistics from it unmasked."
+fi
 
 echo "[done] predictions for $CONFIG seed$SEED -> $OUT_DIR (class + _probs.tif)"
