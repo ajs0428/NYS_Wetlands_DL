@@ -1,5 +1,5 @@
 ---
-title: "Factorial Experiment Visualization (v2)"
+title: "Factorial Experiment Visualization (v3)"
 author: "Anthony Stewart"
 date: today
 format:
@@ -14,13 +14,22 @@ execute:
   message: false
 ---
 
-Walkthrough of the v2 factorial experiment results (8 configs x 5 seeds x
-{multiclass, binary}) plus the follow-on studies (patch-count learning curve,
-UNet3+ comparison). Inputs are the small CSV/JSON aggregation outputs only:
+Walkthrough of the v3 factorial experiment results (8 configs x 5 seeds x
+{multiclass, binary}, 29-channel full feature set) plus the three-arm
+architecture comparison (U-Net / UNet3+ / mbfusion) and the fusion gate exports.
+Inputs are the small CSV/JSON aggregation outputs, plus the float16 gate rasters
+for the last section:
 
-- `dl_08_aggregate_factorial.py` -> `Models/factorial_results_v2/<mode>/analysis/`
-- `dl_08b_aggregate_patchcurve.py` -> `Models/results_patchcurve_v2/<mode>/analysis/` and `Models/results_arch_v2/<mode>/analysis/`
-- `dl_09b_shap_geomorph_export.py` -> `Models/factorial_results_v2/<mode>/analysis/shap_geomorph_channels.csv`
+- `dl_08_aggregate_factorial.py` -> `Models/factorial_results_v3/<mode>/analysis/`
+- `dl_09_shap_factorial.py` -> `Models/factorial_results_v3/<mode>/<config>/seed<k>/shap/*_shap_importance.json`
+- `dl_09b_shap_geomorph_export.py` -> `Models/factorial_results_v3/<mode>/analysis/shap_geomorph_channels.csv`
+- `dl_08b_aggregate_patchcurve.py --arch-compare` -> `Models/results_arch_fusion_v3/<mode>/analysis/`
+  (it writes into the LAST `--arch-dir`, which is the fusion root)
+- `dl_11_export_gates.py` -> `Models/results_arch_fusion_v3/<mode>/*_mbfusion/seed<k>/gates/`
+
+The patch-count learning curve was dropped from v3 (the 100-500 range is under one
+order of magnitude and will not support a scaling claim), so there is no Q6 curve
+here; the v2 curve reproduces from the frozen `results_patchcurve_v2` tree.
 
 ```{r}
 #| label: setup
@@ -30,14 +39,15 @@ library(patchwork)
 library(jsonlite)
 library(colorspace)
 library(scales)
+library(terra)     # only for the fusion gate maps: reads MOD_CLASS off the patches
 ```
 
 
 ```{r}
 #| label: factorial-data
 
-multi_dir  <- "../Models/factorial_results_v2/multiclass"
-binary_dir <- "../Models/factorial_results_v2/binary"
+multi_dir  <- "../Models/factorial_results_v3/multiclass"
+binary_dir <- "../Models/factorial_results_v3/binary"
 
 multi_fact_data <- read.csv(file.path(multi_dir, "analysis/factorial_long.csv"))
 glimpse(multi_fact_data)
@@ -51,10 +61,12 @@ glimpse(binary_fact_data)
 
 # Root holding the architecture-comparison analysis/ dirs -- i.e. the LAST
 # --arch-dir passed to dl_08b_aggregate_patchcurve.py, which is where it writes.
-# v2: results_arch_v2 (two arms). For v3 point this at the fusion root, which
-# also holds the gate exports read by the last section:
-#   arch_dir_base <- "../Models/results_arch_fusion_v3"
-arch_dir_base <- "../Models/results_arch_v2"
+# For v3 that is the fusion root, which also holds the gate exports (the .npz +
+# gate_summary.json under <cell>/seed<k>/gates/) read by the final section.
+arch_dir_base <- "../Models/results_arch_fusion_v3"
+
+# Field patches, for pairing gate rasters back to their MOD_CLASS labels.
+patch_dir <- "../Data/Training_Data/R_Patches"
 ```
 
 ```{r}
@@ -77,6 +89,11 @@ config_label_1line <- gsub("\n ", ", ", config_label)
 
 class_order <- c("EMW", "FSW", "SSW", "WET", "UPL")
 class_color <- c("FSW" = "#81b14f", "SSW" = "#c4bd8b", "EMW" = "#8faab3", "UPL" = "#6a4836", "WET" = "#388C73")
+
+# Which multiclass classes collapse into WET, read from the pipeline's own config
+# so the notebook cannot drift from what the binary models were trained on.
+binary_wet <- fromJSON("../Python_Code_Analysis/DL_Pipeline_v2/dl_band_config.json"
+                       )$binary_mapping$WET
 
 metric_label <- c("precision" = "Precision", "recall" = "Recall", "f1" = "F1", "iou" = "IoU",
                   "macro_f1" = "Macro F1", "mean_iou" = "Mean IoU", "overall_accuracy" = "Overall accuracy")
@@ -124,125 +141,6 @@ seq_fill <- function(...) {
   scale_fill_gradient(low = "#f2f7f5", high = "#14523f", na.value = "grey93", ...)
 }
 ```
-
-### Conceptual figure or matrix for the factorial experiment design
-
-Structure
-
-- Sized for a slide: 16:9, few elements, large type, plain language (no "ablation")
-- Two tables sharing one model: table A varies the inputs with the field labels held constant,
-  table B varies the training labels with the full input set held constant. The orange
-  `fld_chmret_leafoff` model is the single model both tables have in common
-- Only the inputs that actually *vary* get columns. Terrain, geomorphon and leaf-on NAIP are in
-  every model, so they are stated once in the subtitle instead of drawn as always-filled columns
-- Built from `fact_data` itself (label / lidar / spectral / in_channels are columns of
-  `factorial_long.csv`), so the figure cannot drift out of sync with what actually ran
-
-```{r}
-#| label: design-matrix
-#| fig-width: 16
-#| fig-height: 9
-
-reference <- "fld_chmret_leafoff"
-ref_col   <- "#d95f02"
-
-design_cells <- fact_data |>
-  distinct(config, label, lidar, spectral, in_channels) |>
-  mutate(config = as.character(config))
-
-# ---- Table A: inputs vary, field labels held constant ------------------------
-col_lidar    <- "Lidar\n(CHM + return fractions)"
-col_leafoff  <- "NAIP\nleaf-off"
-col_channels <- "Input\nchannels"
-a_cols <- c(col_lidar, col_leafoff, col_channels)
-
-a_row <- c("fld_nolidar_leafon"  = "Baseline",
-           "fld_nolidar_leafoff" = "+ Leaf-off",
-           "fld_chmret_leafon"   = "+ Lidar",
-           "fld_chmret_leafoff"  = "Full inputs")
-
-a_cells <- design_cells |>
-  filter(label == "fld") |>
-  mutate(config = factor(config, levels = rev(config_order)))
-
-# "in"/"out" drive the fill; "meta" is the un-filled channel-count column
-a_tiles <- bind_rows(
-  a_cells |>
-    mutate("{col_lidar}"   := if_else(lidar == "chmret", "in", "out"),
-           "{col_leafoff}" := if_else(spectral == "leafoff", "in", "out")) |>
-    pivot_longer(all_of(c(col_lidar, col_leafoff)), names_to = "input", values_to = "state"),
-  a_cells |> mutate(input = col_channels, state = "meta")
-) |>
-  mutate(input = factor(input, levels = a_cols))
-
-p_a <- ggplot(a_tiles, aes(x = input, y = config)) +
-  geom_tile(aes(fill = state), colour = "white", linewidth = 1.2) +
-  geom_tile(data = filter(a_tiles, config == reference, state != "meta"),
-            fill = NA, colour = ref_col, linewidth = 1.8) +
-  geom_text(data = filter(a_tiles, state == "meta"), aes(label = in_channels),
-            colour = "grey15", size = 6.5, fontface = "bold") +
-  scale_fill_manual(values = c("in" = "#14523f", "out" = "grey88", "meta" = "white"),
-                    breaks = c("in", "out"), labels = c("In the model", "Left out"),
-                    name = NULL, na.value = "white") +
-  scale_x_discrete(limits = a_cols, position = "top") +
-  scale_y_discrete(labels = a_row) +
-  labs(x = NULL, y = NULL, title = "A · Field labels held constant — do lidar and leaf-off imagery help?")
-
-# ---- Table B: training labels vary, full input set held constant --------------
-b_head <- c("fld" = "Field", "nwi" = "NWI", "nwiextra" = "NWI x2",
-            "nwifield" = "NWI + Field", "flddeg" = "Degraded field")
-
-b_desc <- c("fld"      = "Field- and GIS-\nverified polygons",
-            "nwi"      = "NWI polygons, paired\nto the field patches",
-            "nwiextra" = "NWI polygons,\n~2x the patches",
-            "nwifield" = "Field plus extra\nNWI patches pooled",
-            "flddeg"   = "Field labels thinned to\nNWI wetland prevalence")
-
-b_cells <- design_cells |>
-  filter(lidar == "chmret", spectral == "leafoff") |>
-  mutate(label = factor(label, levels = names(b_head)),
-         row   = paste0("Full inputs\n(", in_channels, " channels)"))
-
-p_b <- ggplot(b_cells, aes(x = label, y = row)) +
-  geom_tile(fill = "#14523f", colour = "white", linewidth = 1.2) +
-  geom_tile(data = filter(b_cells, config == reference),
-            fill = NA, colour = ref_col, linewidth = 1.8) +
-  geom_text(aes(label = b_desc[as.character(label)]),
-            colour = "white", size = 4.6, lineheight = 0.95) +
-  scale_x_discrete(labels = b_head, position = "top") +
-  labs(x = NULL, y = NULL, title = "B · Full input set held constant — which training labels?")
-
-n_seeds <- n_distinct(fact_data$seed)
-
-theme_design <- theme_heatmap +
-  theme(text = element_text(size = 22),
-        legend.position = "bottom",
-        legend.text = element_text(size = rel(0.8), hjust = 0),
-        axis.text.x = element_text(size = rel(0.7), lineheight = 0.9),
-        axis.text.y = element_text(size = rel(0.8), hjust = 1, lineheight = 0.9),
-        plot.title = element_text(size = rel(0.8), face = "bold"),
-        plot.title.position = "plot")
-
-(p_a + theme_design) / (p_b + theme_design) +
-  plot_layout(heights = c(4, 1.6), guides = "collect") +
-  plot_annotation(
-    title = "Factorial design: 8 model configurations",
-    subtitle = paste0("Every model includes terrain, geomorphon and leaf-on NAIP, and is trained at ",
-                      n_seeds, " seeds x {multiclass, binary}.\n",
-                      "Every model is evaluated against field-verified labels, whatever it trained on."),
-    caption = paste0("Orange = the reference model (field labels + lidar + leaf-off): the one model both ",
-                     "tables share, and the\nstarting point for the follow-on studies — patch-count curve (Q6) ",
-                     "and UNet3+ (Q7)."),
-    theme = theme(plot.title = element_text(size = 26, face = "bold"),
-                  plot.subtitle = element_text(size = 15, colour = "grey30", lineheight = 1.1),
-                  plot.caption = element_text(size = 13, colour = "grey35", hjust = 0, lineheight = 1.1),
-                  plot.title.position = "plot",
-                  plot.caption.position = "plot",
-                  legend.position = "bottom",
-                  plot.margin = margin(12, 18, 12, 12))
-  )
-```
-
 
 ### Does leaf off imagery or lidar-derived metrics improve field-based models?
 
@@ -461,6 +359,9 @@ fact_data |>
 ### How do field and NWI models compare across each other
 
 - Heat maps of model metrics: config (rows) x class (cols), one panel per metric.
+- First the absolute seed-mean scores, then the same grid as a **difference from a
+  reference config** -- e.g. multiclass EMW precision for `With Leaf-Off` = 0.54
+  minus 0.49 for `Baseline` = +0.05∆.
 
 ```{r}
 #| label: q3-metric-heatmap
@@ -490,6 +391,75 @@ heat_panel <- function(which_mode) {
 
 heat_panel("Multiclass") / heat_panel("Binary") +
   plot_layout(guides = "collect", heights = c(1, 1))
+```
+
+The same grid as a difference from a reference config. Deltas are computed
+**per seed** and then averaged -- same seed => same test patches, so each seed
+contributes a genuinely paired difference -- and a cell is outlined when all
+`r n_distinct(fact_data$seed)` seeds move the same way, which at n=5 is the
+credible summary rather than a p-value. Each panel gets its own colour scale --
+the binary deltas are roughly an order of magnitude smaller than the multiclass
+ones, so a shared scale would render the binary panel blank.
+
+Two references are worth reading, so `HEAT_REF` switches between them:
+`fld_nolidar_leafon` (the "Baseline" model) reads the **feature** rows as "what
+did lidar and leaf-off buy", but the four NWI rows below it change labels *and*
+features at once, so those are a compound difference. `fld_chmret_leafoff` (the
+"Full Model") isolates the **label gradient**, since every config it is compared
+against there shares the identical 29-channel input set.
+
+```{r}
+#| label: q3-metric-heatmap-delta
+#| fig-width: 18
+#| fig-height: 14
+
+HEAT_REF <- "fld_nolidar_leafon"   # or "fld_chmret_leafoff" for the label gradient
+
+metric_delta <- fact_data |>
+  pivot_longer(c(precision, recall, f1, iou), names_to = "metric", values_to = "value") |>
+  mutate(metric = factor(metric_label[metric], levels = c("Precision", "Recall", "F1", "IoU"))) |>
+  # paired within seed: join each config's score to the reference's same-seed score
+  left_join(
+    fact_data |>
+      filter(config == HEAT_REF) |>
+      pivot_longer(c(precision, recall, f1, iou), names_to = "metric", values_to = "ref") |>
+      mutate(metric = factor(metric_label[metric], levels = c("Precision", "Recall", "F1", "IoU"))) |>
+      select(mode, seed, class, metric, ref),
+    by = c("mode", "seed", "class", "metric")) |>
+  filter(config != HEAT_REF, !is.na(ref)) |>
+  mutate(delta = value - ref) |>
+  group_by(mode, config, class, metric) |>
+  # sign_consistent BEFORE delta is overwritten -- summarise() evaluates in order,
+  # so testing it afterwards would just re-test the mean and mark every cell.
+  summarise(sign_consistent = all(delta > 0) | all(delta < 0),
+            delta = mean(delta),
+            .groups = "drop")
+
+heat_delta_panel <- function(which_mode) {
+  d <- filter(metric_delta, mode == which_mode)
+  # Limits per panel: the binary deltas are an order of magnitude smaller than the
+  # multiclass ones, so a shared scale would render that panel uniformly blank.
+  lim <- max(abs(d$delta), na.rm = TRUE)
+  ggplot(d, aes(x = class, y = fct_rev(config), fill = delta)) +
+    geom_tile(colour = "white", linewidth = 1) +
+    # outline = all seeds moved the same way
+    geom_tile(data = filter(d, sign_consistent), fill = NA, colour = "grey15", linewidth = 1.1) +
+    geom_text(aes(label = sprintf("%+.2f", delta), colour = abs(delta) > lim * 0.55),
+              size = 4.5, show.legend = FALSE) +
+    facet_grid(. ~ metric) +
+    scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "grey20")) +
+    scale_fill_gradient2(low = "#8c510a", mid = "grey96", high = "#14523f", midpoint = 0,
+                         limits = c(-lim, lim),
+                         name = paste0("\u0394 vs ", config_label_1line[[HEAT_REF]],
+                                       "\n(", which_mode, ")")) +
+    scale_y_discrete(labels = config_label_1line) +
+    labs(x = NULL, y = NULL, title = which_mode) +
+    theme_heatmap
+}
+
+# Deliberately NOT guides = "collect": each panel carries its own delta scale.
+heat_delta_panel("Multiclass") / heat_delta_panel("Binary") +
+  plot_layout(heights = c(1, 1))
 ```
 
 
@@ -560,11 +530,17 @@ confusion_plot(binary_dir, "Binary", text_size = 5.5)
 ```{r}
 #| label: q5-shap-load
 
-band_order <- c("DEM", "slope_local", "Geomorph_local", "flowacc", "twi",
+# The v3 predictor set: 20 bands -> 29 channels. TPI_local / meanc_local /
+# dmv_local are v3 additions (v2 had 17 bands), so this list is longer than the
+# v2 notebook's. Order = terrain, geomorphon, lidar structure, leaf-on, leaf-off.
+band_order <- c("DEM", "slope_local", "TPI_local", "meanc_local", "dmv_local",
+                "Geomorph_local", "flowacc", "twi",
                 "CHM", "pct_below_1m", "pct_1m_to_5m", "pct_above_5m",
                 "r", "g", "b", "nir", "r_lo", "g_lo", "b_lo", "nir_lo")
 
-band_label <- c("DEM" = "DEM", "slope_local" = "Slope", "Geomorph_local" = "Geomorphons",
+band_label <- c("DEM" = "DEM", "slope_local" = "Slope", "TPI_local" = "TPI",
+                "meanc_local" = "Mean curvature", "dmv_local" = "Deviation from\nmean elevation",
+                "Geomorph_local" = "Geomorphons",
                 "flowacc" = "Flow accum.", "twi" = "TWI",
                 "CHM" = "CHM", "pct_below_1m" = "% returns < 1 m",
                 "pct_1m_to_5m" = "% returns 1-5 m", "pct_above_5m" = "% returns > 5 m",
@@ -629,7 +605,18 @@ value order 1-10):
 geomorph_forms <- c("flat", "peak", "ridge", "shoulder", "spur",
                     "slope", "hollow", "footslope", "valley", "pit")
 
-geomorph_shap <- bind_rows(
+# dl_09b_shap_geomorph_export.py has to be re-run per results root; skip the
+# panel rather than fail the render if v3's CSVs are not there yet.
+geomorph_csv <- file.path(c(multi_dir, binary_dir), "analysis/shap_geomorph_channels.csv")
+have_geomorph <- all(file.exists(geomorph_csv))
+if (!have_geomorph) {
+  cat("shap_geomorph_channels.csv not found under\n  ",
+      paste(geomorph_csv, collapse = "\n   "),
+      "\nRun: python Python_Code_Analysis/DL_Pipeline_v2/dl_09b_shap_geomorph_export.py",
+      "--results-dir Models/factorial_results_v3/<mode>\n")
+}
+
+geomorph_shap <- if (!have_geomorph) NULL else bind_rows(
   read.csv(file.path(multi_dir,  "analysis/shap_geomorph_channels.csv")) |> mutate(mode = "Multiclass"),
   read.csv(file.path(binary_dir, "analysis/shap_geomorph_channels.csv")) |> mutate(mode = "Binary")
 ) |>
@@ -642,7 +629,7 @@ geomorph_shap <- bind_rows(
          config = factor(config, levels = config_order),
          geomorphon_form = factor(geomorphon_form, levels = rev(geomorph_forms)))
 
-geomorph_shap |>
+if (have_geomorph) geomorph_shap |>
   ggplot(aes(x = config, y = geomorphon_form, fill = share)) +
     geom_tile(colour = "white", linewidth = 1) +
     geom_text(aes(label = percent(share, accuracy = 1), colour = share > 0.20),
@@ -656,89 +643,28 @@ geomorph_shap |>
 ```
 
 
-### Does the number of patches matter for model accuracy
-
-- F1, IoU, Precision, Recall graphs across the patch numbers input into the model
-- Include binary and multiclass stacked graphs
-- x-axis is the REALIZED training-set size (from `training_log.json`), points are seeds, lines are seed means
-- The `n500` level is dropped: the field-anchored split leaves only ~440-510 training patches, so `n500` realizes essentially the same size as `full` and the two levels overlap.
-
-```{r}
-#| label: q6-patchcurve
-#| fig-width: 16
-#| fig-height: 16
-
-patchcurve <- bind_rows(
-  read.csv("../Models/results_patchcurve_v2/multiclass/analysis/patchcurve_long.csv") |> mutate(mode = "Multiclass"),
-  read.csv("../Models/results_patchcurve_v2/binary/analysis/patchcurve_long.csv")     |> mutate(mode = "Binary")
-) |>
-  filter(level != "500") |>   # n500 == full given the ~440-510 patch pool cap
-  mutate(mode = factor(mode, levels = c("Multiclass", "Binary")))
-
-pc_class <- patchcurve |>
-  pivot_longer(matches("^(iou|f1|precision|recall)_"),
-               names_pattern = "^(iou|f1|precision|recall)_(.+)$",
-               names_to = c("metric", "class"), values_to = "value") |>
-  filter(!is.na(value)) |>   # bind_rows pads the other mode's class columns with NA
-  mutate(metric = factor(metric_label[metric], levels = c("Precision", "Recall", "F1", "IoU")),
-         class  = factor(class, levels = class_order))
-
-# the realized train count varies a little across seeds within a level,
-# so average x and y per level for the mean line
-pc_class_mean <- pc_class |>
-  group_by(mode, metric, class, level) |>
-  summarise(train_patches = mean(train_patches), value = mean(value), .groups = "drop")
-
-pc_class |>
-  ggplot(aes(x = train_patches, y = value, colour = class)) +
-    geom_point(size = 3, alpha = 0.4) +
-    geom_line(data = pc_class_mean, linewidth = 1.2) +
-    geom_point(data = pc_class_mean, size = 4) +
-    facet_grid(metric ~ mode) +
-    scale_colour_manual(values = class_color) +
-    labs(x = "Realized training patches", y = NULL) +
-    theme_param
-```
-
-Model-level curve (macro metrics):
-
-```{r}
-#| label: q6-patchcurve-macro
-#| fig-width: 16
-#| fig-height: 8
-
-pc_macro <- patchcurve |>
-  pivot_longer(c(macro_f1, mean_iou, overall_accuracy), names_to = "metric", values_to = "value") |>
-  mutate(metric = factor(metric_label[metric], levels = c("Macro F1", "Mean IoU", "Overall accuracy")))
-
-pc_macro_mean <- pc_macro |>
-  group_by(mode, metric, level) |>
-  summarise(train_patches = mean(train_patches), value = mean(value), .groups = "drop")
-
-pc_macro |>
-  ggplot(aes(x = train_patches, y = value, colour = metric)) +
-    geom_point(size = 3, alpha = 0.4) +
-    geom_line(data = pc_macro_mean, linewidth = 1.2) +
-    geom_point(data = pc_macro_mean, size = 4) +
-    facet_grid(. ~ mode) +
-    scale_colour_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = "#6a4836",
-                                   "Overall accuracy" = "grey40"), name = NULL) +
-    labs(x = "Realized training patches", y = NULL) +
-    theme_param
-```
-
-
 ### Does model architecture matter?
 
-- Three arms on `fld_chmret_leafoff`: U-Net (base grid), UNet3+, and the multi-branch
-  fusion encoder. Same seeds -> same test patches, and bf64/d5 held constant, so the
-  only thing that varies is the architecture.
-- Top: model-level Macro F1; middle: per-class F1 coloured by class; bottom: the
-  FSW<->UPL confusion rates the fusion encoder is meant to attack.
-- Boxplot with seed points overlaid to show the distribution of model runs.
-- Reads `arch_compare_long.csv` (tidy, one row per arch x seed), so adding a fourth
-  arm to `dl_08b_aggregate_patchcurve.py --arch-dir` needs no change here beyond a
-  colour. Arms absent from the CSV are dropped silently.
+Three arms, all on `fld_chmret_leafoff` (the 29-channel full feature set), both
+modes, the same 5 seeds, and bf64/d5/50-epochs held constant -- so the only thing
+that varies is the network. No arm is pre-trained: the v2 arms were 26-channel
+runs on the old pool and are not comparable, so all three were retrained for v3.
+
+| Arm | What it changes | Results root |
+|---|---|---|
+| **U-Net** | the reference: residual blocks + SE attention | `Models/factorial_results_v3/<mode>/fld_chmret_leafoff/` |
+| **UNet3+** | full-scale skips: every decoder node sees every encoder scale | `Models/results_arch_v3/<mode>/<config>_unet3plus/` |
+| **mbfusion** | one encoder per input modality, fused by a per-pixel softmax gate at all 6 scales, into a decoder bit-identical to the U-Net's | `Models/results_arch_fusion_v3/<mode>/<config>_mbfusion/` |
+
+Figure layout, per mode: model-level Macro F1 and Mean IoU on top; per-class F1
+coloured by class in the middle; the FSW/UPL confusion rates the fusion encoder
+is specifically meant to attack on the bottom (multiclass only -- binary has no
+FSW, so `dl_08b` omits those columns rather than writing zeros). Boxplot with the
+five seed points overlaid, since at n=5 the spread is the story.
+
+Everything reads `arch_compare_long.csv` (tidy, one row per arch x seed), so a
+fourth arm added to `dl_08b_aggregate_patchcurve.py --arch-dir` needs nothing here
+beyond a display name and a colour. Arms absent from the CSV drop out silently.
 
 ```{r}
 #| label: q7-arch-data
@@ -788,12 +714,16 @@ arch_class <- arch_metrics |>
 arch_alpha <- setNames(seq(1, 0.4, length.out = length(ARCH_LEVELS)), ARCH_LEVELS)
 
 arch_fig <- function(m) {
+  # Macro F1 and Mean IoU side by side: F1 is the headline, IoU is the stricter
+  # read and the one the factorial's own summary tables lead with.
   macro <- arch_metrics |>
-    filter(metric == "macro_f1", mode == m) |>
+    filter(metric %in% c("macro_f1", "mean_iou"), mode == m) |>
+    mutate(metric = factor(metric_label[metric], levels = c("Macro F1", "Mean IoU"))) |>
     ggplot(aes(x = arch, y = value, fill = arch)) +
       box_jitter(point_size = 4) +
+      facet_wrap(~ metric, scales = "free_y") +
       scale_fill_manual(values = arch_color, name = NULL) +
-      labs(x = NULL, y = "Macro F1", title = paste0(m, ": model-level Macro F1")) +
+      labs(x = NULL, y = NULL, title = paste0(m, ": model-level accuracy")) +
       theme_param
 
   cls <- arch_class |>
@@ -812,13 +742,15 @@ arch_fig <- function(m) {
   heights <- c(1, 1.4)
 
   # Confusion panel: multiclass only -- binary has no FSW, so dl_08b omits the
-  # conf_ columns there rather than writing zeros.
-  conf <- arch_metrics |> filter(mode == m, str_detect(metric, "^conf_.*_as_"))
+  # conf_ columns there rather than writing zeros. `_swap` is the symmetric total
+  # (both directions over both classes' pixels), so it moves less than either leg.
+  conf_label <- c(conf_FSW_as_UPL   = "True FSW -> predicted UPL",
+                  conf_UPL_as_FSW   = "True UPL -> predicted FSW",
+                  conf_FSW_UPL_swap = "FSW <-> UPL swap (both directions)")
+  conf <- arch_metrics |> filter(mode == m, metric %in% names(conf_label))
   if (nrow(conf) > 0) {
     conf_p <- conf |>
-      mutate(metric = recode(metric,
-                             conf_FSW_as_UPL = "True FSW -> predicted UPL",
-                             conf_UPL_as_FSW = "True UPL -> predicted FSW")) |>
+      mutate(metric = factor(conf_label[metric], levels = conf_label[names(conf_label)])) |>
       ggplot(aes(x = arch, y = value, fill = arch)) +
         box_jitter(point_size = 4) +
         facet_wrap(~ metric, scales = "free_y") +
@@ -836,6 +768,23 @@ arch_fig <- function(m) {
 
 arch_fig("Multiclass")
 arch_fig("Binary")
+```
+
+Seed-mean scores per arm, the table behind the boxplots:
+
+```{r}
+#| label: q7-arch-summary
+
+arch_metrics |>
+  filter(metric %in% c("macro_f1", "mean_iou", "overall_accuracy") |
+         str_detect(metric, "^(f1|iou)_") | str_detect(metric, "^conf_")) |>
+  group_by(mode, metric, arch) |>
+  summarise(mean = mean(value), sd = sd(value), .groups = "drop") |>
+  mutate(cell = sprintf("%.3f (%.3f)", mean, sd)) |>
+  select(mode, metric, arch, cell) |>
+  pivot_wider(names_from = arch, values_from = cell) |>
+  arrange(mode, metric) |>
+  knitr::kable(caption = "Seed mean (SD) per architecture, n = 5 seeds")
 ```
 
 Paired per-seed contrasts against the baseline arm. Same seed => same test patches,
@@ -879,50 +828,348 @@ read_arch_csv("arch_cost.csv") |>
 
 ### What do the fusion gates attend to?
 
-`dl_11_export_gates.py` writes one `.npz` per held-out patch under
+`dl_11_export_gates.py` writes one `.npz` per held-out field patch under
 `<cell>/seed<k>/gates/`, holding the per-scale softmax gate weights (one channel
-per branch, summing to 1 at every pixel) plus a `gate_summary.json` of the means.
+per branch, summing to 1 at every pixel, stored float16) plus a
+`gate_summary.json` of the per-branch means. Eight patches per cell x 5 seeds x
+2 modes, the same held-out patches the cell was scored on.
 
 **Read these as spatial patterns within a branch, not as a cross-branch ranking.**
-A branch's mean gate weight is confounded by its channel width and by what the
-projection layer does downstream, so "terrain averages 0.31" is provenance, not
-importance. What is interpretable: where within a scene one branch's weight rises
-relative to its own average, and whether the gates stay mixed (entropy near
-log(n_branch)) rather than collapsing onto one branch.
+After gating, `proj` is a 1x1 conv, so the decoder sees `sum_i W_i(f_i * g_i)`:
+the gate is a spatial scalar but `W_i` is a learned linear map with its own
+magnitude, and GroupNorm equalizes the features, not the projection weights. So a
+branch with modest gates and large weights can still dominate. What is
+interpretable is (a) where within a scene a branch's weight rises relative to its
+*own* average, and (b) whether the gates stay mixed rather than collapsing onto
+one branch. Overall branch importance comes from SHAP, not from here.
 
 ```{r}
-#| label: q8-gates
+#| label: q8-gate-reader
 
-gate_files <- Sys.glob(file.path(arch_dir_base, "*", "*_mbfusion", "seed*",
-                                 "gates", "gate_summary.json"))
+# .npy / .npz reader in base R. np.savez_compressed writes a deflate ZIP of .npy
+# members and dl_11 stores gates as float16, so utils::unzip handles the container
+# and the half-float decode below handles the payload -- no numpy/reticulate.
+# A 65536-entry lookup turns the uint16 -> double conversion into an index.
+HALF_LUT <- local({
+  h <- 0:65535
+  s <- bitwAnd(bitwShiftR(h, 15L), 1L)
+  e <- bitwAnd(bitwShiftR(h, 10L), 0x1FL)
+  m <- bitwAnd(h, 0x3FFL)
+  v <- ifelse(e == 0L,  2^-14 * (m / 1024),
+       ifelse(e == 31L, ifelse(m == 0L, Inf, NaN), 2^(e - 15L) * (1 + m / 1024)))
+  ifelse(s == 1L, -v, v)
+})
 
-if (length(gate_files) == 0) {
-  cat("No gate exports found -- run dl_11_export_gates.py and rsync the .npz back.\n")
+read_npy <- function(path) {
+  con <- file(path, "rb"); on.exit(close(con))
+  stopifnot(rawToChar(readBin(con, "raw", 6L)[2:6]) == "NUMPY")
+  ver  <- as.integer(readBin(con, "raw", 2L))
+  hlen <- if (ver[1] >= 2L) readBin(con, "integer", 1L, size = 4L, endian = "little")
+          else readBin(con, "integer", 1L, size = 2L, endian = "little", signed = FALSE)
+  hdr   <- rawToChar(readBin(con, "raw", hlen))
+  descr <- str_match(hdr, "'descr':\\s*'([^']+)'")[, 2]
+  dims  <- str_trim(str_split(str_match(hdr, "'shape':\\s*\\(([^)]*)\\)")[, 2], ",")[[1]])
+  shape <- as.integer(dims[nzchar(dims)])
+  n     <- prod(shape)
+  vals  <- switch(descr,
+    "<f2" = HALF_LUT[readBin(con, "integer", n, size = 2L, endian = "little", signed = FALSE) + 1L],
+    "<f4" = readBin(con, "double", n, size = 4L, endian = "little"),
+    "<f8" = readBin(con, "double", n, size = 8L, endian = "little"),
+    stop("unsupported .npy dtype: ", descr))
+  # numpy is row-major, R is column-major: fill the reversed shape, then permute
+  # back so the array indexes as [branch, row, col].
+  aperm(array(vals, dim = rev(shape)), rev(seq_along(shape)))
+}
+
+read_npz <- function(path, members = NULL) {
+  tmp <- file.path(tempdir(), paste0("npz_", basename(path)))
+  dir.create(tmp, showWarnings = FALSE, recursive = TRUE)
+  on.exit(unlink(tmp, recursive = TRUE))
+  files <- unzip(path, exdir = tmp)
+  names(files) <- tools::file_path_sans_ext(basename(files))
+  if (!is.null(members)) files <- files[intersect(members, names(files))]
+  map(files, read_npy)
+}
+
+# MOD_CLASS from the patch a gate raster came from, as a [row, col] matrix on the
+# same grid as level0. Labels on disk are always the multiclass codes -- the
+# binary collapse happens in the dataset -- so binary cells get the same 4 classes.
+patch_labels <- function(stem) {
+  f <- file.path(patch_dir, paste0(stem, ".tif"))
+  if (!file.exists(f)) return(NULL)
+  r  <- terra::rast(f)
+  lb <- r[[which(names(r) == "MOD_CLASS")]]
+  matrix(as.vector(terra::values(lb)), nrow = nrow(lb), ncol = ncol(lb), byrow = TRUE)
+}
+
+as_tiles <- function(m) {
+  expand_grid(row = seq_len(nrow(m)), col = seq_len(ncol(m))) |>
+    mutate(value = as.vector(t(m)), x = col, y = row)
+}
+```
+
+```{r}
+#| label: q8-gate-cells
+
+gate_summaries <- Sys.glob(file.path(arch_dir_base, "*", "*_mbfusion", "seed*",
+                                     "gates", "gate_summary.json"))
+have_gates <- length(gate_summaries) > 0
+
+if (!have_gates) {
+  cat("No gate exports found under", arch_dir_base,
+      "\nRun dl_11_export_gates.py on each mbfusion cell and rsync the gates/ dirs back.\n")
 } else {
-  gate_means <- map_dfr(gate_files, function(f) {
-    js <- fromJSON(f, simplifyVector = FALSE)
-    seed <- str_extract(f, "seed\\d+")
-    mode <- if (str_detect(f, "/binary/")) "Binary" else "Multiclass"
-    map_dfr(names(js$per_scale), function(sc) {
-      tibble(mode = mode, seed = seed, scale = sc,
-             branch = names(js$per_scale[[sc]]),
-             mean_gate = as.numeric(unlist(js$per_scale[[sc]])))
-    })
-  }) |>
-    mutate(mode  = factor(mode, levels = c("Multiclass", "Binary")),
-           scale = factor(scale, levels = unique(scale)))
+  gate_cells <- tibble(summary_file = gate_summaries) |>
+    mutate(js       = map(summary_file, ~ fromJSON(.x, simplifyVector = TRUE)),
+           mode     = factor(str_to_title(map_chr(js, "mode")),
+                             levels = c("Multiclass", "Binary")),
+           seed     = map_int(js, ~ as.integer(.x$seed)),
+           branches = map(js, "branches"),
+           gate_dir = dirname(summary_file))
 
-  gate_means |>
-    ggplot(aes(x = scale, y = mean_gate, colour = branch, group = branch)) +
-      stat_summary(fun = mean, geom = "line", linewidth = 1) +
-      stat_summary(fun = mean, geom = "point", size = 3) +
-      geom_jitter(width = 0.08, alpha = 0.35, size = 2) +
-      facet_wrap(~ mode) +
-      scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
-      labs(x = "Encoder scale (0 = full resolution)", y = "Mean gate weight",
-           colour = NULL,
-           title = "Fusion gate weight by branch and scale",
-           subtitle = "Seed points jittered; compare a branch across scales, not branches to each other") +
+  # Branch order is the checkpoint's own gate-channel order, taken from the JSON.
+  branch_levels <- gate_cells$branches[[1]]
+  branch_label  <- c(terrain = "Terrain", lidar = "Lidar",
+                     leafon  = "NAIP leaf-on", leafoff = "NAIP leaf-off")
+  branch_color  <- c(Terrain = "#6a4836", Lidar = "#81b14f",
+                     `NAIP leaf-on` = "#388C73", `NAIP leaf-off` = "#B07AA1")
+  BRANCHES  <- unname(branch_label[branch_levels])
+  n_branch  <- length(branch_levels)
+  # MOD_CLASS integer codes -> names, per dl_band_config.json
+  mod_class <- c(`0` = "EMW", `1` = "FSW", `2` = "SSW", `3` = "UPL")
+
+  cat(nrow(gate_cells), "mbfusion cells with gate exports;",
+      n_branch, "branches:", paste(BRANCHES, collapse = ", "), "\n")
+}
+```
+
+Mean gate weight per branch and scale, from `gate_summary.json`. The dashed line
+is the uniform share (`1/n_branch`). **This is provenance, not a ranking** -- read
+each branch's own trajectory across scales, not the branches against each other.
+
+```{r}
+#| label: q8-gate-means
+#| fig-width: 16
+#| fig-height: 7
+#| eval: !expr exists("gate_cells")
+
+gate_means <- pmap_dfr(list(gate_cells$js, gate_cells$mode, gate_cells$seed),
+  function(js, md, sd) {
+    imap_dfr(js$mean_gate, function(v, sc)
+      tibble(mode = md, seed = sd, scale = sc,
+             branch = names(v), mean_gate = as.numeric(unlist(v))))
+  }) |>
+  mutate(scale  = factor(scale, levels = paste0("level", 0:5)),
+         branch = factor(unname(branch_label[branch]), levels = BRANCHES))
+
+gate_means |>
+  ggplot(aes(x = scale, y = mean_gate, colour = branch, group = branch)) +
+    geom_hline(yintercept = 1 / n_branch, linetype = 2, colour = "grey55") +
+    geom_jitter(width = 0.10, alpha = 0.30, size = 2) +
+    stat_summary(fun = mean, geom = "line", linewidth = 1.2) +
+    stat_summary(fun = mean, geom = "point", size = 4) +
+    facet_wrap(~ mode) +
+    scale_colour_manual(values = branch_color, name = NULL) +
+    scale_y_continuous(labels = label_percent(accuracy = 1)) +
+    labs(x = "Encoder scale (level0 = full resolution, level5 = bottleneck)",
+         y = "Mean gate weight",
+         subtitle = paste0("Seed points jittered; dashed line = uniform share (1/",
+                           n_branch, "). Compare a branch across scales, not branches to each other.")) +
+    theme_param
+```
+
+The collapse check. Per-pixel gate entropy `-sum g log g`, averaged over every
+exported pixel: `log(n_branch)` = `r if (exists("n_branch")) round(log(n_branch), 3) else NA`
+means a perfectly even blend, 0 means the gate has gone hard onto a single branch.
+This is the one number that says whether the fusion is actually fusing.
+
+```{r}
+#| label: q8-gate-pixels
+#| cache: true
+#| eval: !expr exists("gate_cells")
+
+# Walks every .npz once (~80 files, ~30-60 s) and returns both pixel-level
+# summaries, so the float16 decode is paid for a single time.
+gate_pixels <- pmap_dfr(list(gate_cells$gate_dir, gate_cells$mode, gate_cells$seed),
+  function(dir, md, sd) {
+    map_dfr(Sys.glob(file.path(dir, "*.npz")), function(f) {
+      stem <- tools::file_path_sans_ext(basename(f))
+      lv   <- read_npz(f, members = paste0("level", 0:5))
+
+      # (a) per-scale mean gate entropy
+      ent <- imap_dfr(lv, function(a, nm) {
+        g <- pmax(a, 1e-6)   # float16 stores exact zeros; keep log() finite
+        tibble(stat = "entropy", scale = nm,
+               entropy = mean(colSums(-g * log(g), dims = 1)))
+      })
+
+      # (b) level0 gate conditioned on the true class -- level0 is 256x256, the
+      # same grid as the patch, so gate pixels and label pixels line up 1:1.
+      labm <- patch_labels(stem)
+      cls  <- if (is.null(labm)) NULL else {
+        code <- as.vector(t(labm))
+        map_dfr(seq_along(branch_levels), function(k)
+          tibble(branch = branch_levels[k], code = code, g = as.vector(t(lv$level0[k, , ]))) |>
+            filter(code %in% as.integer(names(mod_class))) |>
+            group_by(branch, code) |>
+            summarise(mean_gate = mean(g), n = n(), .groups = "drop")) |>
+          mutate(stat = "byclass")
+      }
+
+      bind_rows(ent, cls) |> mutate(mode = md, seed = sd, patch = stem)
+    })
+  })
+```
+
+```{r}
+#| label: q8-gate-entropy
+#| fig-width: 16
+#| fig-height: 7
+#| eval: !expr exists("gate_pixels")
+
+gate_pixels |>
+  filter(stat == "entropy") |>
+  mutate(scale = factor(scale, levels = paste0("level", 0:5))) |>
+  ggplot(aes(x = scale, y = entropy)) +
+    geom_hline(yintercept = log(n_branch), linetype = 2, colour = "grey55") +
+    geom_jitter(aes(colour = factor(seed)), width = 0.12, alpha = 0.45, size = 2) +
+    stat_summary(fun = mean, geom = "line", aes(group = 1), linewidth = 1.2) +
+    stat_summary(fun = mean, geom = "point", size = 4) +
+    facet_wrap(~ mode) +
+    scale_colour_grey(start = 0.1, end = 0.7, name = "Seed") +
+    scale_y_continuous(limits = c(0, log(n_branch) * 1.05)) +
+    labs(x = "Encoder scale (level0 = full resolution, level5 = bottleneck)",
+         y = "Mean per-pixel gate entropy",
+         subtitle = paste0("Dashed line = log(", n_branch, ") = ", round(log(n_branch), 3),
+                           ", a perfectly even blend. 0 = the gate has gone hard onto one branch.",
+                           "\nPoints are patches, coloured by seed; line is the mean.")) +
+    theme_param
+```
+
+Where each branch is up-weighted, by the true class of the pixel. Boxes are the
+**deviation from that branch's own mean gate** over the same pixels, in percentage
+points, so every box is a legitimate within-branch spatial comparison. Positive =
+the model leans on that modality more than usual over that class.
+
+Each panel uses the class set its own models were trained and scored on: the
+multiclass row keeps EMW/FSW/SSW/UPL, the binary row shows WET/UPL. The patches on
+disk always carry the four `MOD_CLASS` codes -- the collapse happens in the dataset
+-- so the binary row is built by pooling the EMW/FSW/SSW **pixels** into WET,
+weighted by pixel count, before taking the deviation. Relabelling the three classes
+without pooling would draw three separate boxes all called "WET" and would not be
+the quantity the binary model actually sees.
+
+```{r}
+#| label: q8-gate-class
+#| fig-width: 16
+#| fig-height: 8
+#| eval: !expr exists("gate_pixels")
+
+gate_class <- gate_pixels |>
+  filter(stat == "byclass") |>
+  mutate(class = unname(mod_class[as.character(code)]),
+         # binary cells are scored on WET/UPL, so pool the wetland pixels rather
+         # than relabelling three classes "WET". `n` is the pixel count, so the
+         # weighted mean below does the patch-average and the class-collapse at once.
+         class = if_else(mode == "Binary" & class %in% binary_wet, "WET", class)) |>
+  group_by(mode, seed, branch, class) |>
+  summarise(mean_gate = weighted.mean(mean_gate, n), n = sum(n), .groups = "drop") |>
+  group_by(mode, seed, branch) |>
+  mutate(delta = mean_gate - weighted.mean(mean_gate, n)) |>   # vs the branch's own mean
+  ungroup() |>
+  mutate(class  = factor(class, levels = class_order),
+         branch = factor(unname(branch_label[branch]), levels = BRANCHES))
+
+# facet_grid shares the x scale down a column, so the 4-class and 2-class rows
+# have to be separate plots stacked by patchwork.
+gate_class_fig <- function(m) {
+  gate_class |>
+    filter(mode == m) |>
+    ggplot(aes(x = class, y = delta, fill = class)) +
+      geom_hline(yintercept = 0, colour = "grey40") +
+      box_jitter(point_size = 3) +
+      facet_grid(. ~ branch) +
+      scale_fill_manual(values = class_color, guide = "none") +
+      scale_y_continuous(labels = label_percent(accuracy = 1)) +
+      labs(x = NULL, y = "Gate weight minus\nthe branch's own mean", title = m) +
       theme_param
+}
+
+gate_class_fig("Multiclass") / gate_class_fig("Binary") +
+  plot_annotation(
+    caption = "Points are seeds. Positive = that modality is up-weighted over that class.",
+    theme = theme(plot.caption = element_text(size = 14, colour = "grey35", hjust = 0)))
+```
+
+Finally the maps themselves, for one seed: the field labels beside each branch's
+full-resolution (level0) gate, standardized **within branch** to SD units so the
+panels show spatial pattern rather than the branch's overall level.
+
+```{r}
+#| label: q8-gate-maps
+#| fig-width: 16
+#| fig-height: 9
+#| eval: !expr exists("gate_cells")
+
+MAP_MODE <- "Multiclass"   # which arm's cells to draw
+MAP_SEED <- 0
+MAP_N    <- 2              # patches to draw (8 are exported per cell)
+
+theme_map <- theme_param +
+  theme(axis.text = element_blank(), axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        plot.title = element_text(size = rel(0.75), face = "bold"),
+        plot.subtitle = element_text(size = rel(0.6), colour = "grey35"))
+
+gate_patch_row <- function(gate_dir, stem, level = "level0") {
+  a    <- read_npz(file.path(gate_dir, paste0(stem, ".npz")), members = level)[[level]]
+  labm <- patch_labels(stem)
+
+  p_lab <- as_tiles(labm) |>
+    mutate(class = factor(mod_class[as.character(value)], levels = class_order)) |>
+    ggplot(aes(x, y, fill = class)) +
+      geom_raster() +
+      # drop = FALSE keeps one shared legend across rows with different classes
+      scale_fill_manual(values = class_color, na.value = "grey90", name = NULL,
+                        na.translate = FALSE, drop = FALSE,
+                        limits = names(mod_class) |> (\(k) unname(mod_class[k]))()) +
+      scale_y_reverse(expand = c(0, 0)) + scale_x_continuous(expand = c(0, 0)) +
+      coord_fixed() +
+      labs(x = NULL, y = NULL, title = "Field labels",
+           subtitle = str_trunc(stem, 46)) +
+      theme_map
+
+  p_gate <- imap_dfr(setNames(seq_along(branch_levels), branch_levels),
+                     function(k, bn) as_tiles(a[k, , ]) |> mutate(branch = bn)) |>
+    group_by(branch) |>
+    mutate(z = (value - mean(value)) / sd(value)) |>
+    ungroup() |>
+    mutate(branch = factor(unname(branch_label[branch]), levels = BRANCHES)) |>
+    ggplot(aes(x, y, fill = z)) +
+      geom_raster() +
+      facet_wrap(~ branch, nrow = 1) +
+      scale_fill_gradient2(low = "#2166ac", mid = "grey96", high = "#b2182b",
+                           midpoint = 0, limits = c(-2.5, 2.5), oob = squish,
+                           name = "SD from the\nbranch's own\nmean gate") +
+      scale_y_reverse(expand = c(0, 0)) + scale_x_continuous(expand = c(0, 0)) +
+      coord_fixed() +
+      labs(x = NULL, y = NULL) +
+      theme_map
+
+  p_lab + p_gate + plot_layout(widths = c(1, 4))
+}
+
+map_cell <- gate_cells |> filter(mode == MAP_MODE, seed == MAP_SEED)
+if (nrow(map_cell) == 0) {
+  cat("No mbfusion cell for", MAP_MODE, "seed", MAP_SEED, "\n")
+} else {
+  stems <- tools::file_path_sans_ext(basename(
+    Sys.glob(file.path(map_cell$gate_dir[1], "*.npz"))))
+  stems <- stems[file.exists(file.path(patch_dir, paste0(stems, ".tif")))]
+  # spread the picks over the exported patches rather than taking the first N,
+  # which would all come from the same HUC12
+  picks <- stems[unique(round(seq(1, length(stems), length.out = min(MAP_N, length(stems)))))]
+  wrap_plots(map(picks, ~ gate_patch_row(map_cell$gate_dir[1], .x)), ncol = 1) +
+    plot_layout(guides = "collect")
 }
 ```
