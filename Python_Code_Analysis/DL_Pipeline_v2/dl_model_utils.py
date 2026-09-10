@@ -29,8 +29,6 @@ def _extract_hparams(checkpoint: dict) -> dict:
         "base_filters": hparams.get("base_filters"),
         "depth": hparams.get("depth"),
         "dropout": hparams.get("dropout"),
-        "use_aspp": hparams.get("use_aspp"),
-        "aspp_rates": hparams.get("aspp_rates"),
         "cat_channels": hparams.get("cat_channels"),
         "deep_supervision": hparams.get("deep_supervision"),
         # mbfusion: REQUIRED to rebuild the net. Config-dependent (a nolidar cell
@@ -87,8 +85,6 @@ def export_safetensors(
     base_filters: Optional[int] = None,
     depth: Optional[int] = None,
     dropout: Optional[float] = None,
-    use_aspp: Optional[bool] = None,
-    aspp_rates: Optional[tuple] = None,
     arch: Optional[str] = None,
     cat_channels: Optional[int] = None,
     deep_supervision: Optional[bool] = None,
@@ -102,7 +98,7 @@ def export_safetensors(
     Args:
         ckpt_path: Path to the .ckpt file
         output_dir: Directory for output files (default: same as ckpt_path)
-        in_channels..aspp_rates: Manual overrides; used when checkpoint
+        in_channels..dropout: Manual overrides; used when checkpoint
             lacks hyper_parameters (pre-hparam checkpoints)
         branch_indices, branch_widths, gate_kernel: [mbfusion] Manual overrides
             for the branch map. Required in the sidecar for mbfusion checkpoints
@@ -137,8 +133,6 @@ def export_safetensors(
         "base_filters": base_filters,
         "depth": depth,
         "dropout": dropout,
-        "use_aspp": use_aspp,
-        "aspp_rates": aspp_rates,
         "cat_channels": cat_channels,
         "deep_supervision": deep_supervision,
     }
@@ -161,10 +155,6 @@ def export_safetensors(
             f"Pass them manually: e.g. --base-filters 64 --depth 5"
         )
 
-    # Ensure aspp_rates is a list for JSON serialization
-    if hparams.get("aspp_rates") is not None:
-        hparams["aspp_rates"] = list(hparams["aspp_rates"])
-
     # Normalize the branch map for JSON (index lists, int widths). Branch ORDER is
     # significant -- it fixes the gate's channel order -- and dict order survives
     # the JSON round-trip, so it is preserved rather than sorted.
@@ -180,10 +170,9 @@ def export_safetensors(
     # Set defaults for optional params.
     # NB: setdefault would be wrong -- _extract_hparams inserts EVERY key, using
     # None for the ones an arch does not use, so the key is present and
-    # setdefault never fires. That wrote "aspp_rates": null into the sidecar and
-    # blew up on load with tuple(None). Fill on None, not on absence.
-    for key, default in (("arch", "unet"), ("dropout", 0.0), ("use_aspp", False),
-                         ("aspp_rates", [6, 12, 18]), ("cat_channels", 64),
+    # setdefault never fires, writing a null into the sidecar that then blows up
+    # on load. Fill on None, not on absence.
+    for key, default in (("arch", "unet"), ("dropout", 0.0), ("cat_channels", 64),
                          ("deep_supervision", False), ("gate_kernel", 3)):
         if hparams.get(key) is None:
             hparams[key] = default
@@ -245,10 +234,8 @@ def _load_from_safetensors(
         base_filters=meta["base_filters"],
         depth=meta["depth"],
         dropout=meta.get("dropout") or 0.0,
-        use_aspp=bool(meta.get("use_aspp")),
         # `or` (not a .get default) so an explicit null in an older sidecar
-        # still falls back instead of raising tuple(None).
-        aspp_rates=tuple(meta.get("aspp_rates") or (6, 12, 18)),
+        # still falls back rather than reaching the constructor.
         cat_channels=meta.get("cat_channels") or 64,
         deep_supervision=bool(meta.get("deep_supervision")),
         branch_indices=meta.get("branch_indices"),
@@ -353,8 +340,6 @@ def load_model(
     base_filters: int = 32,
     depth: int = 4,
     dropout: float = 0.0,
-    use_aspp: bool = False,
-    aspp_rates: tuple = (6, 12, 18),
     arch: str = "unet",
     cat_channels: int = 64,
     deep_supervision: bool = False,
@@ -381,8 +366,6 @@ def load_model(
         base_filters: Base filter count (fallback for legacy checkpoints)
         depth: Network depth (fallback for legacy checkpoints)
         dropout: Dropout rate (fallback for legacy checkpoints)
-        use_aspp: Whether to add ASPP module (fallback for legacy checkpoints)
-        aspp_rates: Dilation rates for ASPP (fallback for legacy checkpoints)
     """
     model_path = Path(model_path)
 
@@ -424,11 +407,6 @@ def load_model(
             detected.append(f"depth={depth}")
         if hp.get("dropout") is not None:
             dropout = hp["dropout"]
-        if hp.get("use_aspp") is not None:
-            use_aspp = hp["use_aspp"]
-            detected.append(f"aspp={use_aspp}")
-        if hp.get("aspp_rates") is not None:
-            aspp_rates = tuple(hp["aspp_rates"])
         if hp.get("branch_indices") is not None:
             branch_indices = hp["branch_indices"]
             detected.append(f"branches={len(branch_indices)}")
@@ -446,8 +424,6 @@ def load_model(
         base_filters=base_filters,
         depth=depth,
         dropout=dropout,
-        use_aspp=use_aspp,
-        aspp_rates=aspp_rates,
         cat_channels=cat_channels,
         deep_supervision=deep_supervision,
         branch_indices=branch_indices,
@@ -485,10 +461,6 @@ if __name__ == "__main__":
                         help="Override: network depth")
     parser.add_argument("--dropout", type=float, default=None,
                         help="Override: dropout rate")
-    parser.add_argument("--use-aspp", action="store_true", default=None,
-                        help="Override: model uses ASPP")
-    parser.add_argument("--aspp-rates", type=int, nargs="+", default=None,
-                        help="Override: ASPP dilation rates")
     parser.add_argument("--arch", type=str, default=None,
                         help="Override: architecture (unet | unet3plus)")
     parser.add_argument("--cat-channels", type=int, default=None,
@@ -505,8 +477,6 @@ if __name__ == "__main__":
         base_filters=args.base_filters,
         depth=args.depth,
         dropout=args.dropout,
-        use_aspp=args.use_aspp,
-        aspp_rates=tuple(args.aspp_rates) if args.aspp_rates else None,
         arch=args.arch,
         cat_channels=args.cat_channels,
         deep_supervision=args.deep_supervision,

@@ -3,8 +3,6 @@ set -e  # Exit on error
 
 # === CONFIGURATION ===
 ARCH="unet3plus"                # unet | unet3plus
-USE_ASPP=false             # [unet] true to enable ASPP at the bottleneck
-ASPP_RATES="6 12 18"      # [unet] dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for depth=4
 CAT_CHANNELS=64            # [unet3plus] unified channels per skip branch
 DEEP_SUPERVISION=true     # [unet3plus] true to add a loss head per decoder stage + bottleneck
 KFOLD=0                    # 0=disabled, 2+=run k-fold CV instead of single split
@@ -37,12 +35,6 @@ WEIGHT_POWER="0.5"
 WP_FLAG=""
 [ -n "$WEIGHT_POWER" ] && WP_FLAG="--weight-power $WEIGHT_POWER"
 
-# Build optional flags
-ASPP_FLAGS=""
-if [ "$USE_ASPP" = true ]; then
-    ASPP_FLAGS="--use-aspp --aspp-rates $ASPP_RATES"
-fi
-
 # Build architecture flags (only the train step takes these; eval/predict
 # auto-detect the architecture from the checkpoint/sidecar metadata)
 ARCH_FLAGS="--arch $ARCH"
@@ -64,7 +56,6 @@ STATS_PATH=$(python -c "import sys; sys.path.insert(0,'$SCRIPT_DIR'); from dl_ba
 echo "=== NYS Wetlands DL Pipeline (HPC) ==="
 echo "Classification: $CLASS_MODE"
 echo "Architecture: $ARCH (bf=$BASE_FILTERS, depth=$DEPTH)"
-[ "$ARCH" = "unet" ] && [ "$USE_ASPP" = true ] && echo "ASPP: enabled (rates: $ASPP_RATES)"
 [ "$ARCH" = "unet3plus" ] && echo "UNet3+: cat_channels=$CAT_CHANNELS, deep_supervision=$DEEP_SUPERVISION"
 [ "$KFOLD" -ge 2 ] 2>/dev/null && echo "K-Fold CV: $KFOLD folds"
 echo "======================================="
@@ -103,7 +94,6 @@ python $SCRIPT_DIR/dl_04_train_lightning.py \
         --weight-decay 1e-4 \
         --precision "$PRECISION" \
         $ARCH_FLAGS \
-        $ASPP_FLAGS \
         $KFOLD_FLAG
 
 # Skip evaluate/predict steps when running k-fold CV
@@ -139,8 +129,7 @@ python $SCRIPT_DIR/dl_05_evaluate.py \
         --batch-size $BATCH_SIZE \
         --base-filters $BASE_FILTERS \
         --depth $DEPTH \
-        --seed $SEED \
-        $ASPP_FLAGS
+        --seed $SEED
 
 # # Step 4: Predict
 # python $SCRIPT_DIR/dl_06_predict.py \
@@ -152,5 +141,4 @@ python $SCRIPT_DIR/dl_05_evaluate.py \
 #         --overlap 128 \
 #         --base-filters $BASE_FILTERS \
 #         --depth $DEPTH \
-#         --probs \
-#         $ASPP_FLAGS
+#         --probs

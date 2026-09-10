@@ -28,9 +28,6 @@ def build_net(
     base_filters: int = 32,
     depth: int = 4,
     dropout: float = 0.2,
-    # UNet-only
-    use_aspp: bool = False,
-    aspp_rates: tuple = (6, 12, 18),
     # UNet3Plus-only
     cat_channels: int = 64,
     deep_supervision: bool = False,
@@ -44,7 +41,6 @@ def build_net(
     Args:
         arch: One of ARCHITECTURES.
         in_channels, num_classes, base_filters, depth, dropout: Shared params.
-        use_aspp, aspp_rates: Used only by "unet".
         cat_channels, deep_supervision: Used only by "unet3plus".
         branch_indices, branch_widths, gate_kernel: Used only by "mbfusion";
             branch_indices/branch_widths are REQUIRED there. For mbfusion the
@@ -58,8 +54,6 @@ def build_net(
             base_filters=base_filters,
             depth=depth,
             dropout=dropout,
-            use_aspp=use_aspp,
-            aspp_rates=aspp_rates,
         )
     if arch == "unet3plus":
         return UNet3Plus(

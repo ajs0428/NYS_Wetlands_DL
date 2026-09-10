@@ -454,7 +454,6 @@ Input (26 ch) -> Residual Encoder (progressive downsampling) -> Bottleneck -> SE
 - **Encoder blocks**: Double Conv-BN-ReLU with residual (shortcut) connections. A 1x1 projection handles channel mismatches. Improves gradient flow through the encoder.
 - **Decoder blocks**: Upsample + skip concatenation + Conv-BN-ReLU + Squeeze-and-Excitation. SE learns to reweight channels after fusing encoder and decoder features.
 - **Bottleneck**: Standard double Conv-BN-ReLU (no residual, no SE).
-- **Optional ASPP**: Atrous Spatial Pyramid Pooling module after the bottleneck (`--use-aspp`). Uses parallel dilated convolutions at multiple rates (default 6/12/18) plus global average pooling to expand the receptive field to ~250m+ at 1m resolution. Off by default for backward compatibility. Use `--aspp-rates 3 6 12` for depth=5 (smaller bottleneck spatial dims).
 
 ### Configuration
 
@@ -537,8 +536,6 @@ python dl_04_train_lightning.py \
 | `--workers` | 4 | DataLoader worker processes (use 0 on macOS if issues arise) |
 | `--seed` | None | Random seed for reproducibility |
 | `--early-stopping` | 15 | Early stopping patience (epochs without improvement) |
-| `--use-aspp` | False | [unet] Add ASPP module at the bottleneck |
-| `--aspp-rates` | `6 12 18` | [unet] Dilation rates for ASPP branches (space-separated) |
 | `--cat-channels` | 64 | [unet3plus] Unified channels per skip branch |
 | `--deep-supervision` | False | [unet3plus] Add a loss head to every decoder stage + bottleneck |
 | `--ce-weight` | 1.0 | Weight for Focal Loss component |
@@ -625,8 +622,6 @@ python dl_05_evaluate.py \
 | `--base-filters` | 32 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
 | `--depth` | 4 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
 | `--seed` | 42 | Must match training seed (same test split) |
-| `--use-aspp` | False | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
-| `--aspp-rates` | `6 12 18` | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
 
 > The architecture itself (`unet` vs `unet3plus`) and its params (`cat_channels`, `deep_supervision`) are read from the checkpoint's hparams / `.meta.json` sidecar — no `--arch` flag is needed when evaluating a `.ckpt` or `.safetensors` model.
 
@@ -670,8 +665,6 @@ python dl_06_predict.py \
 | `--base-filters` | 32 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
 | `--depth` | 4 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
 | `--probs` | False | Also save per-class probability maps |
-| `--use-aspp` | False | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
-| `--aspp-rates` | `6 12 18` | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
 
 > Architecture (`unet`/`unet3plus`) and its params are read from the checkpoint, so a UNet3+ model predicts with the same command — just point `--model` at its checkpoint.
 
@@ -738,7 +731,6 @@ python dl_06b_predict_huc.py \
 | `--patch-size` / `--overlap` | 128 / 64 | Sliding-window size and overlap |
 | `--base-filters` / `--depth` | 32 / 4 | Auto-detected from `.ckpt`/`.safetensors`; fallback for legacy `.pth` |
 | `--probs` | False | Also save per-class probability maps |
-| `--use-aspp` / `--aspp-rates` | False / `6 12 18` | Auto-detected from checkpoint |
 
 Output is named `DLpred_<mode>_cluster_<cluster>_huc_<huc>.tif` under `--out-dir`.
 
@@ -791,7 +783,7 @@ A shell script wrapper (`Shell_Scripts/DL_model_shap_HPC.sh`) runs the analysis 
 | `--n-background` | 50 | Training patches used as the SHAP background distribution |
 | `--n-test` | 20 | Test patches explained |
 | `--crop-size` | 128 | Center-crop each patch to reduce memory (`0` to disable) |
-| `--base-filters`, `--depth`, `--use-aspp`, `--aspp-rates` | — | Fallbacks only; architecture is auto-detected from the checkpoint |
+| `--base-filters`, `--depth` | — | Fallbacks only; architecture is auto-detected from the checkpoint |
 
 ### Outputs
 
@@ -837,10 +829,6 @@ BASE_FILTERS = 32      # 32 for local (M1), 64 for HPC
 DEPTH = 4              # 4 for local, 5 for HPC
 NUM_WORKERS = 4        # Set to 0 if issues on macOS
 SEED = 42
-
-# ASPP at U-Net bottleneck (expands receptive field to ~250m+)
-USE_ASPP = False            # Set True to enable
-ASPP_RATES = (6, 12, 18)   # Dilation rates; use (3, 6, 12) for depth=5
 
 # Loss parameters
 CE_WEIGHT = 0.5        # Weight for Focal Loss component
@@ -1026,7 +1014,6 @@ Two pipeline scripts are provided:
 | BASE_FILTERS | 64 | 128 |
 | DEPTH | 4 | 5 |
 | EPOCHS | 50 | 100 |
-| ASPP_RATES | 6 12 18 | 3 6 12 (for depth=5) |
 | KFOLD | 0 (disabled) | 2 (enabled) |
 
 ### Monitoring Training

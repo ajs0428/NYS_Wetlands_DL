@@ -90,7 +90,7 @@ Run scripts in order: dl_01 -> dl_02 (imported by dl_04) -> dl_03 (imported by d
 
 ## Architecture Details
 - **Selection:** `--arch {unet,unet3plus}` (default `unet`) on train/eval/predict; `dl_model_factory.build_net()` is the single dispatch point. Each arch ignores the other's flags. Architecture + hyperparams are stored in the checkpoint/`.meta.json`/`training_log.json` and auto-detected on load, so eval/predict need no `--arch` for `.ckpt`/`.safetensors`.
-- **U-Net:** Residual blocks + SE attention (depth 4 local / 5 HPC, base filters 32/64). Optional ASPP module at bottleneck (`--use-aspp`) expands receptive field to ~250m+ via parallel dilated convolutions (rates 6/12/18 default; use 3/6/12 for depth=5). Off by default for backward compatibility.
+- **U-Net:** Residual blocks + SE attention (depth 4 local / 5 HPC, base filters 32/64).
 - **UNet3+** (`--arch unet3plus`): full-scale skip connections (each decoder node aggregates all encoder scales + deeper decoder nodes + bottleneck, unified to `--cat-channels` width, default 64 -> decoder nodes are `cat_channels*(depth+1)` wide). Optional `--deep-supervision` adds a loss head per decoder stage + bottleneck; the net returns a list of full-res heads in train mode and a single tensor in eval (`_shared_step` handles both). Reuses U-Net's ConvBlock/SE blocks. ~15M params at bf=32/d4 (~2x the plain U-Net); memory-heavy — prefer `16-mixed` / smaller batch on HPC.
 - **mbfusion** (`--arch mbfusion`): one encoder per input CATEGORY (terrain / lidar / leafon / leafoff), fused at every scale by a per-pixel softmax gate (`BranchFusion`: per-branch GroupNorm → 3x3 gate → weighted concat → 1x1 proj), into a decoder **bit-identical** to the U-Net's. Branch map is derived from `stats["predictor_names"]` in post-one-hot channel space and serialized to the checkpoint — never a CLI knob. 162M params at bf64/d5/29ch (~1.3x U-Net); activation-bound, so prefer `BATCH_SIZE=8`. Gate entropy is logged per scale for collapse monitoring.
 - Input: **29 channels** for the full v3 feature set (20 predictor bands; `Geomorph_local` one-hot expands 1 band to 10 channels). Reduced-band factorial configs are 21 or 25 — `dl_experiment_config.py` is the source of truth. (v2 was 26; older single-model checkpoints may be 31.)
@@ -147,7 +147,7 @@ Run scripts in order: dl_01 -> dl_02 (imported by dl_04) -> dl_03 (imported by d
   2. **Lightning** (`.ckpt`) — includes `hyper_parameters` for architecture auto-detection
   3. **Legacy** (`.pth`) — requires manual `--base-filters`, `--depth`, etc. flags
 - Training auto-exports `.safetensors` alongside `.ckpt`; `load_model()` prefers sibling `.safetensors` when present
-- Architecture params (in_channels, base_filters, depth, dropout, use_aspp, aspp_rates) are stored in Lightning checkpoints and `.meta.json` sidecars
+- Architecture params (in_channels, base_filters, depth, dropout) are stored in Lightning checkpoints and `.meta.json` sidecars
 - Convert existing `.ckpt` files: `python dl_model_utils.py Models/best_model.ckpt --base-filters 64 --depth 5`
 - `dl_model_utils.py` handles all three formats; evaluate and predict scripts work with any format
 

@@ -59,10 +59,10 @@ def _mbfusion_kwargs(arch: str, stats: dict, gate_kernel: int = 3) -> dict:
     }
 
 
-def _arch_label(arch: str, use_aspp: bool, aspp_rates, deep_supervision: bool) -> str:
+def _arch_label(arch: str, deep_supervision: bool) -> str:
     """Human-readable architecture string for logs."""
     if arch == "unet":
-        return "UNet" + (f" + ASPP(rates={aspp_rates})" if use_aspp else "")
+        return "UNet"
     if arch == "unet3plus":
         return "UNet3+" + (" + deep supervision" if deep_supervision else "")
     if arch == "mbfusion":
@@ -245,8 +245,6 @@ class WetlandSegmentationModule(L.LightningModule):
         base_filters: int = 32,
         depth: int = 4,
         dropout: float = 0.0,
-        use_aspp: bool = False,
-        aspp_rates: tuple = (6, 12, 18),
         cat_channels: int = 64,
         deep_supervision: bool = False,
         # MBFusionNet params. Serialized into hyper_parameters because they are
@@ -436,8 +434,6 @@ def train(
     label_smoothing: float = 0.0,
     gradient_clip_val: float = 1.0,
     dropout: float = 0.2,
-    use_aspp: bool = False,
-    aspp_rates: tuple = (6, 12, 18),
     arch: str = "unet",
     cat_channels: int = 64,
     deep_supervision: bool = False,
@@ -475,8 +471,6 @@ def train(
         label_smoothing: Label smoothing factor
         gradient_clip_val: Max gradient norm for clipping (0 = disabled)
         dropout: Spatial dropout rate after bottleneck (0 = disabled)
-        use_aspp: Whether to add ASPP module at U-Net bottleneck
-        aspp_rates: Dilation rates for ASPP branches
     """
     if seed is None:
         seed = int(torch.randint(0, 2**31, (1,)).item())
@@ -502,7 +496,7 @@ def train(
     print(f"{'='*60}")
     print("Wetland Classification Training (Lightning)")
     print(f"{'='*60}")
-    print(f"Architecture: {_arch_label(arch, use_aspp, aspp_rates, deep_supervision)}")
+    print(f"Architecture: {_arch_label(arch, deep_supervision)}")
     print(f"Classification mode: {mode}")
     print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
@@ -540,8 +534,6 @@ def train(
         base_filters=base_filters,
         depth=depth,
         dropout=dropout,
-        use_aspp=use_aspp,
-        aspp_rates=aspp_rates,
         cat_channels=cat_channels,
         deep_supervision=deep_supervision,
         **mb_kwargs,
@@ -556,8 +548,6 @@ def train(
         base_filters=base_filters,
         depth=depth,
         dropout=dropout,
-        use_aspp=use_aspp,
-        aspp_rates=aspp_rates,
         cat_channels=cat_channels,
         deep_supervision=deep_supervision,
         **mb_kwargs,
@@ -735,8 +725,6 @@ def train(
             "class_names": class_names,
             "base_filters": base_filters,
             "depth": depth,
-            "use_aspp": use_aspp,
-            "aspp_rates": list(aspp_rates),
             "cat_channels": cat_channels,
             "deep_supervision": deep_supervision,
             # mbfusion: config-dependent, so recorded per run (empty for other arches)
@@ -813,8 +801,6 @@ def train_kfold(
     label_smoothing: float = 0.0,
     gradient_clip_val: float = 1.0,
     dropout: float = 0.2,
-    use_aspp: bool = False,
-    aspp_rates: tuple = (6, 12, 18),
     arch: str = "unet",
     cat_channels: int = 64,
     deep_supervision: bool = False,
@@ -858,7 +844,7 @@ def train_kfold(
     print(f"\n{'='*60}")
     print(f"K-FOLD CROSS-VALIDATION ({n_folds} folds)")
     print(f"{'='*60}")
-    print(f"Architecture: {_arch_label(arch, use_aspp, aspp_rates, deep_supervision)}")
+    print(f"Architecture: {_arch_label(arch, deep_supervision)}")
     print(f"Classification mode: {mode}")
     print(f"Input channels: {in_channels}, Classes: {num_classes} ({class_names})")
     print(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {learning_rate}")
@@ -901,8 +887,6 @@ def train_kfold(
             base_filters=base_filters,
             depth=depth,
             dropout=dropout,
-            use_aspp=use_aspp,
-            aspp_rates=aspp_rates,
             cat_channels=cat_channels,
             deep_supervision=deep_supervision,
             **mb_kwargs,
@@ -917,8 +901,6 @@ def train_kfold(
             base_filters=base_filters,
             depth=depth,
             dropout=dropout,
-            use_aspp=use_aspp,
-            aspp_rates=aspp_rates,
             cat_channels=cat_channels,
             deep_supervision=deep_supervision,
             **mb_kwargs,
@@ -1046,7 +1028,6 @@ def train_kfold(
         "focal_gamma": focal_gamma,
         "label_smoothing": label_smoothing,
         "dropout": dropout,
-        "use_aspp": use_aspp,
         "per_fold": fold_results,
         "summary": summary,
     }
@@ -1116,8 +1097,6 @@ def train_kfold(
             "class_names": class_names,
             "base_filters": base_filters,
             "depth": depth,
-            "use_aspp": use_aspp,
-            "aspp_rates": list(aspp_rates),
             "cat_channels": cat_channels,
             "deep_supervision": deep_supervision,
             # mbfusion: config-dependent, so recorded per run (empty for other arches)
@@ -1210,10 +1189,6 @@ if __name__ == "__main__":
                         help="Spatial dropout after bottleneck (0=disabled, default: 0.2)")
     parser.add_argument("--arch", type=str, default="unet", choices=list(ARCHITECTURES),
                         help="Model architecture (default: unet)")
-    parser.add_argument("--use-aspp", action="store_true",
-                        help="[unet] Add ASPP module at bottleneck for expanded receptive field")
-    parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
-                        help="[unet] Dilation rates for ASPP branches (default: 6 12 18)")
     parser.add_argument("--cat-channels", type=int, default=64,
                         help="[unet3plus] Unified channels per skip branch (default: 64)")
     parser.add_argument("--deep-supervision", action="store_true",
@@ -1272,8 +1247,6 @@ if __name__ == "__main__":
         label_smoothing=args.label_smoothing,
         gradient_clip_val=args.gradient_clip_val,
         dropout=args.dropout,
-        use_aspp=args.use_aspp,
-        aspp_rates=tuple(args.aspp_rates),
         arch=args.arch,
         cat_channels=args.cat_channels,
         deep_supervision=args.deep_supervision,

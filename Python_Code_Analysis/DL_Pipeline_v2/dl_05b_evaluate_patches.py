@@ -114,8 +114,6 @@ def main(
     depth: int = 4,
     seed: int = 42,
     sort_by: str = "overall_accuracy",
-    use_aspp: bool = False,
-    aspp_rates: tuple = (6, 12, 18),
 ):
     """
     Evaluate every test patch individually and save results to CSV.
@@ -129,8 +127,6 @@ def main(
         depth: Model depth
         seed: Random seed (must match training)
         sort_by: Column to sort results by (ascending = worst first)
-        use_aspp: Whether model uses ASPP at bottleneck
-        aspp_rates: Dilation rates for ASPP branches
     """
     device = get_device()
     print(f"Using device: {device}")
@@ -148,8 +144,7 @@ def main(
     assert_mode_matches(model_path, mode)
 
     # Load model
-    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
-                       use_aspp=use_aspp, aspp_rates=aspp_rates)
+    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth)
 
     # Create test split (no DataLoader — we need per-patch access)
     print("\nCreating test split...")
@@ -218,10 +213,6 @@ if __name__ == "__main__":
         "--sort-by", type=str, default="overall_accuracy",
         help="Column to sort by ascending (worst first). Options: overall_accuracy, mean_iou, macro_f1"
     )
-    parser.add_argument("--use-aspp", action="store_true",
-                        help="Model uses ASPP (auto-detected from checkpoint if available)")
-    parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
-                        help="ASPP dilation rates (auto-detected from checkpoint if available)")
     args = parser.parse_args()
 
     # Handle relative paths
@@ -249,6 +240,4 @@ if __name__ == "__main__":
         depth=args.depth,
         seed=args.seed,
         sort_by=args.sort_by,
-        use_aspp=args.use_aspp,
-        aspp_rates=tuple(args.aspp_rates),
     )

@@ -2,8 +2,8 @@
 set -e  # Exit on error
 
 # === CONFIGURATION ===
-# Architecture params (base_filters, depth, use_aspp, aspp_rates, in_channels,
-# num_classes, dropout) are auto-detected from the checkpoint:
+# Architecture params (base_filters, depth, in_channels, num_classes, dropout)
+# are auto-detected from the checkpoint:
 #   - .safetensors:  read from sibling .meta.json
 #   - .ckpt (Lightning): read from 'hyper_parameters' in the file
 # Only prediction-time knobs live here.
@@ -63,7 +63,7 @@ elif ckpt.suffix == ".ckpt":
         if hp:
             meta = {k: hp.get(k) for k in
                     ("arch", "in_channels", "num_classes", "base_filters", "depth",
-                     "dropout", "use_aspp", "aspp_rates", "cat_channels", "deep_supervision")}
+                     "dropout", "cat_channels", "deep_supervision")}
     except Exception:
         pass
 # 3) training_log.json lookup by checkpoint basename
@@ -85,8 +85,6 @@ if meta:
         line += f", cat_channels={meta.get('cat_channels', '?')}"
         if meta.get("deep_supervision"):
             line += ", deep_supervision"
-    elif meta.get("use_aspp"):
-        line += f", aspp={list(meta.get('aspp_rates', []))}"
     line += ")"
     print(line)
 else:

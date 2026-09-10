@@ -191,8 +191,6 @@ def main():
                 crop_size=args.crop_size if args.crop_size > 0 else None,
                 base_filters=BASE_FILTERS,
                 depth=DEPTH,
-                use_aspp=False,
-                aspp_rates=[6, 12, 18],
                 background_pool=train_pool,
                 test_pool=test_pool,
             )

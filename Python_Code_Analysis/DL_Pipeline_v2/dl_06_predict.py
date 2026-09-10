@@ -220,8 +220,6 @@ def main(
     base_filters: int = 32,
     depth: int = 4,
     save_probabilities: bool = False,
-    use_aspp: bool = False,
-    aspp_rates: tuple = (6, 12, 18),
 ):
     """
     Main prediction function.
@@ -236,8 +234,6 @@ def main(
         base_filters: Model base filters
         depth: Model depth
         save_probabilities: Save probability maps
-        use_aspp: Whether model uses ASPP at bottleneck
-        aspp_rates: Dilation rates for ASPP branches
     """
     device = get_device()
     print(f"Using device: {device}")
@@ -255,8 +251,7 @@ def main(
 
     # Load model
     print(f"\nLoading model from {model_path}")
-    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth,
-                       use_aspp=use_aspp, aspp_rates=aspp_rates)
+    model = load_model(model_path, device, in_channels, num_classes, base_filters, depth)
 
     # Run prediction
     print(f"\nProcessing {input_path}")
@@ -287,11 +282,6 @@ if __name__ == "__main__":
     parser.add_argument("--depth", type=int, default=4,
                         help="Model depth (auto-detected from checkpoint if available)")
     parser.add_argument("--probs", action="store_true", help="Save probability maps")
-    parser.add_argument("--use-aspp", action="store_true",
-                        help="Model uses ASPP (auto-detected from checkpoint if available)")
-    parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18],
-                        help="ASPP dilation rates (auto-detected from checkpoint if available)")
-
     args = parser.parse_args()
 
     # Handle relative paths
@@ -309,6 +299,4 @@ if __name__ == "__main__":
         base_filters=args.base_filters,
         depth=args.depth,
         save_probabilities=args.probs,
-        use_aspp=args.use_aspp,
-        aspp_rates=tuple(args.aspp_rates),
     )

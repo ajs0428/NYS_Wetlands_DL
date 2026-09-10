@@ -2,8 +2,6 @@
 set -e  # Exit on error
 
 # === CONFIGURATION ===
-USE_ASPP=true             # true to enable ASPP at U-Net bottleneck (fallback only — auto-detected from checkpoint)
-ASPP_RATES="3 6 12"       # fallback ASPP rates (ignored when checkpoint has hparams)
 BASE_FILTERS=64           # fallback (ignored when checkpoint has hparams)
 DEPTH=5                   # fallback (ignored when checkpoint has hparams)
 SEED=420                  # must match training seed to reproduce the test split
@@ -29,11 +27,6 @@ STATS_PATH=$(python -c "import sys; sys.path.insert(0,'$SCRIPT_DIR'); from dl_ba
 #   MODEL_PATH="Models/kfold_2fold_unet_20260401_1430"
 MODEL_PATH=""
 
-ASPP_FLAGS=""
-if [ "$USE_ASPP" = true ]; then
-    ASPP_FLAGS="--use-aspp --aspp-rates $ASPP_RATES"
-fi
-
 echo "=== NYS Wetlands DL SHAP Analysis (HPC) ==="
 echo "Output dir: $OUTPUT_DIR"
 echo "Background patches: $N_BACKGROUND   Test patches: $N_TEST   Crop: $CROP_SIZE"
@@ -53,8 +46,7 @@ run_shap() {
         --n-test $N_TEST \
         --crop-size $CROP_SIZE \
         --base-filters $BASE_FILTERS \
-        --depth $DEPTH \
-        $ASPP_FLAGS
+        --depth $DEPTH
 }
 
 # Resolve model list

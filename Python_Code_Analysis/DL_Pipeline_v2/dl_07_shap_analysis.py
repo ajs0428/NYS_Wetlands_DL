@@ -119,8 +119,6 @@ def run_shap(
     crop_size: int = 128,
     base_filters: int = 32,
     depth: int = 4,
-    use_aspp: bool = False,
-    aspp_rates=(6, 12, 18),
     background_pool=None,
     test_pool=None,
 ):
@@ -149,7 +147,6 @@ def run_shap(
     model = load_model(
         model_path, device, in_channels, num_classes,
         base_filters=base_filters, depth=depth,
-        use_aspp=use_aspp, aspp_rates=tuple(aspp_rates),
     )
 
     band_channel_ranges = build_channel_mapping(predictor_names, normalization, in_channels)
@@ -363,8 +360,6 @@ if __name__ == "__main__":
     # Architecture fallbacks (ignored when the checkpoint stores hparams)
     parser.add_argument("--base-filters", type=int, default=32)
     parser.add_argument("--depth", type=int, default=4)
-    parser.add_argument("--use-aspp", action="store_true")
-    parser.add_argument("--aspp-rates", type=int, nargs="+", default=[6, 12, 18])
     args = parser.parse_args()
 
     project_root = Path(__file__).parent.parent.parent
@@ -383,6 +378,4 @@ if __name__ == "__main__":
         crop_size=args.crop_size if args.crop_size > 0 else None,
         base_filters=args.base_filters,
         depth=args.depth,
-        use_aspp=args.use_aspp,
-        aspp_rates=args.aspp_rates,
     )

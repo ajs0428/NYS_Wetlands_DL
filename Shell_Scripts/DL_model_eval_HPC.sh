@@ -2,8 +2,6 @@
 set -e  # Exit on error
 
 # === CONFIGURATION ===
-USE_ASPP=true             # true to enable ASPP at U-Net bottleneck
-ASPP_RATES="3 6 12"      # dilation rates for ASPP; use "3 6 12" for depth=5, "6 12 18" for depth=4
 BASE_FILTERS=64
 DEPTH=5
 BATCH_SIZE=16
@@ -26,19 +24,12 @@ STATS_PATH=$(python -c "import sys; sys.path.insert(0,'$SCRIPT_DIR'); from dl_ba
 # Leave empty to auto-select the newest checkpoint in Models/
 MODEL_PATH=""
 
-# Build optional flags
-ASPP_FLAGS=""
-if [ "$USE_ASPP" = true ]; then
-    ASPP_FLAGS="--use-aspp --aspp-rates $ASPP_RATES"
-fi
-
 # Read classification mode from band config
 CLASS_MODE=$(python -c "import json; print(json.load(open('$BAND_CONFIG'))['classification_mode'])" 2>/dev/null || echo "multiclass")
 
 echo "=== NYS Wetlands DL Evaluation (HPC) ==="
 echo "Classification: $CLASS_MODE"
 echo "Architecture: U-Net (bf=$BASE_FILTERS, depth=$DEPTH)"
-[ "$USE_ASPP" = true ] && echo "ASPP: enabled (rates: $ASPP_RATES)"
 echo "=========================================="
 
 # --- Resolve checkpoint(s) ---
@@ -59,8 +50,7 @@ evaluate_checkpoint() {
             --batch-size $BATCH_SIZE \
             --base-filters $BASE_FILTERS \
             --depth $DEPTH \
-            --seed $SEED \
-            $ASPP_FLAGS
+            --seed $SEED
     echo "Results saved to: $EVAL_OUTPUT"
 }
 
