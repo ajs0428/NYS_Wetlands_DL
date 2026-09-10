@@ -153,87 +153,82 @@ Structure
 
 ```{r}
 #| label: q1-precision-recall
-#| fig-width: 8
+#| fig-width: 12
 #| fig-height: 14
-#| layout-ncol: 2
 
 pr_data <- fact_data |>
   filter(label == "fld") |>
   pivot_longer(c(precision, recall), names_to = "metric", values_to = "value") |>
   mutate(metric = factor(metric_label[metric], levels = c("Precision", "Recall")))
 
-pr_plot <- function(which_mode, which_metric) {
+# One figure per mode: class down the rows, metric across the two columns.
+# facet_grid + scales = "free_y" frees the y-scale per ROW, so Precision and
+# Recall stay on a common scale within a class (directly comparable) while each
+# class keeps its own range -- and the legend, x labels and y title are stated
+# once for the whole panel instead of per plot.
+pr_plot <- function(which_mode) {
   pr_data |>
-    filter(mode == which_mode, metric == which_metric) |>
+    filter(mode == which_mode) |>
     ggplot(aes(x = config, y = value, fill = class)) +
-      facet_wrap(~ class, scales = "free_y", ncol = 1) +
+      facet_grid(class ~ metric, scales = "free_y") +
       box_jitter(point_size = 3.5) +
-      scale_fill_manual(values = class_color) +
+      scale_fill_manual(values = class_color, name = "Class") +
       scale_x_discrete(labels = config_label) +
-      labs(x = NULL, y = which_metric, title = which_mode) +
+      scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+      labs(x = NULL, y = "Score", title = which_mode) +
       theme_param
 }
 
-pr_plot("Multiclass", "Precision")
+pr_plot("Multiclass")
+```
 
-pr_plot("Multiclass", "Recall")
+```{r}
+#| label: q1-precision-recall-binary
+#| fig-width: 12
+#| fig-height: 8
 
-pr_plot("Binary", "Precision")
-
-pr_plot("Binary", "Recall")
+pr_plot("Binary")
 ```
 
 ```{r}
 #| label: q1-f1-iou
-#| fig-width: 8
+#| fig-width: 12
 #| fig-height: 14
 
-fact_data |>
-  filter(label == "fld", mode == "Multiclass") |>
-  ggplot(aes(x = config, y = f1, fill = class)) +
-    box_jitter() +
-    facet_wrap(~ class, scales = "free_y", ncol = 1) +
-    scale_fill_manual(values = class_color) +
-    scale_x_discrete(labels = config_label) +
-    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
-    labs(x = NULL, y = "F1") +
-    # ylim(0.0, 1.0) +
-    theme_param
+fi_data <- fact_data |>
+  filter(label == "fld") |>
+  pivot_longer(c(f1, iou), names_to = "metric", values_to = "value") |>
+  mutate(metric = factor(metric_label[metric], levels = c("F1", "IoU")))
 
-fact_data |>
-  filter(label == "fld", mode == "Multiclass") |>
-  ggplot(aes(x = config, y = iou, fill = class)) +
-    box_jitter() +
-    facet_wrap(~ class, scales = "free_y", ncol = 1) +
-    scale_fill_manual(values = class_color) +
-    scale_x_discrete(labels = config_label) +
-    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
-    labs(x = NULL, y = "IoU") +
-    theme_param
+# Same layout as the precision/recall figure: class rows x metric columns,
+# one shared legend and one shared y title per mode.
+fi_plot <- function(which_mode) {
+  fi_data |>
+    filter(mode == which_mode) |>
+    ggplot(aes(x = config, y = value, fill = class)) +
+      facet_grid(class ~ metric, scales = "free_y") +
+      box_jitter() +
+      scale_fill_manual(values = class_color, name = "Class") +
+      scale_x_discrete(labels = config_label) +
+      scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+      labs(x = NULL, y = "Score", title = which_mode) +
+      theme_param
+}
 
-  fact_data |>
-  filter(label == "fld", mode == "Binary") |>
-  ggplot(aes(x = config, y = f1, fill = class)) +
-    box_jitter() +
-    facet_wrap(~ class, scales = "free_y", ncol = 1) +
-    scale_fill_manual(values = class_color) +
-    scale_x_discrete(labels = config_label) +
-    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
-    labs(x = NULL, y = "F1") +
-    theme_param
+fi_plot("Multiclass")
 
-fact_data |>
-  filter(label == "fld", mode == "Binary") |>
-  ggplot(aes(x = config, y = iou, fill = class)) +
-    box_jitter() +
-    facet_wrap(~ class, scales = "free_y", ncol = 1) +
-    scale_fill_manual(values = class_color) +
-    scale_x_discrete(labels = config_label) +
-    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
-    labs(x = NULL, y = "IoU") +
-    theme_param
+ggsave(filename = "../Writing/Figures/F1_IoU_Multiclass.png", plot = fi_plot("Multiclass"), width = 12, height = 14)
 ```
 
+```{r}
+#| label: q1-f1-iou-binary
+#| fig-width: 12
+#| fig-height: 8
+
+fi_plot("Binary")
+
+ggsave(filename = "../Writing/Figures/F1_IoU_Binary.png", plot = fi_plot("Binary"), width = 12, height = 8)
+```
 
 ### How do NWI data labels compare to field and GIS-derived data?
 
@@ -244,54 +239,59 @@ fact_data |>
 ```{r}
 #| label: q2-nwi-f1-iou
 #| fig-width: 24
-#| fig-height: 6
+#| fig-height: 12
 
 config_label_nwi <- config_label
 config_label_nwi[4] <- "Full\nModel\nField+GIS"
 
-fact_data |>
-  filter(featureset == "chmret_leafoff", mode == "Multiclass") |>
-  ggplot(aes(x = config, y = f1, fill = class)) +
-    box_jitter() +
-    facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
-    scale_fill_manual(values = class_color) +
-    scale_x_discrete(labels = config_label_nwi) +
-    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
-    labs(x = NULL, y = "F1") +
-    theme_param
+q2_data <- fact_data |>
+  filter(featureset == "chmret_leafoff") |>
+  pivot_longer(c(f1, iou), names_to = "metric", values_to = "value") |>
+  mutate(metric = factor(metric_label[metric], levels = c("F1", "IoU")))
 
-fact_data |>
-  filter(featureset == "chmret_leafoff", mode == "Binary") |>
-  ggplot(aes(x = config, y = f1, fill = class)) +
-    box_jitter() +
-    facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
-    scale_fill_manual(values = class_color) +
-    scale_x_discrete(labels = config_label) +
-    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
-    labs(x = NULL, y = "F1") +
-    theme_param
+# One row of class panels per metric. Unlike the Q1 figures this stacks two
+# facet_wraps with patchwork rather than using facet_grid(metric ~ class):
+# facet_grid would free the y-scale per ROW, which here forces every class onto
+# one scale, and UPL (~0.9) against SSW (~0.3) flattens the wetland classes.
+# Stacking keeps the per-class free scale and still collects one shared legend.
+q2_row <- function(which_mode, which_metric) {
+  q2_data |>
+    filter(mode == which_mode, metric == which_metric) |>
+    ggplot(aes(x = config, y = value, fill = class)) +
+      facet_wrap(~ class, scales = "free_y", nrow = 1) +
+      box_jitter() +
+      scale_fill_manual(values = class_color, name = "Class") +
+      scale_x_discrete(labels = config_label_nwi) +
+      scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+      labs(x = NULL, y = which_metric) +
+      theme_param
+}
 
-# fact_data |>
-#   filter(featureset == "chmret_leafoff", mode == "Multiclass") |>
-#   ggplot(aes(x = config, y = iou, fill = class)) +
-#     box_jitter() +
-#     facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
-#     scale_fill_manual(values = class_color) +
-#     scale_x_discrete(labels = config_label) +
-#     scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
-#     labs(x = NULL, y = "IoU") +
-#     theme_param
+# F1 on top, IoU on the bottom; the class strips and the config labels are each
+# drawn once for the pair, since both rows share the same columns and x-axis.
+q2_plot <- function(which_mode) {
+  top    <- q2_row(which_mode, "F1")  + theme(axis.text.x = element_blank())
+  bottom <- q2_row(which_mode, "IoU") + theme(strip.text = element_blank())
+  top / bottom +
+    plot_layout(guides = "collect") +
+    plot_annotation(title = which_mode,
+                    theme = theme(plot.title = element_text(size = 22, face = "bold")))
+}
 
-# fact_data |>
-#   filter(featureset == "chmret_leafoff", mode == "Binary") |>
-#   ggplot(aes(x = config, y = iou, fill = class)) +
-#     box_jitter() +
-#     facet_wrap(mode ~ class, scales = "free_y", ncol = 4) +
-#     scale_fill_manual(values = class_color) +
-#     scale_x_discrete(labels = config_label) +
-#     scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
-#     labs(x = NULL, y = "IoU") +
-#     theme_param
+q2_plot("Multiclass")
+
+
+ggsave(filename = "../Writing/Figures/NWI_F1_IoU_Multiclass.png", plot = q2_plot("Multiclass"), width = 24, height = 12)
+```
+
+```{r}
+#| label: q2-nwi-f1-iou-binary
+#| fig-width: 14
+#| fig-height: 12
+
+q2_plot("Binary")
+
+ggsave(filename = "../Writing/Figures/NWI_F1_IoU_Binary.png", plot = q2_plot("Binary"), width = 14, height = 12)
 ```
 
 Model-level summary (macro metrics are repeated on every class row of
