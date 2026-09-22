@@ -3,6 +3,8 @@
 ## Project Overview
 U-Net semantic segmentation pipeline for wetland classification in New York State. Multi-source remote sensing inputs (terrain, spectral, SAR, NAIP imagery) -> pixel-level wetland type predictions.
 
+> **FROZEN FOR MANUSCRIPT (since 2026-09-22): tag `factorial-v3`.** This repo is the factorial-v3 benchmark that the manuscript cites. Only manuscript-driven work goes here: figures, the R viz qmd, and aggregation or analysis fixes. **Don't modify the core pipeline (`dl_01`–`dl_06`, `dl_02_dataset.py`, `dl_03_*`, `dl_losses.py`, `dl_model_*`, `dl_experiment_config.py`, `dl_patch_pools.py`, `run_config.sh`).** If a genuine factorial bug is found, fix it here, re-tag it as `factorial-v3.1`, and note it for the manuscript. **Production-model work lives in a separate repo, `/ibstorage/anthony/NYS_Wetlands_Prod`**, whose core was copied from `factorial-v3`. Changes don't flow between the two repos.
+
 ## Environment
 - **Package manager:** uv (preferred) or conda
 - **Python:** 3.11
@@ -45,11 +47,7 @@ Python_Code_Analysis/DL_Pipeline_v2/   # Main pipeline (production)
   factorial_experiment/PLAN.md            # Factorial: THE design doc (v3; consolidates v1+v2+arch_fusion plans)
   factorial_experiment/EXECUTION.md       # Factorial: THE runbook (v3; consolidates v1+v2 EXECUTION) -- read this
   factorial_experiment/archive/           # Superseded v1/v2 plans + runbooks, kept for provenance
-  production_model/dl_prod_config.py      # Production: the shipped model's recipe (single source of truth)
-  production_model/PLAN.md                # Production: recipe rationale + open decisions
-  production_model/EXECUTION.md           # Production: operational walkthrough (deltas from factorial)
 Shell_Scripts/                         # Orchestration wrappers (run_factorial.sh, run_*.sh, rsync_*.sh)
-Models/production_model/               # Production: the deployable model's cells (+ its checkpoints)
 webmap/                                # Leaflet/COG viewer + dev server (source tracked; COGs are not)
 Models/factorial_results_v3/           # v3 base grid: <mode>/<config>/seed<k>/ + analysis/
 Models/results_arch_v3/                # v3 arch arm 2: UNet3+ cells + analysis/
@@ -68,8 +66,8 @@ pyproject.toml                         # Dependencies + uv config
 - **`main` is the trunk.** All work lands here. (History note: `factorial-experiment-pipeline` had drifted into being the de-facto trunk while `main` sat abandoned; merged back into `main` 2026-07-27.)
 - **Short-lived feature branches only** — days, not months — for changes risky enough to want isolation (a `dl_02_dataset.py` refactor, a new architecture). Name them `feat/<thing>` / `fix/<thing>` and merge back fast.
 - **Never branch to separate a workstream.** Workstreams here share the entire core (`dl_01`–`dl_06`, dataset, model, losses), so a long-lived parallel branch means every core fix is applied twice and reconciled at merge — and this repo's merges are `.ipynb`-JSON and `.gitignore` merges, the painful kind.
-- **Separate workstreams by directory + results root + config instead**, keeping the 1:1:1 mapping: `<workstream>` = `Shell_Scripts/run_<workstream>.sh` = `Models/<workstream>/`, with a `<workstream>/` doc+config dir under `DL_Pipeline_v2/`. Current instances: `factorial_experiment` → `Models/factorial_results_v3/` (+ `results_arch_v3/`, `results_arch_fusion_v3/`); `production_model` → `Models/production_model/`.
-- **Freeze a published result with a tag, not a branch** (`factorial-v1`, `factorial-v2`). Tags are immutable and need no maintenance.
+- **Separate workstreams by directory + results root + config instead**, keeping the 1:1:1 mapping: `<workstream>` = `Shell_Scripts/run_<workstream>.sh` = `Models/<workstream>/`, with a `<workstream>/` doc+config dir under `DL_Pipeline_v2/`. Current instance: `factorial_experiment` → `Models/factorial_results_v3/` (+ `results_arch_v3/`, `results_arch_fusion_v3/`). The production model was a workstream here until 2026-09-22. It moved to its own repo (`NYS_Wetlands_Prod`) because it changes the core (loss toggle, new band set, new patch dir) while the manuscript needs this core frozen.
+- **Freeze a published result with a tag, not a branch** (`factorial-v1`, `factorial-v2`, `factorial-v3`). Tags are immutable and need no maintenance.
 - **`.gitignore` starts with a blanket `*`** — anything new is invisible until explicitly whitelisted, and reaching a deep file requires un-ignoring every parent dir first. Check with `git check-ignore -v --no-index <path>` (without `--no-index` it silently skips already-tracked files).
 
 ## Pipeline Workflow
@@ -158,7 +156,7 @@ A controlled benchmark isolating the effect of **LiDAR tier**, **leaf-off NAIP**
 
 > **Agent boundary:** Claude *prepares* these scripts; **the user runs** all GPU/long jobs. Nothing here auto-launches training, containers, or rsync.
 
-> **v3 status (2026-08-25): not yet run.** Code is built and CPU-tested; patches and stats are being rebuilt. Preflight GREEN is the hard gate before GPU time.
+> **v3 status (2026-09-22): all 100 cells run and aggregated; frozen at tag `factorial-v3`.** Cells were trained from working tree `cad2392-dirty` (committed as `284a722`). Later commits cover analysis and figures, plus `a3916d7`, which removed ASPP (dead code; every checkpoint has `use_aspp=False`).
 
 ### Config grammar `<label>_<lidar>_<spectral>`
 - `<label>`: `fld` (field-verified) / `nwi` (NWI paired to field locations) / `nwiextra` (NWI ∪ extra same-HUC12 locations, ~2×) / `nwifield` (field ∪ non-overlapping NWI) / `flddeg` (field degraded to NWI prevalence) — the training **label source**, which in v2+ is a **separate patch directory**, not a label band
@@ -287,11 +285,5 @@ Same node ritual: reload image, restage (lean push), run in container under `tmu
 **Figures:** `R_Code_Analysis/dl_10_Factorial_viz_R.qmd` is the **active** viz notebook (its architecture section reads `arch_compare_long.csv` and is arm-count-agnostic). The Python `dl_10_factorial_viz.ipynb` (§1–§5 base + SHAP, §6–§7 follow-ons, `MODE` selector) and `dl_10b_huc_inference_viz.ipynb` (§8 HUC prevalence) are the older siblings. **Notebook split for git sync:** `dl_10` reads only small CSV/JSON, which `.gitignore` whitelists (~2 MB) so they sync to a local Mac via `git pull`; `dl_10b` reads the multi-GB prediction GeoTIFFs, which stay gitignored and are rsync'd separately. Re-run `git add -A` after each aggregation.
 
 > **Two schema facts for any new analysis code.** v2/v3 `metrics.json` nests scores under **`"test_metrics"`** (v1 had them flat) — unwrap with `scores = metrics.get("test_metrics") or metrics`. And `confusion_matrix` is a **dict** `{"labels": [...], "matrix": [[...]]}` at top level (v1 was a bare nested list) — `np.array(cm)` on it raises. `dl_08`/`dl_08b` already handle both.
-## Production Model (the single deployable model)
-Where the factorial asks *which inputs and labels matter*, this workstream ships **one** model. It is a **sibling workstream on the same trunk, not a branch** — it reuses `dl_01`–`dl_06`, the dataset, model, and losses untouched. **Full guide:** `Python_Code_Analysis/DL_Pipeline_v2/production_model/EXECUTION.md`; rationale + open decisions in `production_model/PLAN.md`.
-
-- **Recipe (single source of truth):** `production_model/dl_prod_config.py` — run it with no args to print + self-check. Currently `nwifield_chmret_leafoff`, multiclass, unet bf64/d5, 100 epochs, seeds 0-2. The config was picked on factorial-v2 field-test results (best WET IoU **and** recall); every other knob is **held at the factorial's values on purpose**, so the benchmark's ranking remains valid evidence for the shipped model. `--emit` prints shell-sourceable `PROD_*` vars.
-- **Driver:** `Shell_Scripts/run_production.sh [seed ...]` — a **thin wrapper over `run_config.sh`**, not a second training path, so fixes to training/metric-extraction land once. Inherits the skip-completed guard (safe stop/resume) and all of `run_config.sh`'s env knobs. `DRY_RUN=1` to plan.
-- **Results:** `Models/production_model/<mode>/production/seed<k>/` — same layout as a factorial cell. Evaluation is still **against field labels** on the seed's held-out field patches, so scores are directly comparable to `Models/factorial_results_v2/analysis/cross_mode_summary.csv`.
-- **Weights are the deliverable here** (unlike the factorial): pull the `.safetensors` back, not just `--metrics-only`. `.gitignore` tracks this root's `metrics.json`/`manifest.json`/`confusion_matrix.csv` and ignores the checkpoints.
-- **Still open (do not silently decide):** ship best seed vs. 3-model ensemble; whether to refit on the full pool for the final artifact (forfeits the held-out score). See PLAN.md §4.
+## Production Model
+Moved to its own repo on 2026-09-22: **`/ibstorage/anthony/NYS_Wetlands_Prod`** (see its README.md and CLAUDE.md). It uses the `prod14` band set (adds ndvi/ndwi; drops DEM, the LiDAR return fractions and leaf-off), a `R_Patches_Prod` patch dir, a loss toggle, and a frozen HUC12 test split. The old in-repo scaffold (`DL_Pipeline_v2/production_model/`, `run_production.sh`) was removed, and it is still available at tag `factorial-v3`. It never trained a model.
