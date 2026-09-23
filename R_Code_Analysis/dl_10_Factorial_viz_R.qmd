@@ -230,6 +230,148 @@ fi_plot("Binary")
 ggsave(filename = "../Writing/Figures/F1_IoU_Binary.png", plot = fi_plot("Binary"), width = 12, height = 8)
 ```
 
+#### Whole-model performance
+
+The panels above are per class. These summarise each model as a single row:
+**macro F1** (unweighted mean of the per-class F1s -- the rare wetland classes
+count as much as UPL), **mean IoU** (same averaging over the per-class IoUs), and
+**overall accuracy** (the pixel-weighted share correct, so it is dominated by the
+~75% UPL background and always reads high). They come straight from
+`factorial_long.csv`, where they are cell-level and therefore repeated on every
+class row -- `distinct()` collapses each (mode, config, seed) cell back to one
+record before anything is averaged.
+
+The tile **fill is the rank within its metric column**, not the absolute score:
+overall accuracy sits ~0.2 above macro F1 in multiclass, so a shared 0-1 scale
+paints every tile the same shade and hides the config differences the figure is
+for. The printed number is the true seed-mean +/- SD across the
+`r n_distinct(fact_data$seed)` seeds.
+
+```{r}
+#| label: q1-overall-heatmap
+#| fig-width: 11
+#| fig-height: 9
+
+overall_levels <- c("Macro F1", "Mean IoU", "Overall accuracy")
+
+overall_data <- fact_data |>
+  filter(label == "fld") |>
+  distinct(mode, config, seed, macro_f1, mean_iou, overall_accuracy) |>
+  pivot_longer(c(macro_f1, mean_iou, overall_accuracy), names_to = "metric", values_to = "value") |>
+  mutate(metric = factor(metric_label[metric], levels = overall_levels))
+
+overall_heat <- overall_data |>
+  group_by(mode, config, metric) |>
+  # sd BEFORE value -- summarise() evaluates in order, so computing it after
+  # value <- mean(value) would take the SD of a single number and return NA.
+  summarise(sd = sd(value), value = mean(value), .groups = "drop") |>
+  group_by(mode, metric) |>
+  # scales::rescale qualified: terra (loaded for the gate maps) masks rescale()
+  mutate(rel = if (diff(range(value)) == 0) 0.5 else scales::rescale(value)) |>
+  ungroup()
+
+overall_heat_panel <- function(which_mode) {
+  overall_heat |>
+    filter(mode == which_mode) |>
+    ggplot(aes(x = metric, y = fct_rev(config), fill = rel)) +
+      geom_tile(colour = "white", linewidth = 1) +
+      geom_text(aes(label = sprintf("%.3f\n±%.3f", value, sd), colour = rel > 0.55),
+                size = 5, lineheight = 0.95, show.legend = FALSE) +
+      scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "grey20")) +
+      seq_fill(limits = c(0, 1), breaks = c(0, 1), labels = c("worst", "best"),
+               name = "Rank within\nmetric column") +
+      scale_y_discrete(labels = config_label_1line) +
+      scale_x_discrete(position = "top") +
+      labs(x = NULL, y = NULL, title = which_mode) +
+      theme_heatmap
+}
+
+overall_heat_fig <- overall_heat_panel("Multiclass") / overall_heat_panel("Binary") +
+  plot_layout(guides = "collect")
+overall_heat_fig
+
+ggsave(filename = "../Writing/Figures/Overall_Metrics_Heatmap.png", plot = overall_heat_fig,
+       width = 11, height = 9)
+```
+
+Same grid as a **difference from one reference config**, computed per seed and
+then averaged -- same seed => same test patches, so each seed contributes a
+genuinely paired difference. `OVERALL_REF` is the config every other row is
+subtracted from; `fld_chmret_leafon` ("With Lidar") asks what leaf-off adds on
+top of lidar and what dropping lidar costs, while `fld_nolidar_leafon`
+("Baseline") reads the two feature additions as gains from nothing. A cell is
+outlined when all `r n_distinct(fact_data$seed)` seeds moved the same way, which
+at n=5 is the credible summary rather than a p-value; `n/5` is how many seeds
+came out above the reference. Each mode carries its own colour scale -- the
+binary deltas are several times smaller than the multiclass ones.
+
+```{r}
+#| label: q1-overall-heatmap-delta
+#| fig-width: 11
+#| fig-height: 9
+
+OVERALL_REF <- "fld_chmret_leafon"   # or "fld_nolidar_leafon" to read gains over Baseline
+
+overall_delta <- overall_data |>
+  left_join(overall_data |> filter(config == OVERALL_REF) |> select(mode, seed, metric, ref = value),
+            by = c("mode", "seed", "metric")) |>
+  filter(config != OVERALL_REF, !is.na(ref)) |>
+  mutate(delta = value - ref) |>
+  group_by(mode, config, metric) |>
+  # sign_consistent + n_better BEFORE delta is overwritten by its own mean
+  summarise(sign_consistent = all(delta > 0) | all(delta < 0),
+            n_better = sum(delta > 0), n_seeds = n(),
+            delta = mean(delta), .groups = "drop")
+
+overall_delta_panel <- function(which_mode) {
+  d <- filter(overall_delta, mode == which_mode)
+  lim <- max(abs(d$delta), na.rm = TRUE)
+  ggplot(d, aes(x = metric, y = fct_rev(config), fill = delta)) +
+    geom_tile(colour = "white", linewidth = 1) +
+    # outline = all seeds moved the same way
+    geom_tile(data = filter(d, sign_consistent), fill = NA, colour = "grey15", linewidth = 1.1) +
+    geom_text(aes(label = sprintf("%+.3f\n%d/%d seeds", delta, n_better, n_seeds),
+                  colour = abs(delta) > lim * 0.55),
+              size = 4.5, lineheight = 0.95, show.legend = FALSE) +
+    scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "grey20")) +
+    scale_fill_gradient2(low = "#8c510a", mid = "grey96", high = "#14523f", midpoint = 0,
+                         limits = c(-lim, lim),
+                         name = paste0("Δ vs ", config_label_1line[[OVERALL_REF]],
+                                       "\n(", which_mode, ")")) +
+    scale_y_discrete(labels = config_label_1line) +
+    scale_x_discrete(position = "top") +
+    labs(x = NULL, y = NULL, title = which_mode) +
+    theme_heatmap
+}
+
+# Deliberately NOT guides = "collect": each panel carries its own delta scale.
+overall_delta_fig <- overall_delta_panel("Multiclass") / overall_delta_panel("Binary")
+overall_delta_fig
+
+ggsave(filename = "../Writing/Figures/Overall_Metrics_Heatmap_Delta.png", plot = overall_delta_fig,
+       width = 11, height = 9)
+```
+
+The heatmap shows the seed mean; this is the spread behind it, on the same three
+metrics. Each panel gets its own y-scale -- overall accuracy and macro F1 differ
+by more than the configs do -- so read within a panel, not across.
+
+```{r}
+#| label: q1-overall-spread
+#| fig-width: 14
+#| fig-height: 9
+
+overall_data |>
+  ggplot(aes(x = config, y = value, fill = mode)) +
+    facet_wrap(mode ~ metric, scales = "free_y", nrow = 2) +
+    box_jitter(point_size = 3.5) +
+    scale_fill_manual(values = c(Multiclass = "#81b14f", Binary = "#388C73"), guide = "none") +
+    scale_x_discrete(labels = config_label) +
+    scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+    labs(x = NULL, y = "Score") +
+    theme_param
+```
+
 ### How do NWI data labels compare to field and GIS-derived data?
 
 #### Also does degrading the field data hinder its performance?
