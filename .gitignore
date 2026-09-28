@@ -60,18 +60,6 @@ CLAUDE.md
 !Data/Training_Data/
 !Data/
 
-# --- webmap viewer source (root rule is `*`, so this needs whitelisting) ------
-# The Leaflet/COG viewer + its dev server. Source only -- the COGs and any
-# generated tiles it serves are data and stay ignored.
-!webmap/
-!webmap/*.py
-!webmap/*.md
-!webmap/viewer/
-!webmap/viewer/*.html
-!webmap/viewer/*.js
-!webmap/viewer/*.css
-webmap/__pycache__/
-
 # --- generated R outputs (rendered artifacts, not source) --------------------
 R_Code_Analysis/*.html
 R_Code_Analysis/Rplots.pdf

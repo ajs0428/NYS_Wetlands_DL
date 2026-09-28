@@ -48,7 +48,6 @@ Python_Code_Analysis/DL_Pipeline_v2/   # Main pipeline (production)
   factorial_experiment/EXECUTION.md       # Factorial: THE runbook (v3; consolidates v1+v2 EXECUTION) -- read this
   factorial_experiment/archive/           # Superseded v1/v2 plans + runbooks, kept for provenance
 Shell_Scripts/                         # Orchestration wrappers (run_factorial.sh, run_*.sh, rsync_*.sh)
-webmap/                                # Leaflet/COG viewer + dev server (source tracked; COGs are not)
 Models/factorial_results_v3/           # v3 base grid: <mode>/<config>/seed<k>/ + analysis/
 Models/results_arch_v3/                # v3 arch arm 2: UNet3+ cells + analysis/
 Models/results_arch_fusion_v3/         # v3 arch arm 3: mbfusion cells (+ gates/) + analysis/
@@ -287,3 +286,5 @@ Same node ritual: reload image, restage (lean push), run in container under `tmu
 > **Two schema facts for any new analysis code.** v2/v3 `metrics.json` nests scores under **`"test_metrics"`** (v1 had them flat) — unwrap with `scores = metrics.get("test_metrics") or metrics`. And `confusion_matrix` is a **dict** `{"labels": [...], "matrix": [[...]]}` at top level (v1 was a bare nested list) — `np.array(cm)` on it raises. `dl_08`/`dl_08b` already handle both.
 ## Production Model
 Moved to its own repo on 2026-09-22: **`/ibstorage/anthony/NYS_Wetlands_Prod`** (see its README.md and CLAUDE.md). It uses the `prod14` band set (adds ndvi/ndwi; drops DEM, the LiDAR return fractions and leaf-off), a `R_Patches_Prod` patch dir, a loss toggle, and a frozen HUC12 test split. The old in-repo scaffold (`DL_Pipeline_v2/production_model/`, `run_production.sh`) was removed, and it is still available at tag `factorial-v3`. It never trained a model.
+
+The **webmap** (Leaflet/COG viewer, `python_make_cogs.py`, `submit_cogs.sh`, `make_nwi_pmtiles.sh`, `COG_Plan.md`) moved to `NYS_Wetlands_Prod/webmap/` on 2026-09-28. It still exists here at tag `factorial-v3`. The v2 COGs it built stay in `Data/HUC_DL_Predictions_v2/cogs/`, and the Prod viewer serves them through a dev-server mount, so don't move or delete that directory.
