@@ -444,57 +444,29 @@ Model-level summary (macro metrics are repeated on every class row of
 #| fig-width: 20
 #| fig-height: 8
 
-fact_data |>
-  filter(featureset == "chmret_leafoff", mode == "Multiclass") |>
-  distinct(mode, config, seed, macro_f1) |>
-  pivot_longer(c(macro_f1), names_to = "metric", values_to = "value") |>
-  mutate(metric = metric_label[metric]) |>
-  ggplot(aes(x = config, y = value, fill = metric)) +
-    box_jitter(point_size = 4) +
-    facet_grid(. ~ mode) +
-    scale_fill_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = lighten("#388C73", 0.45)), name = NULL) +
-    scale_x_discrete(labels = config_label) +
-    labs(x = NULL, y = NULL) +
-    theme_param
-  
-fact_data |>
-  filter(featureset == "chmret_leafoff", mode == "Multiclass") |>
-  distinct(mode, config, seed, mean_iou) |>
-  pivot_longer(c(mean_iou), names_to = "metric", values_to = "value") |>
-  mutate(metric = metric_label[metric]) |>
-  ggplot(aes(x = config, y = value, fill = metric)) +
-    box_jitter(point_size = 4) +
-    facet_grid(. ~ mode) +
-    scale_fill_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = lighten("#388C73", 0.45)), name = NULL) +
-    scale_x_discrete(labels = config_label) +
-    labs(x = NULL, y = NULL) +
-    theme_param
+# One model-level metric for one mode; the metric names the y-axis instead of a
+# fill legend, and the text is bumped up from theme_param's base size.
+q2_macro <- function(which_mode, which_metric) {
+  fact_data |>
+    filter(featureset == "chmret_leafoff", mode == which_mode) |>
+    distinct(mode, config, seed, across(all_of(which_metric))) |>
+    pivot_longer(all_of(which_metric), names_to = "metric", values_to = "value") |>
+    mutate(metric = metric_label[metric]) |>
+    ggplot(aes(x = config, y = value, fill = metric)) +
+      box_jitter(point_size = 4) +
+      facet_grid(. ~ mode) +
+      scale_fill_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = lighten("#388C73", 0.45)),
+                        guide = "none") +
+      scale_x_discrete(labels = config_label) +
+      labs(x = NULL, y = metric_label[[which_metric]]) +
+      theme_param +
+      theme(text = element_text(size = 24))
+}
 
-fact_data |>
-  filter(featureset == "chmret_leafoff", mode == "Binary") |>
-  distinct(mode, config, seed, macro_f1) |>
-  pivot_longer(c(macro_f1), names_to = "metric", values_to = "value") |>
-  mutate(metric = metric_label[metric]) |>
-  ggplot(aes(x = config, y = value, fill = metric)) +
-    box_jitter(point_size = 4) +
-    facet_grid(. ~ mode) +
-    scale_fill_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = lighten("#388C73", 0.45)), name = NULL) +
-    scale_x_discrete(labels = config_label) +
-    labs(x = NULL, y = NULL) +
-    theme_param
-  
-fact_data |>
-  filter(featureset == "chmret_leafoff", mode == "Binary") |>
-  distinct(mode, config, seed, mean_iou) |>
-  pivot_longer(c(mean_iou), names_to = "metric", values_to = "value") |>
-  mutate(metric = metric_label[metric]) |>
-  ggplot(aes(x = config, y = value, fill = metric)) +
-    box_jitter(point_size = 4) +
-    facet_grid(. ~ mode) +
-    scale_fill_manual(values = c("Macro F1" = "#388C73", "Mean IoU" = lighten("#388C73", 0.45)), name = NULL) +
-    scale_x_discrete(labels = config_label) +
-    labs(x = NULL, y = NULL) +
-    theme_param
+q2_macro("Multiclass", "macro_f1")
+q2_macro("Multiclass", "mean_iou")
+q2_macro("Binary", "macro_f1")
+q2_macro("Binary", "mean_iou")
 ```
 
 
