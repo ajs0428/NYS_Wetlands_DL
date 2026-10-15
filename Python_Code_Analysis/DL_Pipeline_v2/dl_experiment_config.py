@@ -72,6 +72,7 @@ LABEL_SOURCE_ALIASES: Dict[str, List[str]] = {
     "fld":      ["MOD_CLASS_FLD", "MOD_CLASS"],
     "nwi":      ["MOD_CLASS_NWI", "MOD_CLASS"],
     "nwiextra": ["MOD_CLASS"],
+    "nwiextra10": ["MOD_CLASS"],
     "nwifield": ["MOD_CLASS"],
     "flddeg":   ["MOD_CLASS_FLDDEG", "MOD_CLASS"],
 }
@@ -106,6 +107,10 @@ LABEL_SOURCE_ALIASES: Dict[str, List[str]] = {
 #     extra_pool    train/val = (R_Patches_NWI U R_Patches_NWIextra) minus
 #                               LEAKAGE_GUARD (HUC12s holding a test_fld patch),
 #                               seed-split -> ~2x NWI quantity test          (nwiextra)
+#                             The pool is the union of the source's patch_dirs, so
+#                             the same rule serves the ~10x arm (nwiextra10, added
+#                             2026-10-15 as a post-freeze follow-on: same rule,
+#                             larger extra dir R_Patches_NWIextra10).
 #     hybrid_union  train/val = R_Patches[train/val_fld] (field labels)
 #                               U R_Patches_NWIextra minus LEAKAGE_GUARD     (nwifield)
 #     degrade       train/val = R_Patches[train/val_fld] with seeded
@@ -124,6 +129,7 @@ LABEL_SOURCES: Dict[str, dict] = {
     "fld":      {"patch_dirs": ["R_Patches"],                        "pool_rule": "anchored"},
     "nwi":      {"patch_dirs": ["R_Patches_NWI"],                    "pool_rule": "paired"},
     "nwiextra": {"patch_dirs": ["R_Patches_NWI", "R_Patches_NWIextra"], "pool_rule": "extra_pool"},
+    "nwiextra10": {"patch_dirs": ["R_Patches_NWI", "R_Patches_NWIextra", "R_Patches_NWIextra10"], "pool_rule": "extra_pool"},
     "nwifield": {"patch_dirs": ["R_Patches", "R_Patches_NWIextra"],  "pool_rule": "hybrid_union"},
     "flddeg":   {"patch_dirs": ["R_Patches"],                        "pool_rule": "degrade"},
 }
@@ -136,6 +142,9 @@ LABEL_SOURCES: Dict[str, dict] = {
 # geographically meaningful across directories (594 false field<->NWIextra hits).
 _NWI_PREFIX_RE = re.compile(r"^NWI_")
 _HUC12_RE = re.compile(r"huc_(\d+)")
+# NWIextra-family files ("NWIextra_...", "NWIextra10_...") are new footprints with
+# their own patch_N namespace -- never field twins (see huc12_of / the coord guard).
+_NWIEXTRA_PREFIX_RE = re.compile(r"^NWIextra\d*_")
 
 
 # --- The 8 configurations (plan Section 2) ------------------------------------
@@ -153,6 +162,10 @@ CONFIGS: Dict[str, dict] = {
     "nwiextra_chmret_leafoff":{"lidar": "chmret",  "spectral": "leafoff", "label": "nwiextra", "channels": 29},
     "nwifield_chmret_leafoff":{"lidar": "chmret",  "spectral": "leafoff", "label": "nwifield", "channels": 29},
     "flddeg_chmret_leafoff":  {"lidar": "chmret",  "spectral": "leafoff", "label": "flddeg",   "channels": 29},
+    # Post-freeze follow-on (2026-10-15, tag factorial-v3.1): the ~10x NWI quantity
+    # arm. Appended LAST so --list order, and with it every v3 cell's run order,
+    # is unchanged; existing configs' pools are bit-identical (verified).
+    "nwiextra10_chmret_leafoff":{"lidar": "chmret", "spectral": "leafoff", "label": "nwiextra10", "channels": 29},
 }
 
 
@@ -221,6 +234,16 @@ def nwi_field_twin(path: str) -> str:
     return _NWI_PREFIX_RE.sub("", os.path.basename(path), count=1)
 
 
+def is_nwiextra_file(path: str) -> bool:
+    """True for an NWIextra-family patch (R_Patches_NWIextra / R_Patches_NWIextra10).
+
+    These are new ground with an independent patch_N namespace: they have no
+    field twin, so the coord guard keys them by nothing and the huc12 guard by
+    huc12_of().
+    """
+    return bool(_NWIEXTRA_PREFIX_RE.match(os.path.basename(path)))
+
+
 def huc12_of(path: str) -> str:
     """The 12-digit HUC code in a patch filename (e.g. '042900030101').
 
@@ -236,7 +259,7 @@ def huc12_of(path: str) -> str:
 
 
 def config_label_source(name: str) -> str:
-    """Label-source key for a config (fld / nwi / nwiextra / nwifield / flddeg)."""
+    """Label-source key for a config (fld / nwi / nwiextra / nwiextra10 / nwifield / flddeg)."""
     return get_config(name)["label"]
 
 

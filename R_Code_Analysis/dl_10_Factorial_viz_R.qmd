@@ -73,7 +73,8 @@ patch_dir <- "../Data/Training_Data/R_Patches"
 #| label: data-organizing
 
 config_order <- c("fld_nolidar_leafon", "fld_nolidar_leafoff",  "fld_chmret_leafon", "fld_chmret_leafoff",
-                 "nwi_chmret_leafoff", "nwiextra_chmret_leafoff", "nwifield_chmret_leafoff", "flddeg_chmret_leafoff")
+                 "nwi_chmret_leafoff", "nwiextra_chmret_leafoff", "nwiextra10_chmret_leafoff",
+                 "nwifield_chmret_leafoff", "flddeg_chmret_leafoff")
 
 config_label <- c("fld_nolidar_leafon" = "Baseline",
                   "fld_nolidar_leafoff" = "With\nLeaf-Off",
@@ -81,6 +82,7 @@ config_label <- c("fld_nolidar_leafon" = "Baseline",
                   "fld_chmret_leafoff" = "Full\nModel",
                   "nwi_chmret_leafoff" = "NWI\nData",
                   "nwiextra_chmret_leafoff" = "NWI\nx2",
+                  "nwiextra10_chmret_leafoff" = "NWI\nx10",
                   "nwifield_chmret_leafoff" = "NWI\n+\nField",
                   "flddeg_chmret_leafoff" = "Degraded\nField")
 

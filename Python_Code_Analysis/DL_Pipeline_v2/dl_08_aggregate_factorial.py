@@ -277,6 +277,7 @@ def compute_contrasts(long_df: pd.DataFrame) -> pd.DataFrame:
       Leaf-off main eff : leafoff-leafon                           (per LiDAR tier)
       Interaction       : (leafoff-leafon)@chmret - (leafoff-leafon)@nolidar
       Label gradient    : nwi-fld, flddeg-fld, nwi-flddeg          (full feature set)
+      NWI quantity      : nwiextra-nwi, nwiextra10-nwiextra, nwiextra10-nwi, nwiextra10-fld
 
     Metrics: FSW & UPL {iou,recall}. Field-only configs drive the feature
     ablations; the label gradient uses the chmret_leafoff cells.
@@ -307,6 +308,15 @@ def compute_contrasts(long_df: pd.DataFrame) -> pd.DataFrame:
     add("nwi_chmret_leafoff",    "fld_chmret_leafoff",    "label_gradient", "NWI vs field")
     add("flddeg_chmret_leafoff", "fld_chmret_leafoff",    "label_gradient", "degraded vs field (quantity)")
     add("nwi_chmret_leafoff",    "flddeg_chmret_leafoff", "label_gradient", "NWI vs degraded (correctness)")
+
+    # 3b. NWI quantity ladder 1x -> ~2x -> ~10x (post-freeze nwiextra10 arm). Each
+    #     pool is a superset of the previous one, so these rows isolate volume.
+    #     _paired_delta returns None for a missing cell, so on a tree without
+    #     nwiextra10 these rows simply don't appear.
+    add("nwiextra_chmret_leafoff",   "nwi_chmret_leafoff",      "nwi_quantity", "NWI 2x vs 1x")
+    add("nwiextra10_chmret_leafoff", "nwiextra_chmret_leafoff", "nwi_quantity", "NWI 10x vs 2x")
+    add("nwiextra10_chmret_leafoff", "nwi_chmret_leafoff",      "nwi_quantity", "NWI 10x vs 1x")
+    add("nwiextra10_chmret_leafoff", "fld_chmret_leafoff",      "nwi_quantity", "NWI 10x vs field")
 
     df = pd.DataFrame(recs)
 

@@ -235,6 +235,18 @@ def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
         rep.check(ext_hucs <= fld_hucs, "NWIextra HUC12 subset of field",
                   detail_ok=f"all {len(ext_hucs)} extra HUC12s within field's {len(fld_hucs)}",
                   detail_fail=f"extra-only HUC12s: {sorted(ext_hucs - fld_hucs)[:5]}")
+    if "R_Patches_NWIextra10" in files_by_dir:
+        # NOT required: the 10x pool deliberately reaches beyond the field HUC12s.
+        # dl_patch_pools._outside_huc_trainval routes those HUC12s to train/val
+        # (never test), so this WARN only reports how much of the pool they are.
+        fld_hucs = {huc12_of(f) for f in files_by_dir[FIELD_TEST_DIR]}
+        e10 = files_by_dir["R_Patches_NWIextra10"]
+        out = [f for f in e10 if huc12_of(f) not in fld_hucs]
+        rep.check(not out, "NWIextra10 HUC12s outside field (train/val only)",
+                  detail_ok="none",
+                  detail_fail=f"{len(out)}/{len(e10)} patches in "
+                              f"{len({huc12_of(f) for f in out})} non-field HUC12s -> train/val by HUC",
+                  required=False)
 
     # ---[4] Footprint identity per paired twin ---
     print("\n[4] Footprint identity per field<->NWI twin (CRS/transform/H/W/nodata)")
@@ -340,7 +352,7 @@ def run_preflight(data_root: Path, stats_dir: Path, norm_master: Path,
                 detail = f"seed {seed}: test patches not all from {FIELD_TEST_DIR}"
                 break
             if seed == seeds[0]:
-                detail = f"seed {seeds[0]}: test={len(tests[0])} field patches, identical across all 8 configs"
+                detail = f"seed {seeds[0]}: test={len(tests[0])} field patches, identical across all {len(CONFIGS)} configs"
     except AssertionError as e:
         split_ok = False
         detail = f"leakage guard tripped: {e}"

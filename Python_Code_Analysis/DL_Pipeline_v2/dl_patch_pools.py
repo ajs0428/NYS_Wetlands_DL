@@ -113,6 +113,27 @@ def _huc_partition(files: List[Path], train_hucs: set, val_hucs: set) -> Tuple[L
     return tr, va
 
 
+def _outside_huc_trainval(
+    files: List[Path], field_hucs: set, seed: int
+) -> Tuple[List[Path], List[Path]]:
+    """Split files whose HUC12 holds NO field patch into (train, val) by whole HUC12.
+
+    huc12 regime only. R_Patches_NWIextra10 reaches 42 HUC12s beyond the field's
+    47; the field split never assigns those, so _huc_partition alone would drop
+    them silently. They can't touch a test HUC12 (test HUC12s are field HUC12s),
+    so they go to train/val, split at HUC level like everything else in the
+    regime, ~82/18 to mirror the 70/15 field ratio. A no-op for every v3 config:
+    their dirs lie entirely inside field HUC12s, so `outside` is empty.
+    """
+    outside = [f for f in files if X.huc12_of(f) not in field_hucs]
+    hucs = sorted({X.huc12_of(f) for f in outside})
+    random.Random(seed + 202).shuffle(hucs)
+    cut = int(round(len(hucs) * (1.0 - _VAL_OF_TRAINVAL)))
+    tr_h, va_h = set(hucs[:cut]), set(hucs[cut:])
+    return ([f for f in outside if X.huc12_of(f) in tr_h],
+            [f for f in outside if X.huc12_of(f) in va_h])
+
+
 def _seeded_trainval(files: List[Path], seed: int) -> Tuple[List[Path], List[Path]]:
     """Assign footprint-disjoint 'extra' files to (train, val) by seeded shuffle.
 
@@ -157,9 +178,11 @@ def resolve_pools(
         elif rule == "paired":                          # nwi
             nwi = _list_dir(data_root, "R_Patches_NWI")
             train, val = _huc_partition(nwi, train_hucs, val_hucs)
-        elif rule == "extra_pool":                      # nwiextra: NWI U NWIextra
-            pool = _list_dir(data_root, "R_Patches_NWI") + _list_dir(data_root, "R_Patches_NWIextra")
+        elif rule == "extra_pool":                      # nwiextra(10): NWI U NWIextra dir(s)
+            pool = [f for d in X.config_patch_dirs(config) for f in _list_dir(data_root, d)]
             train, val = _huc_partition(pool, train_hucs, val_hucs)
+            otr, ova = _outside_huc_trainval(pool, train_hucs | val_hucs | test_hucs, seed)
+            train, val = train + otr, val + ova
         elif rule == "hybrid_union":                    # nwifield: field U NWIextra
             extra = _list_dir(data_root, "R_Patches_NWIextra")
             ftr, fva = _huc_partition(field, train_hucs, val_hucs)
@@ -183,12 +206,17 @@ def resolve_pools(
             val = [f for f in nwi if X.nwi_field_twin(f) in val_fld]
         elif rule == "extra_pool":
             nwi = _list_dir(data_root, "R_Patches_NWI")
-            ntr = [f for f in nwi if X.nwi_field_twin(f) in train_fld]
-            nva = [f for f in nwi if X.nwi_field_twin(f) in val_fld]
-            # NWIextra is footprint-disjoint from field (invariant), so none can
-            # collide with a test patch; partition it by seeded shuffle.
-            etr, eva = _seeded_trainval(_list_dir(data_root, "R_Patches_NWIextra"), seed)
-            train, val = ntr + etr, nva + eva
+            train = [f for f in nwi if X.nwi_field_twin(f) in train_fld]
+            val = [f for f in nwi if X.nwi_field_twin(f) in val_fld]
+            # NWIextra dirs are footprint-disjoint from field (invariant), so none
+            # can collide with a test patch; partition each by seeded shuffle.
+            # Per-dir (not pooled) so nwiextra's partition is unchanged by the
+            # addition of R_Patches_NWIextra10.
+            for d in X.config_patch_dirs(config):
+                if d == "R_Patches_NWI":
+                    continue
+                etr, eva = _seeded_trainval(_list_dir(data_root, d), seed)
+                train, val = train + etr, val + eva
         elif rule == "hybrid_union":
             ftr = [by_name[n] for n in sorted(train_fld)]
             fva = [by_name[n] for n in sorted(val_fld)]
@@ -224,10 +252,9 @@ def _assert_no_leakage(
     else:
         test_fp = {X.field_key(f) for f in test}
         def footprint(f: Path) -> str | None:
-            n = f.name
-            if n.startswith("NWIextra_"):
+            if X.is_nwiextra_file(f):
                 return None  # disjoint from field by construction
-            return X.nwi_field_twin(f) if "R_Patches_NWI" in str(f.parent) else X.field_key(f)
+            return X.nwi_field_twin(f) if f.parent.name == "R_Patches_NWI" else X.field_key(f)
         bad = [f.name for f in (train + val) if footprint(f) in test_fp]
         if bad:
             raise AssertionError(

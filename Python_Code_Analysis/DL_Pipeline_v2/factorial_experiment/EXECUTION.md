@@ -745,6 +745,56 @@ output reproduces from the same script.
 
 ---
 
+## 9b. NWI ~10× quantity arm (`nwiextra10_chmret_leafoff`, post-freeze add-on)
+
+Added 2026-10-15, after the `factorial-v3` freeze. It's one more label-source config
+in the base grid (2 modes × 5 seeds = **10 cells**), so it lands in
+`Models/factorial_results_v3/<mode>/nwiextra10_chmret_leafoff/` beside the other 80
+cells, which aren't retrained.
+
+- **Pool:** `R_Patches_NWI ∪ R_Patches_NWIextra ∪ R_Patches_NWIextra10`, rule
+  `extra_pool`. It's a strict superset of the 2× arm's pool, so the ladder
+  `nwi (1×) ⊂ nwiextra (2×) ⊂ nwiextra10 (10×)` isolates volume. Train+val comes out
+  at 10.0–10.6× field per seed under `huc12`. The three dirs are footprint-disjoint
+  (verified: 0 overlaps).
+- **HUC12 reach:** 3,321 of the 8,549 NWIextra10 patches sit in 42 HUC12s that hold no
+  field patch. Under `huc12` they go to **train/val only**, split by whole HUC12
+  (`dl_patch_pools._outside_huc_trainval`), and can never reach test. So this arm
+  measures quantity *plus* geographic breadth, the way NWI scales in practice.
+  Preflight [3] reports the count as a WARN.
+- **Test:** unchanged. The seed's `test_fld` from `R_Patches`, identical to every other
+  config.
+- **Cost:** ~10× the patches per epoch of a field cell. Budget ~2 h/cell, ~15–20 h for
+  all 10 cells.
+- **Invariance:** all 8 v3 configs resolve bit-identical pools (5 seeds × both guards)
+  and `--emit` output before and after the change. `nwiextra10` is appended last in
+  `CONFIGS`, so `--list` order is unchanged.
+
+```bash
+# CPU node
+python $PIPE/dl_make_config_stats.py --config nwiextra10_chmret_leafoff --mode multiclass
+python $PIPE/dl_make_config_stats.py --config nwiextra10_chmret_leafoff --mode binary
+python $PIPE/dl_preflight_check.py                       # must be GREEN
+GPU_NODE=cbsugpu10.biohpc.cornell.edu bash Shell_Scripts/rsync_push_v3.sh   # +36 GB NWIextra10
+
+# GPU node, in tmux -- ONLY the new config (CONFIGS must go through -e)
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \
+  -e CONFIGS=nwiextra10_chmret_leafoff \
+  nys-wetlands-dl bash Shell_Scripts/run_factorial.sh
+# (equivalently: ... nys-wetlands-dl bash Shell_Scripts/run_nwiextra10_chmret_leafoff.sh)
+
+# SHAP before teardown (optional, for parity with the other cells), per mode:
+#   ... nys-wetlands-dl bash Shell_Scripts/run_shap_factorial.sh \
+#       --results-dir Models/factorial_results_v3/multiclass --configs nwiextra10_chmret_leafoff
+#   ... --results-dir Models/factorial_results_v3/binary --mode binary --configs nwiextra10_chmret_leafoff
+
+# CPU node: sync back (--metrics-only), then re-aggregate both modes as in §8.
+#   contrasts.csv gains the `nwi_quantity` group: 2x-1x, 10x-2x, 10x-1x, 10x-fld.
+```
+
+---
+
 ## 10. HUC prediction / inference maps
 
 Per-HUC class raster + per-class softmax probabilities. Unlike training, this needs
