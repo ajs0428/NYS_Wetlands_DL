@@ -278,6 +278,7 @@ def compute_contrasts(long_df: pd.DataFrame) -> pd.DataFrame:
       Interaction       : (leafoff-leafon)@chmret - (leafoff-leafon)@nolidar
       Label gradient    : nwi-fld, flddeg-fld, nwi-flddeg          (full feature set)
       NWI quantity      : nwiextra-nwi, nwiextra10-nwiextra, nwiextra10-nwi, nwiextra10-fld
+      Hybrid quantity   : nwifield10-nwifield, nwifield10-nwiextra10, nwifield10-fld
 
     Metrics: FSW & UPL {iou,recall}. Field-only configs drive the feature
     ablations; the label gradient uses the chmret_leafoff cells.
@@ -317,6 +318,13 @@ def compute_contrasts(long_df: pd.DataFrame) -> pd.DataFrame:
     add("nwiextra10_chmret_leafoff", "nwiextra_chmret_leafoff", "nwi_quantity", "NWI 10x vs 2x")
     add("nwiextra10_chmret_leafoff", "nwi_chmret_leafoff",      "nwi_quantity", "NWI 10x vs 1x")
     add("nwiextra10_chmret_leafoff", "fld_chmret_leafoff",      "nwi_quantity", "NWI 10x vs field")
+
+    # 3c. Field + NWI hybrid at ~10x (post-freeze nwifield10 arm): its 2x
+    #     counterpart, the label effect of adding field at fixed ~10x NWI, and
+    #     field alone. Rows are absent on a tree without nwifield10, as in 3b.
+    add("nwifield10_chmret_leafoff", "nwifield_chmret_leafoff",   "hybrid_quantity", "Field+NWI 10x vs 2x")
+    add("nwifield10_chmret_leafoff", "nwiextra10_chmret_leafoff", "hybrid_quantity", "10x NWI: +field labels")
+    add("nwifield10_chmret_leafoff", "fld_chmret_leafoff",        "hybrid_quantity", "Field+NWI 10x vs field")
 
     df = pd.DataFrame(recs)
 

@@ -795,6 +795,61 @@ docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
 
 ---
 
+## 9c. Field + NWI ~10× hybrid arm (`nwifield10_chmret_leafoff`, post-freeze add-on)
+
+Added 2026-10-17. It's the 10× counterpart of `nwifield`, the same way `nwiextra10`
+is the 10× counterpart of `nwiextra`. One more config in the base grid (2 modes × 5
+seeds = **10 cells**) under `Models/factorial_results_v3/<mode>/nwifield10_chmret_leafoff/`.
+The other 90 cells aren't retrained.
+
+- **Pool:** `R_Patches ∪ R_Patches_NWIextra ∪ R_Patches_NWIextra10`, rule
+  `hybrid_union`. Field train/val keep their field labels, and the extras are every
+  non-field dir in the config. `R_Patches_NWI` is **excluded**, as in `nwifield`: its
+  patches are 1:1 footprint twins of the field patches, so including them would put
+  conflicting labels on the same pixels. Train+val is exactly field train/val ∪
+  `nwiextra10`'s non-`R_Patches_NWI` extras for every seed and both guards
+  (verified), so `nwifield10 − nwiextra10` swaps NWI for field labels on the field
+  footprints and holds everything else fixed. Train+val is 10.0–10.6× field per seed
+  under `huc12`.
+- **HUC12 reach:** the same 3,321 NWIextra10 patches in 42 non-field HUC12s as §9b.
+  Under `huc12`, `_outside_huc_trainval` routes them to **train/val only**, split by
+  whole HUC12, and it applies to the extras only. Under `coord`, each non-field dir is
+  split separately by `_seeded_trainval`, so `nwifield`'s NWIextra partition is unchanged.
+  Preflight [3] reports the count as a WARN.
+- **Test:** unchanged. The seed's `test_fld` from `R_Patches`.
+- **Cost:** ~10.8k patches, the same as `nwiextra10`. On cbsugpu09 that's
+  ~1h15–1h50/cell, or ~12–15 h for all 10 cells.
+- **Invariance:** all 9 earlier configs (the 8 v3 + `nwiextra10`) resolve bit-identical
+  pools (5 seeds × both guards) and `--emit` output before and after the change.
+  `nwifield10` is appended last in `CONFIGS`. No new data: all three dirs are
+  already in `rsync_push_v3.sh`.
+
+```bash
+# CPU node
+python $PIPE/dl_make_config_stats.py --config nwifield10_chmret_leafoff --mode multiclass
+python $PIPE/dl_make_config_stats.py --config nwifield10_chmret_leafoff --mode binary
+python $PIPE/dl_preflight_check.py                       # must be GREEN
+GPU_NODE=cbsugpu09.biohpc.cornell.edu bash Shell_Scripts/rsync_push_v3.sh
+
+# GPU node, in tmux -- ONLY the new config (CONFIGS must go through -e)
+docker1 run --rm --gpus all --shm-size=8g --user $(id -u):$(id -g) \
+  -v /workdir/$USER/nys_wetlands:/app -e TMPDIR=/app/tmp \
+  -e CONFIGS=nwifield10_chmret_leafoff \
+  nys-wetlands-dl bash Shell_Scripts/run_factorial.sh
+# (equivalently: ... nys-wetlands-dl bash Shell_Scripts/run_nwifield10_chmret_leafoff.sh)
+
+# SHAP before teardown (optional), per mode:
+#   ... nys-wetlands-dl bash Shell_Scripts/run_shap_factorial.sh \
+#       --results-dir Models/factorial_results_v3/multiclass --configs nwifield10_chmret_leafoff
+#   ... --results-dir Models/factorial_results_v3/binary --mode binary --configs nwifield10_chmret_leafoff
+
+# CPU node: sync back (--metrics-only), then re-aggregate both modes as in §8.
+#   contrasts.csv gains the `hybrid_quantity` group: nwifield10-nwifield,
+#   nwifield10-nwiextra10, nwifield10-fld.
+```
+
+---
+
 ## 10. HUC prediction / inference maps
 
 Per-HUC class raster + per-class softmax probabilities. Unlike training, this needs

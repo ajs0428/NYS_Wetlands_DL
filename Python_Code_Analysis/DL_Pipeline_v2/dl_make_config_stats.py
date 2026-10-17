@@ -27,7 +27,10 @@ stale when the patches were re-cut:
   * `fld*`      -> R_Patches.
   * `nwi`       -> R_Patches_NWI.
   * `nwiextra`  -> R_Patches_NWI + R_Patches_NWIextra (the ~2x pool).
+  * `nwiextra10`-> R_Patches_NWI + R_Patches_NWIextra + R_Patches_NWIextra10 (~10x).
   * `nwifield`  -> R_Patches + R_Patches_NWIextra (field labels + NWI extras).
+  * `nwifield10`-> R_Patches + R_Patches_NWIextra + R_Patches_NWIextra10 (field
+                   labels + the ~10x NWI extras; R_Patches_NWI excluded, as above).
   * `flddeg`    -> R_Patches with the analytic wetland->UPL degrade applied at the
                    measured flip probability (dl_degrade_labels.degraded_class_counts),
                    so its weights reflect the NWI-degraded distribution.

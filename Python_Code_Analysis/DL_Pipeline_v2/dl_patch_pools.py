@@ -122,8 +122,10 @@ def _outside_huc_trainval(
     47; the field split never assigns those, so _huc_partition alone would drop
     them silently. They can't touch a test HUC12 (test HUC12s are field HUC12s),
     so they go to train/val, split at HUC level like everything else in the
-    regime, ~82/18 to mirror the 70/15 field ratio. A no-op for every v3 config:
-    their dirs lie entirely inside field HUC12s, so `outside` is empty.
+    regime, ~82/18 to mirror the 70/15 field ratio. Applied to the NWI pools of
+    the extra_pool (nwiextra/nwiextra10) and hybrid_union (nwifield/nwifield10)
+    rules, never to field patches. A no-op for the 8 original v3 configs: their
+    dirs lie entirely inside field HUC12s, so `outside` is empty.
     """
     outside = [f for f in files if X.huc12_of(f) not in field_hucs]
     hucs = sorted({X.huc12_of(f) for f in outside})
@@ -183,11 +185,16 @@ def resolve_pools(
             train, val = _huc_partition(pool, train_hucs, val_hucs)
             otr, ova = _outside_huc_trainval(pool, train_hucs | val_hucs | test_hucs, seed)
             train, val = train + otr, val + ova
-        elif rule == "hybrid_union":                    # nwifield: field U NWIextra
-            extra = _list_dir(data_root, "R_Patches_NWIextra")
+        elif rule == "hybrid_union":                    # nwifield(10): field U NWIextra dir(s)
+            # Extras = every non-field dir in the config (R_Patches_NWI is never
+            # listed: its footprints are field twins). Outside-field HUC12s go to
+            # the extras only; field patches are all inside field HUC12s.
+            extra = [f for d in X.config_patch_dirs(config) if d != X.FIELD_TEST_DIR
+                     for f in _list_dir(data_root, d)]
             ftr, fva = _huc_partition(field, train_hucs, val_hucs)
             etr, eva = _huc_partition(extra, train_hucs, val_hucs)
-            train, val = ftr + etr, fva + eva
+            otr, ova = _outside_huc_trainval(extra, train_hucs | val_hucs | test_hucs, seed)
+            train, val = ftr + etr + otr, fva + eva + ova
         else:
             raise ValueError(f"unknown pool_rule {rule!r} for config {config!r}")
 
@@ -218,10 +225,15 @@ def resolve_pools(
                 etr, eva = _seeded_trainval(_list_dir(data_root, d), seed)
                 train, val = train + etr, val + eva
         elif rule == "hybrid_union":
-            ftr = [by_name[n] for n in sorted(train_fld)]
-            fva = [by_name[n] for n in sorted(val_fld)]
-            etr, eva = _seeded_trainval(_list_dir(data_root, "R_Patches_NWIextra"), seed)
-            train, val = ftr + etr, fva + eva
+            train = [by_name[n] for n in sorted(train_fld)]
+            val = [by_name[n] for n in sorted(val_fld)]
+            # Per non-field dir (not pooled), as in extra_pool, so nwifield's
+            # NWIextra partition is unchanged by nwifield10's extra dir.
+            for d in X.config_patch_dirs(config):
+                if d == X.FIELD_TEST_DIR:
+                    continue
+                etr, eva = _seeded_trainval(_list_dir(data_root, d), seed)
+                train, val = train + etr, val + eva
         else:
             raise ValueError(f"unknown pool_rule {rule!r} for config {config!r}")
 

@@ -74,6 +74,7 @@ LABEL_SOURCE_ALIASES: Dict[str, List[str]] = {
     "nwiextra": ["MOD_CLASS"],
     "nwiextra10": ["MOD_CLASS"],
     "nwifield": ["MOD_CLASS"],
+    "nwifield10": ["MOD_CLASS"],
     "flddeg":   ["MOD_CLASS_FLDDEG", "MOD_CLASS"],
 }
 
@@ -113,6 +114,13 @@ LABEL_SOURCE_ALIASES: Dict[str, List[str]] = {
 #                             larger extra dir R_Patches_NWIextra10).
 #     hybrid_union  train/val = R_Patches[train/val_fld] (field labels)
 #                               U R_Patches_NWIextra minus LEAKAGE_GUARD     (nwifield)
+#                             The extras are every non-field dir in the source's
+#                             patch_dirs, so the same rule serves the ~10x hybrid
+#                             (nwifield10, added 2026-10-17 post-freeze: + the
+#                             R_Patches_NWIextra10 dir). R_Patches_NWI is excluded
+#                             from both: its patches are 1:1 footprint twins of
+#                             the field patches, so they'd put conflicting labels
+#                             on the same pixels.
 #     degrade       train/val = R_Patches[train/val_fld] with seeded
 #                               wetland->UPL relabel                         (flddeg)
 FIELD_TEST_DIR: str = "R_Patches"
@@ -131,6 +139,7 @@ LABEL_SOURCES: Dict[str, dict] = {
     "nwiextra": {"patch_dirs": ["R_Patches_NWI", "R_Patches_NWIextra"], "pool_rule": "extra_pool"},
     "nwiextra10": {"patch_dirs": ["R_Patches_NWI", "R_Patches_NWIextra", "R_Patches_NWIextra10"], "pool_rule": "extra_pool"},
     "nwifield": {"patch_dirs": ["R_Patches", "R_Patches_NWIextra"],  "pool_rule": "hybrid_union"},
+    "nwifield10": {"patch_dirs": ["R_Patches", "R_Patches_NWIextra", "R_Patches_NWIextra10"], "pool_rule": "hybrid_union"},
     "flddeg":   {"patch_dirs": ["R_Patches"],                        "pool_rule": "degrade"},
 }
 
@@ -166,6 +175,10 @@ CONFIGS: Dict[str, dict] = {
     # arm. Appended LAST so --list order, and with it every v3 cell's run order,
     # is unchanged; existing configs' pools are bit-identical (verified).
     "nwiextra10_chmret_leafoff":{"lidar": "chmret", "spectral": "leafoff", "label": "nwiextra10", "channels": 29},
+    # Post-freeze follow-on (2026-10-17): the ~10x counterpart of nwifield (field
+    # labels + the ~10x NWI extras, R_Patches_NWI excluded). Appended LAST for the
+    # same reason as nwiextra10; existing configs' pools are bit-identical (verified).
+    "nwifield10_chmret_leafoff":{"lidar": "chmret", "spectral": "leafoff", "label": "nwifield10", "channels": 29},
 }
 
 
@@ -259,7 +272,7 @@ def huc12_of(path: str) -> str:
 
 
 def config_label_source(name: str) -> str:
-    """Label-source key for a config (fld / nwi / nwiextra / nwiextra10 / nwifield / flddeg)."""
+    """Label-source key for a config (fld / nwi / nwiextra / nwiextra10 / nwifield / nwifield10 / flddeg)."""
     return get_config(name)["label"]
 
 
