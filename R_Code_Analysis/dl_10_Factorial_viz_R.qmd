@@ -84,7 +84,7 @@ config_label <- c("fld_nolidar_leafon" = "Baseline",
                   "nwiextra_chmret_leafoff" = "NWI\nx2",
                   "nwiextra10_chmret_leafoff" = "NWI\nx10",
                   "nwifield_chmret_leafoff" = "NWI\n+\nField",
-                  "nwifield10_chmret_leafoff" = "NWI x10\n+\nField",
+                  "nwifield10_chmret_leafoff" = "NWI\nx10\n+\nField",
                   "flddeg_chmret_leafoff" = "Degraded\nField")
 
 # single-line variant for heatmap y-axes (stacked labels overlap there)
@@ -431,12 +431,12 @@ ggsave(filename = "../Writing/Figures/NWI_F1_IoU_Multiclass.png", plot = q2_plot
 
 ```{r}
 #| label: q2-nwi-f1-iou-binary
-#| fig-width: 14
+#| fig-width: 18
 #| fig-height: 12
 
 q2_plot("Binary")
 
-ggsave(filename = "../Writing/Figures/NWI_F1_IoU_Binary.png", plot = q2_plot("Binary"), width = 14, height = 12)
+ggsave(filename = "../Writing/Figures/NWI_F1_IoU_Binary.png", plot = q2_plot("Binary"), width = 18, height = 12)
 ```
 
 Model-level summary (macro metrics are repeated on every class row of

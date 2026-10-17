@@ -27,6 +27,34 @@ label_gradient,nwi_chmret_leafoff - flddeg_chmret_leafoff,FSW,iou,-0.0521,0.0761
 label_gradient,nwi_chmret_leafoff - flddeg_chmret_leafoff,FSW,recall,-0.0671,0.1871,5,NWI vs degraded (correctness)
 label_gradient,nwi_chmret_leafoff - flddeg_chmret_leafoff,UPL,iou,-0.012,0.0291,5,NWI vs degraded (correctness)
 label_gradient,nwi_chmret_leafoff - flddeg_chmret_leafoff,UPL,recall,0.0144,0.0489,5,NWI vs degraded (correctness)
+nwi_quantity,nwiextra_chmret_leafoff - nwi_chmret_leafoff,FSW,iou,0.0181,0.0389,5,NWI 2x vs 1x
+nwi_quantity,nwiextra_chmret_leafoff - nwi_chmret_leafoff,FSW,recall,0.0186,0.0565,5,NWI 2x vs 1x
+nwi_quantity,nwiextra_chmret_leafoff - nwi_chmret_leafoff,UPL,iou,0.0062,0.0097,5,NWI 2x vs 1x
+nwi_quantity,nwiextra_chmret_leafoff - nwi_chmret_leafoff,UPL,recall,-0.0142,0.0129,5,NWI 2x vs 1x
+nwi_quantity,nwiextra10_chmret_leafoff - nwiextra_chmret_leafoff,FSW,iou,0.0105,0.0405,5,NWI 10x vs 2x
+nwi_quantity,nwiextra10_chmret_leafoff - nwiextra_chmret_leafoff,FSW,recall,-0.0066,0.0897,5,NWI 10x vs 2x
+nwi_quantity,nwiextra10_chmret_leafoff - nwiextra_chmret_leafoff,UPL,iou,0.0251,0.0212,5,NWI 10x vs 2x
+nwi_quantity,nwiextra10_chmret_leafoff - nwiextra_chmret_leafoff,UPL,recall,0.0191,0.0331,5,NWI 10x vs 2x
+nwi_quantity,nwiextra10_chmret_leafoff - nwi_chmret_leafoff,FSW,iou,0.0285,0.0466,5,NWI 10x vs 1x
+nwi_quantity,nwiextra10_chmret_leafoff - nwi_chmret_leafoff,FSW,recall,0.0119,0.1016,5,NWI 10x vs 1x
+nwi_quantity,nwiextra10_chmret_leafoff - nwi_chmret_leafoff,UPL,iou,0.0313,0.0232,5,NWI 10x vs 1x
+nwi_quantity,nwiextra10_chmret_leafoff - nwi_chmret_leafoff,UPL,recall,0.0048,0.0402,5,NWI 10x vs 1x
+nwi_quantity,nwiextra10_chmret_leafoff - fld_chmret_leafoff,FSW,iou,-0.0259,0.056,5,NWI 10x vs field
+nwi_quantity,nwiextra10_chmret_leafoff - fld_chmret_leafoff,FSW,recall,-0.0484,0.09,5,NWI 10x vs field
+nwi_quantity,nwiextra10_chmret_leafoff - fld_chmret_leafoff,UPL,iou,0.0087,0.0099,5,NWI 10x vs field
+nwi_quantity,nwiextra10_chmret_leafoff - fld_chmret_leafoff,UPL,recall,0.0035,0.0099,5,NWI 10x vs field
+hybrid_quantity,nwifield10_chmret_leafoff - nwifield_chmret_leafoff,FSW,iou,-0.0133,0.0298,5,Field+NWI 10x vs 2x
+hybrid_quantity,nwifield10_chmret_leafoff - nwifield_chmret_leafoff,FSW,recall,-0.0641,0.0782,5,Field+NWI 10x vs 2x
+hybrid_quantity,nwifield10_chmret_leafoff - nwifield_chmret_leafoff,UPL,iou,0.0188,0.0162,5,Field+NWI 10x vs 2x
+hybrid_quantity,nwifield10_chmret_leafoff - nwifield_chmret_leafoff,UPL,recall,0.0276,0.0279,5,Field+NWI 10x vs 2x
+hybrid_quantity,nwifield10_chmret_leafoff - nwiextra10_chmret_leafoff,FSW,iou,0.027,0.024,5,10x NWI: +field labels
+hybrid_quantity,nwifield10_chmret_leafoff - nwiextra10_chmret_leafoff,FSW,recall,0.0364,0.0572,5,10x NWI: +field labels
+hybrid_quantity,nwifield10_chmret_leafoff - nwiextra10_chmret_leafoff,UPL,iou,0.0046,0.0137,5,10x NWI: +field labels
+hybrid_quantity,nwifield10_chmret_leafoff - nwiextra10_chmret_leafoff,UPL,recall,0.0034,0.0146,5,10x NWI: +field labels
+hybrid_quantity,nwifield10_chmret_leafoff - fld_chmret_leafoff,FSW,iou,0.0011,0.0732,5,Field+NWI 10x vs field
+hybrid_quantity,nwifield10_chmret_leafoff - fld_chmret_leafoff,FSW,recall,-0.012,0.1388,5,Field+NWI 10x vs field
+hybrid_quantity,nwifield10_chmret_leafoff - fld_chmret_leafoff,UPL,iou,0.0133,0.0112,5,Field+NWI 10x vs field
+hybrid_quantity,nwifield10_chmret_leafoff - fld_chmret_leafoff,UPL,recall,0.0069,0.0169,5,Field+NWI 10x vs field
 interaction,(leafoff-leafon)@chmret - @nolidar,FSW,iou,-0.0274,0.0338,5,"LiDAR x leaf-off (>0 complementary, <0 redundant)"
 interaction,(leafoff-leafon)@chmret - @nolidar,FSW,recall,-0.0309,0.0892,5,"LiDAR x leaf-off (>0 complementary, <0 redundant)"
 interaction,(leafoff-leafon)@chmret - @nolidar,UPL,iou,-0.0002,0.0287,5,"LiDAR x leaf-off (>0 complementary, <0 redundant)"
