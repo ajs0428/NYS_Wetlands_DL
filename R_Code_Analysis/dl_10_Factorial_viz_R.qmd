@@ -139,6 +139,27 @@ box_jitter <- function(point_size = 5) {
   )
 }
 
+# Exactly four evenly spaced y ticks per panel, with the axis limits snapped to
+# the outer ticks, so free-scaled facets all read on the same tick grammar. The
+# step is the smallest "nice" one whose four ticks cover the panel's data range.
+# Idempotent: re-running on the snapped limits returns the same ticks.
+four_ticks <- function(lim, steps = c(0.05, 0.1, 0.2, 0.25, 0.5)) {
+  for (s in steps) {
+    start <- floor(lim[1] / s + 1e-9) * s
+    if (start + 3 * s >= lim[2] - 1e-9) return(round(start + s * 0:3, 10))
+  }
+  pretty(lim, n = 4)
+}
+scale_y_four <- function(pad = 0.05, ...) {
+  # ggplot hands the breaks function the EXPANDED range, which would push
+  # four_ticks to a coarser step -- strip the padding back off first.
+  unpad <- \(lim) lim + c(1, -1) * pad * diff(lim) / (1 + 2 * pad)
+  scale_y_continuous(breaks = \(lim) four_ticks(unpad(lim)),
+                     limits = \(lim) range(four_ticks(lim)),
+                     expand = expansion(mult = pad),
+                     labels = scales::label_number(accuracy = 0.01), ...)
+}
+
 # Single-hue sequential fill for the heatmaps (magnitude = light -> dark)
 seq_fill <- function(...) {
   scale_fill_gradient(low = "#f2f7f5", high = "#14523f", na.value = "grey93", ...)
@@ -177,9 +198,11 @@ pr_plot <- function(which_mode) {
       box_jitter(point_size = 3.5) +
       scale_fill_manual(values = class_color, name = "Class") +
       scale_x_discrete(labels = config_label) +
-      scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+      scale_y_four() +
       labs(x = NULL, y = "Score", title = which_mode) +
-      theme_param
+      theme_param +
+      # room between class rows so a row's edge points don't read as the next row's
+      theme(panel.spacing.y = unit(1.5, "lines"))
 }
 
 pr_plot("Multiclass")
@@ -213,9 +236,11 @@ fi_plot <- function(which_mode) {
       box_jitter() +
       scale_fill_manual(values = class_color, name = "Class") +
       scale_x_discrete(labels = config_label) +
-      scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
+      scale_y_four() +
       labs(x = NULL, y = "Score", title = which_mode) +
-      theme_param
+      theme_param +
+      # room between class rows so a row's edge points don't read as the next row's
+      theme(panel.spacing.y = unit(1.5, "lines"))
 }
 
 fi_plot("Multiclass")
@@ -394,29 +419,39 @@ q2_data <- fact_data |>
   pivot_longer(c(f1, iou), names_to = "metric", values_to = "value") |>
   mutate(metric = factor(metric_label[metric], levels = c("F1", "IoU")))
 
-# One row of class panels per metric. Unlike the Q1 figures this stacks two
-# facet_wraps with patchwork rather than using facet_grid(metric ~ class):
-# facet_grid would free the y-scale per ROW, which here forces every class onto
-# one scale, and UPL (~0.9) against SSW (~0.3) flattens the wetland classes.
-# Stacking keeps the per-class free scale and still collects one shared legend.
-q2_row <- function(which_mode, which_metric) {
-  q2_data |>
-    filter(mode == which_mode, metric == which_metric) |>
+# One row of class panels per metric. The wetland classes share one y-scale so
+# their scores compare directly across classes; UPL (~0.9 F1, ~0.8 IoU) sits in
+# its own panel on its own scale, since sharing would flatten the wetland
+# classes. In binary mode the "wetland" side is just WET, so this reduces to two
+# free-scaled panels.
+q2_panel <- function(d, classes, y_title) {
+  d |>
+    filter(class %in% classes) |>
     ggplot(aes(x = config, y = value, fill = class)) +
-      facet_wrap(~ class, scales = "free_y", nrow = 1) +
+      facet_wrap(~ class, nrow = 1) +
       box_jitter() +
-      scale_fill_manual(values = class_color, name = "Class") +
+      # No legend: the facet strips already name every class
+      scale_fill_manual(values = class_color, guide = "none") +
       scale_x_discrete(labels = config_label_nwi) +
-      scale_y_continuous(labels = scales::label_number(accuracy = 0.01)) +
-      labs(x = NULL, y = which_metric) +
-      theme_param
+      scale_y_four() +
+      labs(x = NULL, y = y_title) +
+      theme_param +
+      theme(axis.text.x = element_text(size = rel(0.7)),
+            panel.spacing.x = unit(2, "lines"))
+}
+
+q2_row <- function(which_mode, which_metric) {
+  d <- filter(q2_data, mode == which_mode, metric == which_metric)
+  wet <- setdiff(intersect(class_order, unique(d$class)), "UPL")
+  (q2_panel(d, wet, which_metric) | q2_panel(d, "UPL", NULL)) +
+    plot_layout(widths = c(length(wet), 1))
 }
 
 # F1 on top, IoU on the bottom; the class strips and the config labels are each
 # drawn once for the pair, since both rows share the same columns and x-axis.
 q2_plot <- function(which_mode) {
-  top    <- q2_row(which_mode, "F1")  + theme(axis.text.x = element_blank())
-  bottom <- q2_row(which_mode, "IoU") + theme(strip.text = element_blank())
+  top    <- q2_row(which_mode, "F1")  & theme(axis.text.x = element_blank())
+  bottom <- q2_row(which_mode, "IoU") & theme(strip.text = element_blank())
   top / bottom +
     plot_layout(guides = "collect") +
     plot_annotation(title = which_mode,
